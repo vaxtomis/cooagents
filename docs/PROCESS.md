@@ -49,5 +49,6 @@
 ```cron
 */2 * * * * cd /path/to/cooagents && scripts/workflow-tick-cron.sh >> .coop/cron-tick.log 2>&1
 */2 * * * * cd /path/to/cooagents && python3 scripts/workflow-notify.py >> .coop/cron-notify.log 2>&1
+*/2 * * * * cd /path/to/cooagents && FEISHU_WEBHOOK_URL='https://open.feishu.cn/open-apis/bot/v2/hook/xxx' python3 scripts/workflow-notify-feishu.py >> .coop/cron-feishu.log 2>&1
 ```
 

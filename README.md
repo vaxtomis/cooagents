@@ -45,5 +45,12 @@ scripts/workflow-tick-cron.sh
 
 # 7) 输出关键事件（可接消息通知）
 python3 scripts/workflow-notify.py
+
+# 8) 直接推送到 Feishu 群机器人/Webhook
+export FEISHU_WEBHOOK_URL="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+python3 scripts/workflow-notify-feishu.py
 ```
+
+> 说明：`workflow-notify-feishu.py` 通过 Feishu 自定义机器人 Webhook 推送事件。
+> 如果你希望推送到 OpenClaw 当前 DM 会话，可再做一层 OpenClaw message API relay。
 
