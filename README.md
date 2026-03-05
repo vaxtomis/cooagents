@@ -36,5 +36,14 @@ scripts/workflow-approve.sh <run_id> design 小吴 "设计确认通过"
 # 4) 查看状态
 scripts/workflow-status.sh <run_id>
 scripts/workflow-status.sh --list
+
+# 5) 失败重试
+scripts/workflow-retry.sh <run_id> <operator> "重试原因"
+
+# 6) 批量推进（cron 调度）
+scripts/workflow-tick-cron.sh
+
+# 7) 输出关键事件（可接消息通知）
+python3 scripts/workflow-notify.py
 ```
 

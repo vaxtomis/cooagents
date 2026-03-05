@@ -40,4 +40,14 @@
 - `flock` 锁避免并发 tick 冲突
 - Gate 审批（req/design）显式触发下一阶段
 - 状态快照写入 `.coop/runs/<run_id>/state.json`，便于排障
+- `tick` 异常自动将 run 标记为 `failed`，可执行 retry
+
+## 调度建议（cron）
+
+示例：每 2 分钟推进运行中的流程、每 2 分钟拉取关键事件
+
+```cron
+*/2 * * * * cd /path/to/cooagents && scripts/workflow-tick-cron.sh >> .coop/cron-tick.log 2>&1
+*/2 * * * * cd /path/to/cooagents && python3 scripts/workflow-notify.py >> .coop/cron-notify.log 2>&1
+```
 

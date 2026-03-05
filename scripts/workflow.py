@@ -202,11 +202,37 @@ def cmd_tick(args):
     with open(LOCK_PATH, "a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         conn = db_conn()
-        stage_tick(conn, args.run_id)
-        conn.commit()
+        try:
+            stage_tick(conn, args.run_id)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            update_run(conn, args.run_id, status="failed")
+            event(conn, args.run_id, "run.failed", {"error": str(e)})
+            conn.commit()
+            snapshot(conn, args.run_id)
+            print(json.dumps({"run_id": args.run_id, "status": "failed", "error": str(e)}, ensure_ascii=False, indent=2))
+            sys.exit(1)
+
         snapshot(conn, args.run_id)
         run = conn.execute("SELECT id,status,current_stage,updated_at FROM runs WHERE id=?", (args.run_id,)).fetchone()
         print(json.dumps(dict(run), ensure_ascii=False, indent=2))
+
+
+def cmd_retry(args):
+    conn = db_conn()
+    run = conn.execute("SELECT id,status,current_stage FROM runs WHERE id=?", (args.run_id,)).fetchone()
+    if not run:
+        print("run not found", file=sys.stderr)
+        sys.exit(1)
+    if run["status"] != "failed":
+        print(f"run {args.run_id} is not failed (status={run['status']})")
+        return
+    update_run(conn, args.run_id, status="running")
+    event(conn, args.run_id, "run.retried", {"by": args.by, "note": args.note or ""})
+    conn.commit()
+    snapshot(conn, args.run_id)
+    print(f"retried {args.run_id}")
 
 
 def cmd_approve(args):
@@ -267,6 +293,12 @@ def main():
     p = sub.add_parser("status")
     p.add_argument("--run-id", required=True)
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("retry")
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--note")
+    p.set_defaults(func=cmd_retry)
 
     p = sub.add_parser("list")
     p.add_argument("--limit", type=int, default=20)
