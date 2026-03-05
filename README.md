@@ -14,6 +14,16 @@ OpenClaw / Claude / Codex 协作流程模板仓库（异步事件驱动版）。
 
 详见：`docs/PROCESS.md`
 
+## 开箱即用（其他 OpenClaw 拉取后）
+
+```bash
+git clone git@github.com:vaxtomis/cooagents.git
+cd cooagents
+scripts/bootstrap.sh
+```
+
+依赖：`git` / `python3` / `tmux`（`claude`、`codex` 为设计/开发阶段可选必需）
+
 ## 异步工作流（SQLite + 事件日志）
 
 - 状态数据库：`.coop/state.db`
@@ -47,7 +57,8 @@ scripts/workflow-tick-cron.sh
 python3 scripts/workflow-notify.py
 
 # 8) 直接推送到 Feishu 群机器人/Webhook
-export FEISHU_WEBHOOK_URL="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+cp .env.example .env
+source .env
 python3 scripts/workflow-notify-feishu.py
 ```
 
