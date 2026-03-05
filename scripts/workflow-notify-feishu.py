@@ -15,6 +15,8 @@ WATCH_EVENTS = {
     "stage.changed",
     "gate.waiting",
     "gate.approved",
+    "ack.waiting",
+    "ack.received",
     "run.failed",
     "run.completed",
 }
@@ -60,6 +62,10 @@ def format_text(event_row):
         return f"[cooagents] run={run_id}\n事件: 等待审批\ngate={payload.get('gate')}\n时间={ts}"
     if event == "gate.approved":
         return f"[cooagents] run={run_id}\n事件: 审批通过\ngate={payload.get('gate')} by={payload.get('by')}\n时间={ts}"
+    if event == "ack.waiting":
+        return f"[cooagents] run={run_id}\n事件: 等待ACK\nstage={payload.get('stage')}\nack_file={payload.get('ack_file')}\n时间={ts}"
+    if event == "ack.received":
+        return f"[cooagents] run={run_id}\n事件: 已收到ACK\nstage={payload.get('stage')}\nack_file={payload.get('ack_file')}\n时间={ts}"
     if event == "run.failed":
         return f"[cooagents] run={run_id}\n事件: 运行失败\nerror={payload.get('error')}\n时间={ts}"
     if event == "run.completed":

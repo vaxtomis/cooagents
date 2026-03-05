@@ -146,6 +146,14 @@ def dispatch_task(session, workdir, agent_cmd, task_file, role):
     ])
 
 
+def ack_file_for(run_id, stage_name):
+    stage_map = {
+        "design": ROOT / "tasks" / run_id / "design.ack.json",
+        "dev": ROOT / "tasks" / run_id / "dev.ack.json",
+    }
+    return stage_map[stage_name]
+
+
 def stage_tick(conn, run_id):
     run = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
     if not run:
@@ -177,9 +185,17 @@ def stage_tick(conn, run_id):
             branch, wt = ensure_worktree(repo, ticket, "design")
             task_file = make_assignment(repo, run_id, ticket, "design", wt, req_path=str(req_file))
             dispatch_task(f"design-{ticket}", wt, "claude", task_file, "claude")
-            step_open(conn, run_id, "DESIGN_RUNNING", "claude", f"worktree={wt} branch={branch} task={task_file}")
+            update_run(conn, run_id, stage="DESIGN_ASSIGNED")
+            event(conn, run_id, "stage.changed", {"to": "DESIGN_ASSIGNED", "worktree": wt, "branch": branch, "task": task_file})
+            event(conn, run_id, "ack.waiting", {"stage": "design", "ack_file": str(ack_file_for(run_id, "design"))})
+
+    elif stage == "DESIGN_ASSIGNED":
+        ack_file = ack_file_for(run_id, "design")
+        if ack_file.exists():
+            step_open(conn, run_id, "DESIGN_RUNNING", "claude", f"ack={ack_file}")
             update_run(conn, run_id, stage="DESIGN_RUNNING")
-            event(conn, run_id, "stage.changed", {"to": "DESIGN_RUNNING", "worktree": wt, "branch": branch, "task": task_file})
+            event(conn, run_id, "ack.received", {"stage": "design", "ack_file": str(ack_file)})
+            event(conn, run_id, "stage.changed", {"to": "DESIGN_RUNNING"})
 
     elif stage == "DESIGN_RUNNING":
         des_file = pathlib.Path(repo).parent / f"wt-{ticket}-design" / "docs" / "design" / f"DES-{ticket}.md"
@@ -198,11 +214,19 @@ def stage_tick(conn, run_id):
             design_file = pathlib.Path(repo).parent / f"wt-{ticket}-design" / "docs" / "design" / f"DES-{ticket}.md"
             task_file = make_assignment(repo, run_id, ticket, "dev", wt, design_path=str(design_file))
             dispatch_task(f"dev-{ticket}", wt, "codex", task_file, "codex")
-            step_open(conn, run_id, "DEV_RUNNING", "codex", f"worktree={wt} branch={branch} task={task_file}")
-            update_run(conn, run_id, stage="DEV_RUNNING")
-            event(conn, run_id, "stage.changed", {"to": "DEV_RUNNING", "worktree": wt, "branch": branch, "task": task_file})
+            update_run(conn, run_id, stage="DEV_ASSIGNED")
+            event(conn, run_id, "stage.changed", {"to": "DEV_ASSIGNED", "worktree": wt, "branch": branch, "task": task_file})
+            event(conn, run_id, "ack.waiting", {"stage": "dev", "ack_file": str(ack_file_for(run_id, "dev"))})
 
-    elif stage == "DEV_RUNNING":
+    elif stage == "DEV_ASSIGNED":
+        ack_file = ack_file_for(run_id, "dev")
+        if ack_file.exists():
+            step_open(conn, run_id, "DEV_RUNNING", "codex", f"ack={ack_file}")
+            update_run(conn, run_id, stage="DEV_RUNNING")
+            event(conn, run_id, "ack.received", {"stage": "dev", "ack_file": str(ack_file)})
+            event(conn, run_id, "stage.changed", {"to": "DEV_RUNNING"})
+
+    elif stage == "DEV_RUNNING": 
         test_file = pathlib.Path(repo).parent / f"wt-{ticket}-dev" / "docs" / "dev" / f"TEST-REPORT-{ticket}.md"
         if test_file.exists():
             step_done(conn, run_id, "DEV_RUNNING", "开发与测试产物已生成")

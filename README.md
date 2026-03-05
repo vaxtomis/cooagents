@@ -55,6 +55,9 @@ scripts/workflow-retry.sh <run_id> <operator> "重试原因"
 # 1) 生成 tasks/<run_id>/design.md 或 dev.md
 # 2) 启动/复用 tmux 会话
 # 3) 向 claude/codex 注入任务指令
+# 4) 等待 ACK 文件存在后，才进入 *_RUNNING
+#    - tasks/<run_id>/design.ack.json
+#    - tasks/<run_id>/dev.ack.json
 
 # 6) 批量推进（cron 调度）
 scripts/workflow-tick-cron.sh

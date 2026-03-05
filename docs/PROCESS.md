@@ -31,8 +31,8 @@
 
 状态流转：
 - `INIT` -> `REQ_COLLECTING` -> `REQ_READY`(等待 req 审批)
-- `DESIGN_RUNNING` -> `DESIGN_DONE`(等待 design 审批)
-- `DEV_RUNNING` -> `COMPLETED`
+- `DESIGN_ASSIGNED`(等待 design ACK) -> `DESIGN_RUNNING` -> `DESIGN_DONE`(等待 design 审批)
+- `DEV_ASSIGNED`(等待 dev ACK) -> `DEV_RUNNING` -> `COMPLETED`
 
 实现要点：
 - SQLite 存储运行状态/事件/审批/产物

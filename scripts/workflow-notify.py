@@ -12,6 +12,8 @@ CURSOR = COOP / "notify.cursor"
 WATCH_EVENTS = {
     "gate.waiting",
     "gate.approved",
+    "ack.waiting",
+    "ack.received",
     "run.failed",
     "run.completed",
     "stage.changed",
