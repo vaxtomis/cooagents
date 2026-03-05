@@ -119,6 +119,33 @@ def ensure_tmux(session, workdir, command):
         run_cmd(["tmux", "send-keys", "-t", session, command, "Enter"])
 
 
+def make_assignment(repo, run_id, ticket, stage, worktree, req_path="", design_path=""):
+    out = run_cmd([
+        sys.executable,
+        str(ROOT / "scripts" / "workflow-assign.py"),
+        "--run-id", run_id,
+        "--ticket", ticket,
+        "--stage", stage,
+        "--repo", repo,
+        "--worktree", worktree,
+        "--req-path", req_path,
+        "--design-path", design_path,
+    ])
+    return out.stdout.strip()
+
+
+def dispatch_task(session, workdir, agent_cmd, task_file, role):
+    run_cmd([
+        sys.executable,
+        str(ROOT / "scripts" / "tmux-dispatch.py"),
+        "--session", session,
+        "--workdir", workdir,
+        "--agent-cmd", agent_cmd,
+        "--task-file", task_file,
+        "--role", role,
+    ])
+
+
 def stage_tick(conn, run_id):
     run = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
     if not run:
@@ -148,10 +175,11 @@ def stage_tick(conn, run_id):
     elif stage == "REQ_READY":
         if has_approval(conn, run_id, "req"):
             branch, wt = ensure_worktree(repo, ticket, "design")
-            ensure_tmux(f"design-{ticket}", wt, "claude")
-            step_open(conn, run_id, "DESIGN_RUNNING", "claude", f"worktree={wt} branch={branch}")
+            task_file = make_assignment(repo, run_id, ticket, "design", wt, req_path=str(req_file))
+            dispatch_task(f"design-{ticket}", wt, "claude", task_file, "claude")
+            step_open(conn, run_id, "DESIGN_RUNNING", "claude", f"worktree={wt} branch={branch} task={task_file}")
             update_run(conn, run_id, stage="DESIGN_RUNNING")
-            event(conn, run_id, "stage.changed", {"to": "DESIGN_RUNNING", "worktree": wt, "branch": branch})
+            event(conn, run_id, "stage.changed", {"to": "DESIGN_RUNNING", "worktree": wt, "branch": branch, "task": task_file})
 
     elif stage == "DESIGN_RUNNING":
         des_file = pathlib.Path(repo).parent / f"wt-{ticket}-design" / "docs" / "design" / f"DES-{ticket}.md"
@@ -167,10 +195,12 @@ def stage_tick(conn, run_id):
     elif stage == "DESIGN_DONE":
         if has_approval(conn, run_id, "design"):
             branch, wt = ensure_worktree(repo, ticket, "dev")
-            ensure_tmux(f"dev-{ticket}", wt, "codex")
-            step_open(conn, run_id, "DEV_RUNNING", "codex", f"worktree={wt} branch={branch}")
+            design_file = pathlib.Path(repo).parent / f"wt-{ticket}-design" / "docs" / "design" / f"DES-{ticket}.md"
+            task_file = make_assignment(repo, run_id, ticket, "dev", wt, design_path=str(design_file))
+            dispatch_task(f"dev-{ticket}", wt, "codex", task_file, "codex")
+            step_open(conn, run_id, "DEV_RUNNING", "codex", f"worktree={wt} branch={branch} task={task_file}")
             update_run(conn, run_id, stage="DEV_RUNNING")
-            event(conn, run_id, "stage.changed", {"to": "DEV_RUNNING", "worktree": wt, "branch": branch})
+            event(conn, run_id, "stage.changed", {"to": "DEV_RUNNING", "worktree": wt, "branch": branch, "task": task_file})
 
     elif stage == "DEV_RUNNING":
         test_file = pathlib.Path(repo).parent / f"wt-{ticket}-dev" / "docs" / "dev" / f"TEST-REPORT-{ticket}.md"

@@ -50,6 +50,12 @@ scripts/workflow-status.sh --list
 # 5) 失败重试
 scripts/workflow-retry.sh <run_id> <operator> "重试原因"
 
+# 任务分配（自动）
+# 在进入 DESIGN/DEV 阶段时，workflow 会自动：
+# 1) 生成 tasks/<run_id>/design.md 或 dev.md
+# 2) 启动/复用 tmux 会话
+# 3) 向 claude/codex 注入任务指令
+
 # 6) 批量推进（cron 调度）
 scripts/workflow-tick-cron.sh
 

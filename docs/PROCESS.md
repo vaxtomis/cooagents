@@ -41,6 +41,7 @@
 - Gate 审批（req/design）显式触发下一阶段
 - 状态快照写入 `.coop/runs/<run_id>/state.json`，便于排障
 - `tick` 异常自动将 run 标记为 `failed`，可执行 retry
+- 进入设计/开发阶段时，自动生成任务单并通过 tmux 注入给 Claude/Codex
 
 ## 调度建议（cron）
 
