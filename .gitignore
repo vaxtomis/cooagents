@@ -1,1 +1,3 @@
 .coop/
+tasks/*
+!tasks/.gitkeep
