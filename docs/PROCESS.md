@@ -24,3 +24,20 @@
 ## tmux 会话规范
 - 设计：`design-<ticket>`
 - 开发：`dev-<ticket>`
+
+## 异步稳定模式（事件驱动）
+
+采用状态机推进，避免线性脚本中断导致全流程失败。
+
+状态流转：
+- `INIT` -> `REQ_COLLECTING` -> `REQ_READY`(等待 req 审批)
+- `DESIGN_RUNNING` -> `DESIGN_DONE`(等待 design 审批)
+- `DEV_RUNNING` -> `COMPLETED`
+
+实现要点：
+- SQLite 存储运行状态/事件/审批/产物
+- `tick` 幂等：可重复执行，不重复创建会话和 worktree
+- `flock` 锁避免并发 tick 冲突
+- Gate 审批（req/design）显式触发下一阶段
+- 状态快照写入 `.coop/runs/<run_id>/state.json`，便于排障
+
