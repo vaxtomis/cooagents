@@ -1,0 +1,121 @@
+{
+  "tools": [
+    {
+      "name": "create_task",
+      "description": "创建新的工作流任务",
+      "method": "POST",
+      "endpoint": "/api/v1/runs",
+      "parameters": {
+        "ticket": {"type": "string", "description": "任务标识符", "required": true},
+        "repo_path": {"type": "string", "description": "代码仓库路径", "required": true},
+        "description": {"type": "string", "description": "任务描述"},
+        "preferences": {"type": "object", "description": "偏好设置（如指定主机）"}
+      }
+    },
+    {
+      "name": "list_tasks",
+      "description": "列出所有工作流任务",
+      "method": "GET",
+      "endpoint": "/api/v1/runs",
+      "parameters": {
+        "status": {"type": "string", "description": "按状态过滤: running/completed/failed/cancelled"},
+        "limit": {"type": "integer", "description": "返回数量限制", "default": 20}
+      }
+    },
+    {
+      "name": "get_task_status",
+      "description": "获取任务详细状态",
+      "method": "GET",
+      "endpoint": "/api/v1/runs/{run_id}",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true}
+      }
+    },
+    {
+      "name": "submit_requirement",
+      "description": "提交需求文档内容",
+      "method": "POST",
+      "endpoint": "/api/v1/runs/{run_id}/submit-requirement",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true},
+        "content": {"type": "string", "description": "需求文档内容（Markdown格式）", "required": true}
+      }
+    },
+    {
+      "name": "approve_gate",
+      "description": "审批通过指定阶段门控",
+      "method": "POST",
+      "endpoint": "/api/v1/runs/{run_id}/approve",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true},
+        "gate": {"type": "string", "enum": ["req", "design", "dev"], "description": "门控名称", "required": true},
+        "by": {"type": "string", "description": "审批人", "required": true},
+        "comment": {"type": "string", "description": "审批备注"}
+      }
+    },
+    {
+      "name": "reject_gate",
+      "description": "驳回指定阶段门控",
+      "method": "POST",
+      "endpoint": "/api/v1/runs/{run_id}/reject",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true},
+        "gate": {"type": "string", "enum": ["req", "design", "dev"], "description": "门控名称", "required": true},
+        "by": {"type": "string", "description": "驳回人", "required": true},
+        "reason": {"type": "string", "description": "驳回原因", "required": true}
+      }
+    },
+    {
+      "name": "retry_task",
+      "description": "重试失败的任务",
+      "method": "POST",
+      "endpoint": "/api/v1/runs/{run_id}/retry",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true},
+        "by": {"type": "string", "description": "操作人", "required": true},
+        "note": {"type": "string", "description": "备注"}
+      }
+    },
+    {
+      "name": "recover_task",
+      "description": "恢复中断的任务",
+      "method": "POST",
+      "endpoint": "/api/v1/runs/{run_id}/recover",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true},
+        "action": {"type": "string", "enum": ["resume", "redo", "manual"], "description": "恢复策略", "required": true}
+      }
+    },
+    {
+      "name": "cancel_task",
+      "description": "取消任务",
+      "method": "DELETE",
+      "endpoint": "/api/v1/runs/{run_id}",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true},
+        "cleanup": {"type": "boolean", "description": "是否清理 worktree", "default": false}
+      }
+    },
+    {
+      "name": "list_artifacts",
+      "description": "列出任务的产物文件",
+      "method": "GET",
+      "endpoint": "/api/v1/runs/{run_id}/artifacts",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true},
+        "kind": {"type": "string", "description": "按类型过滤: req/design/adr/code/test-report"},
+        "status": {"type": "string", "description": "按状态过滤: draft/submitted/approved/rejected"}
+      }
+    },
+    {
+      "name": "get_artifact_content",
+      "description": "获取产物文件内容",
+      "method": "GET",
+      "endpoint": "/api/v1/runs/{run_id}/artifacts/{artifact_id}/content",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true},
+        "artifact_id": {"type": "integer", "description": "产物ID", "required": true}
+      }
+    }
+  ]
+}
