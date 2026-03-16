@@ -90,6 +90,7 @@ http://127.0.0.1:8321/api/v1
 | `POST` | `/runs/{run_id}/reject` | 驳回并附修改意见，回退到上一阶段重做 |
 | `POST` | `/runs/{run_id}/retry` | 重试失败的任务 |
 | `POST` | `/runs/{run_id}/recover` | 中断恢复（resume/redo/manual） |
+| `POST` | `/runs/{run_id}/submit-requirement` | 提交需求内容（便捷方式，自动写文件并推进） |
 | `DELETE` | `/runs/{run_id}` | 取消/终止任务 |
 
 ### 产物管理
@@ -914,9 +915,119 @@ webhooks (
   events      TEXT,                    -- JSON array of event types to watch, null = all
   secret      TEXT,                    -- 签名密钥（可选）
   status      TEXT DEFAULT 'active',   -- active / paused
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
 )
 ```
+
+### artifacts 表
+
+（完整定义见 Section 4，此处汇总）
+
+```sql
+artifacts (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id         TEXT NOT NULL,
+  kind           TEXT NOT NULL,          -- req / design / adr / code / test-report
+  path           TEXT NOT NULL,
+  git_ref        TEXT,
+  stage          TEXT NOT NULL,
+  version        INTEGER DEFAULT 1,
+  status         TEXT DEFAULT 'draft',  -- draft / submitted / approved / rejected
+  review_comment TEXT,
+  content_hash   TEXT,
+  byte_size      INTEGER,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+)
+```
+
+### agent_hosts 表
+
+（完整定义见 Section 7，此处汇总）
+
+```sql
+agent_hosts (
+  id             TEXT PRIMARY KEY,
+  host           TEXT NOT NULL,
+  agent_type     TEXT NOT NULL,          -- claude / codex / both
+  max_concurrent INTEGER DEFAULT 1,
+  status         TEXT DEFAULT 'online',  -- online / offline
+  current_load   INTEGER DEFAULT 0,
+  ssh_key        TEXT,
+  labels         TEXT,
+  last_heartbeat TEXT,
+  created_at     TEXT NOT NULL
+)
+```
+
+### jobs 表
+
+（完整定义见 Section 8，此处汇总）
+
+```sql
+jobs (
+  id            TEXT PRIMARY KEY,
+  run_id        TEXT NOT NULL,
+  host_id       TEXT NOT NULL,
+  agent_type    TEXT NOT NULL,
+  stage         TEXT NOT NULL,
+  task_file     TEXT NOT NULL,
+  worktree      TEXT NOT NULL,
+  pid           INTEGER,
+  status        TEXT DEFAULT 'starting',  -- starting / running / completed / failed / timeout / cancelled / interrupted
+  exit_code     INTEGER,
+  output_log    TEXT,
+  base_commit   TEXT,
+  snapshot_json TEXT,
+  resume_count  INTEGER DEFAULT 0,
+  started_at    TEXT,
+  ended_at      TEXT,
+  timeout_sec   INTEGER DEFAULT 3600
+)
+```
+
+### merge_queue 表
+
+（完整定义见 Section 6，此处汇总）
+
+```sql
+merge_queue (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     TEXT NOT NULL,
+  repo_path  TEXT NOT NULL,
+  branch     TEXT NOT NULL,
+  priority   INTEGER DEFAULT 0,
+  status     TEXT DEFAULT 'queued',  -- queued / merging / merged / conflict / skipped
+  queued_at  TEXT NOT NULL,
+  merged_at  TEXT
+)
+```
+
+### 完整表清单
+
+| 表名 | 首次定义 | 用途 |
+|------|---------|------|
+| runs | Section 12 | 任务实例 |
+| steps | Section 12 | 执行步骤记录 |
+| events | Section 12 | 不可变事件日志 |
+| approvals | Section 12 | 审批记录 |
+| webhooks | Section 12 | Webhook 注册 |
+| artifacts | Section 4 / 12 | 产物管理 |
+| agent_hosts | Section 7 / 12 | Agent Host 池 |
+| jobs | Section 8 / 12 | Agent 执行 Job |
+| merge_queue | Section 6 / 12 | 合并队列 |
+
+### 数据库迁移策略
+
+本次重构为**全新部署**（clean-slate），不迁移旧数据：
+
+1. 旧系统的 `.coop/state.db` 备份为 `.coop/state.db.bak`
+2. 基于新 `db/schema.sql` 创建全新数据库
+3. `scripts/bootstrap.sh` 更新为执行新 schema
+4. 如果未来需要从旧数据迁移，提供 `scripts/migrate-legacy.py` 脚本（按需实现）
+
+理由：旧系统处于 demo 阶段，没有生产数据需要保留。新 schema 变化幅度大（14 列 vs 6 列的 runs 表、全新的 jobs/agent_hosts/merge_queue/webhooks 表），ALTER TABLE 迁移成本高于收益。
 
 ## 13. 补充设计
 
@@ -1025,15 +1136,18 @@ Agent 进程结束后，按以下规则扫描产物：
 
 ```python
 async def _run_ssh(self, host, task):
-    async with asyncssh.connect(host.host, known_hosts=None, username=..., client_keys=[host.ssh_key]) as conn:
-        result = await conn.run(
-            f"cd {shlex.quote(worktree)} && {shlex.quote(cmd)}",
-            timeout=task.timeout
-        )
+    async with asyncssh.connect(
+        host.host, username=..., client_keys=[host.ssh_key],
+        known_hosts=known_hosts_path   # 生产环境应配置 known_hosts 文件路径
+    ) as conn:
+        # 对每个参数单独 shlex.quote，避免注入
+        cmd_parts = self._build_command_parts(task.agent_type, task.task_file)
+        shell_cmd = f"cd {shlex.quote(worktree)} && " + " ".join(shlex.quote(p) for p in cmd_parts)
+        result = await conn.run(shell_cmd, timeout=task.timeout)
         return result.stdout, result.stderr, result.returncode
 ```
 
-统一使用 `asyncssh` 库，不混用 shell SSH。
+统一使用 `asyncssh` 库，不混用 shell SSH。注意对命令参数逐个 `shlex.quote`，而非对整个命令字符串引用。
 
 ### 13.9 SQLite 并发策略
 
