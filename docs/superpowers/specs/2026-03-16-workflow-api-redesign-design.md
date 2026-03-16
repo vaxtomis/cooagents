@@ -802,3 +802,277 @@ pyyaml>=6.0
 pydantic>=2.0
 httpx>=0.27
 ```
+
+## 12. 完整数据库 Schema
+
+### runs 表
+
+```sql
+runs (
+  id             TEXT PRIMARY KEY,        -- run-{timestamp}-{uuid6}
+  ticket         TEXT NOT NULL,           -- 任务编号，同一 ticket 可有多个 run
+  repo_path      TEXT NOT NULL,           -- 代码仓库绝对路径
+  description    TEXT,                    -- 需求描述
+  status         TEXT NOT NULL,           -- running / completed / failed / cancelled
+  current_stage  TEXT NOT NULL,           -- 见状态机定义
+  failed_at_stage TEXT,                   -- FAILED 时记录失败前所在阶段，retry 时恢复
+  design_worktree TEXT,                   -- 设计阶段 worktree 路径
+  design_branch   TEXT,                   -- 设计阶段分支名
+  dev_worktree    TEXT,                   -- 开发阶段 worktree 路径
+  dev_branch      TEXT,                   -- 开发阶段分支名
+  preferences_json TEXT,                  -- {"design_host":"...", "dev_host":"..."} 或 null
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+)
+```
+
+**status 与 current_stage 的关系：**
+- `status=running`: 任务正在进行，`current_stage` 为当前所在阶段
+- `status=completed`: 任务正常结束，`current_stage=MERGED`
+- `status=failed`: 任务异常，`current_stage` 为失败时所在阶段，`failed_at_stage` 记录恢复目标
+- `status=cancelled`: 用户主动取消
+
+### steps 表
+
+```sql
+steps (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id      TEXT NOT NULL,
+  stage       TEXT NOT NULL,
+  assignee    TEXT NOT NULL,       -- openclaw / claude / codex / system / user
+  status      TEXT NOT NULL,       -- running / done / failed / cancelled
+  host_id     TEXT,                -- 执行的 agent host（仅 agent 阶段）
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT,
+  retry_count INTEGER DEFAULT 0,
+  note        TEXT
+)
+```
+
+### events 表
+
+```sql
+events (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id        TEXT NOT NULL,
+  event_type    TEXT NOT NULL,
+  payload_json  TEXT,
+  created_at    TEXT NOT NULL
+)
+```
+
+**完整事件类型枚举：**
+- `run.created` — 任务创建
+- `run.failed` — 任务失败 (payload: `{error, stage}`)
+- `run.completed` — 任务完成
+- `run.cancelled` — 任务取消 (payload: `{by, reason}`)
+- `run.retried` — 任务重试 (payload: `{by, note, from_stage}`)
+- `stage.changed` — 阶段变更 (payload: `{from, to, worktree?, branch?}`)
+- `gate.waiting` — 等待审批 (payload: `{gate, artifact_ids}`)
+- `gate.approved` — 审批通过 (payload: `{gate, by, comment}`)
+- `gate.rejected` — 审批驳回 (payload: `{gate, by, reason}`)
+- `job.dispatched` — Agent 任务已调度 (payload: `{host_id, agent_type, job_id}`)
+- `job.started` — Agent 进程已启动 (payload: `{job_id, pid}`)
+- `job.completed` — Agent 任务完成 (payload: `{job_id, exit_code}`)
+- `job.failed` — Agent 任务失败 (payload: `{job_id, exit_code, error}`)
+- `job.interrupted` — Agent 任务中断 (payload: `{job_id, reason, progress}`)
+- `job.recovered` — Agent 任务恢复 (payload: `{job_id, action}`)
+- `artifact.created` — 产物创建 (payload: `{artifact_id, kind, version}`)
+- `artifact.submitted` — 产物提交审阅 (payload: `{artifact_id, kind}`)
+- `artifact.approved` — 产物审批通过 (payload: `{artifact_id, kind}`)
+- `artifact.rejected` — 产物被驳回 (payload: `{artifact_id, kind, reason}`)
+- `conflict.detected` — 冲突检测 (payload: `{files, with_branch}`)
+- `concurrency.warning` — 并发提醒 (payload: `{concurrent_runs}`)
+- `merge.queued` — 进入合并队列
+- `merge.completed` — 合并成功 (payload: `{merge_commit}`)
+- `merge.conflict` — 合并冲突 (payload: `{conflict_files}`)
+- `host.offline` — Host 离线 (payload: `{host_id}`)
+- `host.online` — Host 恢复 (payload: `{host_id}`)
+
+### approvals 表
+
+```sql
+approvals (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id      TEXT NOT NULL,
+  gate        TEXT NOT NULL,          -- req / design / dev
+  action      TEXT NOT NULL,          -- approved / rejected
+  by          TEXT NOT NULL,
+  comment     TEXT,
+  artifact_ids TEXT,                   -- JSON array of artifact ids reviewed
+  created_at  TEXT NOT NULL,
+  UNIQUE(run_id, gate, created_at)    -- 允许同一 gate 多次审批（驳回后重审）
+)
+```
+
+### webhooks 表
+
+```sql
+webhooks (
+  id          TEXT PRIMARY KEY,
+  url         TEXT NOT NULL,
+  events      TEXT,                    -- JSON array of event types to watch, null = all
+  secret      TEXT,                    -- 签名密钥（可选）
+  status      TEXT DEFAULT 'active',   -- active / paused
+  created_at  TEXT NOT NULL
+)
+```
+
+## 13. 补充设计
+
+### 13.1 需求文档创建路径
+
+REQ_COLLECTING 阶段，需求文档由 OpenClaw 在 API 之外创建。典型流程：
+
+1. OpenClaw 通过飞书与用户对话收集需求
+2. OpenClaw 将需求整理为 Markdown 格式
+3. OpenClaw 调用 shell 命令将文件写入 `docs/req/REQ-{ticket}.md`
+4. OpenClaw 调用 `POST /runs/{run_id}/tick` 触发检测
+5. 状态机发现需求文件存在 → 注册 artifact → 进入 REQ_REVIEW
+
+也支持通过 API 直接提交需求内容（便捷方式）：
+
+```json
+// POST /runs/{run_id}/submit-requirement
+{"content": "# 需求文档\n..."}
+```
+
+API 自动将内容写入 `docs/req/REQ-{ticket}.md`，注册 artifact 并推进状态。
+
+### 13.2 API 错误响应格式
+
+所有错误响应使用统一格式：
+
+```json
+// 404
+{"error": "not_found", "message": "run run-xxx not found"}
+
+// 409
+{"error": "conflict", "message": "run is not in REVIEW stage, cannot approve", "current_stage": "DESIGN_RUNNING"}
+
+// 422
+{"error": "validation_error", "message": "ticket is required", "details": [...]}
+
+// 500
+{"error": "internal_error", "message": "database error"}
+```
+
+### 13.3 并发审批防护
+
+同一个 gate 的 approve 和 reject 操作使用数据库级乐观锁：
+
+```python
+async def approve(run_id, gate, by, comment):
+    async with db.transaction():
+        run = await db.get_run(run_id)
+        # 检查当前阶段是否是对应的 REVIEW 阶段
+        expected_stage = {"req": "REQ_REVIEW", "design": "DESIGN_REVIEW", "dev": "DEV_REVIEW"}
+        if run.current_stage != expected_stage[gate]:
+            raise ConflictError(f"run is in {run.current_stage}, not {expected_stage[gate]}")
+        # 在事务内原子更新，第二个并发请求会发现 stage 已变更而失败
+        await db.insert_approval(...)
+        await state_machine.tick(run_id)
+```
+
+### 13.4 DELETE /runs/{run_id} 行为
+
+取消/终止任务的完整流程：
+
+1. 如果有运行中的 agent job → 终止进程（本地 kill / 远程 SSH kill）
+2. 如果在合并队列中 → 从队列移除
+3. 清理 worktree（可选，通过 `?cleanup=true` 参数控制）
+4. 设置 `status=cancelled`
+5. 记录 `run.cancelled` 事件
+6. Webhook 通知
+
+不会删除数据库记录——所有历史保留可追溯。
+
+### 13.5 重复 ticket 处理
+
+允许同一 ticket 创建多个 run（不同 run_id），但在创建时检测并警告：
+
+- 扫描同 ticket 的 running 状态 run
+- 如果存在 → 返回 warning 字段但不阻塞
+- 分支名使用 `feat/{ticket}-design-{run_suffix}` 格式避免碰撞（首次省略后缀，第二次起追加）
+
+### 13.6 retry 与 recover 的区别
+
+| 场景 | 使用 | 说明 |
+|------|------|------|
+| 状态机 tick 抛异常 → run 标记为 FAILED | `retry` | 恢复 status=running，从 failed_at_stage 继续 tick |
+| Agent 进程超时 → job 标记为 interrupted | `recover` | 提供 resume/redo/manual 三个选项 |
+| Agent 进程 crash (exit_code != 0) → job 失败 | `recover` | 同上 |
+| SSH 连接断开 → job 失败 | `recover` | 同上 |
+
+实现上：`retry` 操作 runs 表，`recover` 操作 jobs 表。Agent 执行失败时 run 状态不直接改为 FAILED，而是停在当前 RUNNING 阶段，等待 recover 决策。只有状态机本身的代码错误才会触发 FAILED。
+
+### 13.7 产物检测规则
+
+Agent 进程结束后，按以下规则扫描产物：
+
+| 阶段 | 扫描模式 | 产物类型 |
+|------|---------|---------|
+| DESIGN_RUNNING | `{worktree}/docs/design/DES-{ticket}*.md` | design |
+| DESIGN_RUNNING | `{worktree}/docs/design/ADR-{ticket}*.md` | adr |
+| DEV_RUNNING | `{worktree}/docs/dev/TEST-REPORT-{ticket}*.md` | test-report |
+| DEV_RUNNING | `git log {base_commit}..HEAD` | code |
+
+新文件通过 `content_hash` 比对区分：之前不存在或 hash 变化的才注册为新产物。
+
+### 13.8 SSH 执行安全
+
+远程命令构造使用 `asyncssh`（而非 shell SSH 二进制），所有参数通过 asyncssh 的 API 传递，避免 shell 注入：
+
+```python
+async def _run_ssh(self, host, task):
+    async with asyncssh.connect(host.host, known_hosts=None, username=..., client_keys=[host.ssh_key]) as conn:
+        result = await conn.run(
+            f"cd {shlex.quote(worktree)} && {shlex.quote(cmd)}",
+            timeout=task.timeout
+        )
+        return result.stdout, result.stderr, result.returncode
+```
+
+统一使用 `asyncssh` 库，不混用 shell SSH。
+
+### 13.9 SQLite 并发策略
+
+uvicorn 运行单 worker 进程（`--workers 1`），所有数据库操作通过单个 aiosqlite 连接池（池大小为 1）串行执行写入。读操作可并发（WAL 模式）。这对当前规模（几十个并发 run）完全足够。
+
+### 13.10 健康检查端点
+
+```json
+// GET /health
+{"status": "ok", "uptime": 3600, "db": "connected", "active_runs": 5, "active_jobs": 2}
+```
+
+### 13.11 Webhook 投递策略
+
+- 失败后重试 3 次，间隔 5s / 30s / 300s
+- 超过重试次数 → 记录 events 表（`webhook.delivery_failed`）
+- 可通过 `GET /webhooks/{id}/deliveries` 查看投递历史
+
+### 13.12 合并队列优先级与跳过
+
+- 默认 FIFO，可通过 `POST /runs/{run_id}/merge` 传入 `priority` 调整
+- 冲突项可被跳过：`POST /runs/{run_id}/merge-skip`，允许后续项先合并
+- 跳过后该项不会被自动处理，需要人工解决后重新入队
+
+### 13.13 首选 Host 降级
+
+当 `preferences.design_host` 指定的 host 不可用时：
+- 等待 5 分钟
+- 如果仍不可用 → webhook 通知用户，自动降级到自动调度
+- 用户可通过 API 更新 preferences 指定其他 host
+
+### 13.14 Worktree 清理策略
+
+| 状态 | 清理时机 |
+|------|---------|
+| MERGED | 合并成功后自动清理 worktree 和本地分支 |
+| CANCELLED | 取消时根据 `?cleanup=true` 参数决定 |
+| FAILED（超过 7 天） | 后台定期检查，通知用户确认后清理 |
+
+### 13.15 Agent 输出处理
+
+Agent stdout/stderr 流式写入临时文件（`{coop}/jobs/{job_id}/stdout.log`），避免大量输出占用内存。`jobs.output_log` 字段仅保存最后 10KB 摘要。完整日志通过 `GET /runs/{run_id}/jobs/{job_id}/output` 读取文件返回。
