@@ -1,0 +1,34 @@
+stage.changed:
+  message: "任务 {{ticket}} 阶段变更: {{from}} → {{to}}"
+gate.waiting:
+  message: "任务 {{ticket}} 等待审阅 ({{gate}})"
+gate.approved:
+  message: "任务 {{ticket}} 审批通过 ({{gate}})"
+gate.rejected:
+  message: "任务 {{ticket}} 已驳回 ({{gate}}): {{reason}}"
+job.completed:
+  message: "任务 {{ticket}} 执行完成"
+job.failed:
+  message: "任务 {{ticket}} 执行失败"
+job.interrupted:
+  message: "任务 {{ticket}} 执行中断: {{reason}}"
+job.timeout:
+  message: "任务 {{ticket}} 执行超时"
+run.completed:
+  message: "任务 {{ticket}} 已完成"
+run.cancelled:
+  message: "任务 {{ticket}} 已取消"
+run.retried:
+  message: "任务 {{ticket}} 已重试"
+merge.completed:
+  message: "任务 {{ticket}} 合并完成"
+merge.conflict:
+  message: "任务 {{ticket}} 合并冲突: {{conflicts}}"
+host.online:
+  message: "主机 {{host_id}} 上线"
+host.offline:
+  message: "主机 {{host_id}} 离线"
+review.reminder:
+  message: "提醒: 任务 {{ticket}} 等待审阅 ({{stage}})"
+requirement.submitted:
+  message: "任务 {{ticket}} 需求文档已提交"
