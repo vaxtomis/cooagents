@@ -56,6 +56,8 @@ class StateMachine:
         merge_manager=None,
         coop_dir: str = ".coop",
         ensure_worktree_fn=None,
+        config=None,
+        job_manager=None,
     ):
         self.db = db
         self.artifacts = artifact_manager
@@ -65,6 +67,13 @@ class StateMachine:
         self.merge = merge_manager
         self.coop_dir = coop_dir
         self._ensure_worktree = ensure_worktree_fn
+        self._config = config
+        self.jobs = job_manager
+        self._design_max_turns = 3
+        self._dev_max_turns = 5
+        if config:
+            self._design_max_turns = getattr(getattr(config, 'turns', None), 'design_max_turns', 3)
+            self._dev_max_turns = getattr(getattr(config, 'turns', None), 'dev_max_turns', 5)
 
     # ------------------------------------------------------------------
     # Public API
@@ -272,7 +281,7 @@ class StateMachine:
         """Try to dispatch the design agent job if a host is available."""
         host = await self.hosts.select_host("claude")
         if not host:
-            return  # Stay in DESIGN_QUEUED; will be retried on next tick
+            return
 
         branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "design")
 
@@ -282,11 +291,15 @@ class StateMachine:
             (wt, branch, now, run["id"]),
         )
 
-        # Render agent task file
         task_path = os.path.join(self.coop_dir, "runs", run["id"], "TASK-design.md")
         os.makedirs(os.path.dirname(task_path), exist_ok=True)
+
+        template = "templates/INIT-design.md"
+        if not Path(template).exists():
+            template = "templates/TASK-claude.md"
+
         await self.artifacts.render_task(
-            "templates/TASK-claude.md",
+            template,
             {
                 "run_id": run["id"],
                 "ticket": run["ticket"],
@@ -297,7 +310,10 @@ class StateMachine:
             task_path,
         )
 
-        await self.executor.dispatch(run["id"], host, "claude", task_path, wt, 1800)
+        if hasattr(self.executor, 'start_session'):
+            await self.executor.start_session(run["id"], host, "claude", task_path, wt, 1800)
+        else:
+            await self.executor.dispatch(run["id"], host, "claude", task_path, wt, 1800)
         await self._update_stage(run["id"], "DESIGN_QUEUED", "DESIGN_DISPATCHED")
 
     async def _tick_design_dispatched(self, run: dict) -> None:
@@ -310,24 +326,48 @@ class StateMachine:
             await self._update_stage(run["id"], "DESIGN_DISPATCHED", "DESIGN_RUNNING")
 
     async def _tick_design_running(self, run: dict) -> None:
-        """Advance to DESIGN_REVIEW once the design job completes."""
+        """Check design job result, evaluate, and either advance or request revision."""
         job = await self.db.fetchone(
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
             (run["id"],),
         )
-        if job and job["status"] == "completed":
-            await self.artifacts.scan_and_register(
-                run["id"], run["ticket"], "DESIGN_RUNNING",
-                run.get("design_worktree", ""),
-            )
+        if not job or job["status"] != "completed":
+            return
+
+        turn = job.get("turn_count") or 1
+        wt = run.get("design_worktree", "")
+
+        await self.artifacts.scan_and_register(run["id"], run["ticket"], "DESIGN_RUNNING", wt)
+        all_artifacts = await self.artifacts.get_by_run(run["id"])
+        verdict, detail = self._evaluate_design(all_artifacts, job)
+
+        if verdict == "accept" or turn >= self._design_max_turns:
             await self.artifacts.submit_all(run["id"], "DESIGN_RUNNING")
+            if hasattr(self.executor, 'close_session'):
+                await self.executor.close_session(run["id"], "claude")
             await self._update_stage(run["id"], "DESIGN_RUNNING", "DESIGN_REVIEW")
+        elif verdict == "revise":
+            revision_path = os.path.join(self.coop_dir, "runs", run["id"], f"TURN-revision-{turn+1}.md")
+            os.makedirs(os.path.dirname(revision_path), exist_ok=True)
+            await self.artifacts.render_task(
+                "templates/TURN-revision.md",
+                {"turn": turn + 1, "feedback": detail, "ticket": run["ticket"],
+                 "missing_artifacts": []},
+                revision_path,
+            )
+            await self._emit(run["id"], "turn.completed", {"turn_num": turn, "verdict": verdict, "detail": detail})
+            if hasattr(self.executor, 'send_followup'):
+                await self._emit(run["id"], "turn.started", {"turn_num": turn + 1, "agent_type": "claude"})
+                if self.jobs:
+                    await self.jobs.increment_turn(job["id"])
+                    await self.jobs.record_turn(job["id"], turn, revision_path, verdict, detail)
+                await self.executor.send_followup(run["id"], "claude", revision_path, wt, 1800)
 
     async def _tick_dev_queued(self, run: dict) -> None:
         """Try to dispatch the dev agent job if a host is available."""
         host = await self.hosts.select_host("codex")
         if not host:
-            return  # Stay in DEV_QUEUED
+            return
 
         branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "dev")
 
@@ -341,8 +381,13 @@ class StateMachine:
         os.makedirs(os.path.dirname(task_path), exist_ok=True)
         design_arts = await self.artifacts.get_by_run(run["id"], kind="design", status="approved")
         design_path = design_arts[0]["path"] if design_arts else ""
+
+        template = "templates/INIT-dev.md"
+        if not Path(template).exists():
+            template = "templates/TASK-codex.md"
+
         await self.artifacts.render_task(
-            "templates/TASK-codex.md",
+            template,
             {
                 "run_id": run["id"],
                 "ticket": run["ticket"],
@@ -353,7 +398,10 @@ class StateMachine:
             task_path,
         )
 
-        await self.executor.dispatch(run["id"], host, "codex", task_path, wt, 3600)
+        if hasattr(self.executor, 'start_session'):
+            await self.executor.start_session(run["id"], host, "codex", task_path, wt, 3600)
+        else:
+            await self.executor.dispatch(run["id"], host, "codex", task_path, wt, 3600)
         await self._update_stage(run["id"], "DEV_QUEUED", "DEV_DISPATCHED")
 
     async def _tick_dev_dispatched(self, run: dict) -> None:
@@ -366,18 +414,42 @@ class StateMachine:
             await self._update_stage(run["id"], "DEV_DISPATCHED", "DEV_RUNNING")
 
     async def _tick_dev_running(self, run: dict) -> None:
-        """Advance to DEV_REVIEW once the dev job completes."""
+        """Check dev job result, evaluate, and either advance or request revision."""
         job = await self.db.fetchone(
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
             (run["id"],),
         )
-        if job and job["status"] == "completed":
-            await self.artifacts.scan_and_register(
-                run["id"], run["ticket"], "DEV_RUNNING",
-                run.get("dev_worktree", ""),
-            )
+        if not job or job["status"] != "completed":
+            return
+
+        turn = job.get("turn_count") or 1
+        wt = run.get("dev_worktree", "")
+
+        await self.artifacts.scan_and_register(run["id"], run["ticket"], "DEV_RUNNING", wt)
+        all_artifacts = await self.artifacts.get_by_run(run["id"])
+        verdict, detail = self._evaluate_dev(all_artifacts, job, wt)
+
+        if verdict == "accept" or turn >= self._dev_max_turns:
             await self.artifacts.submit_all(run["id"], "DEV_RUNNING")
+            if hasattr(self.executor, 'close_session'):
+                await self.executor.close_session(run["id"], "codex")
             await self._update_stage(run["id"], "DEV_RUNNING", "DEV_REVIEW")
+        elif verdict == "revise":
+            revision_path = os.path.join(self.coop_dir, "runs", run["id"], f"TURN-dev-fix-{turn+1}.md")
+            os.makedirs(os.path.dirname(revision_path), exist_ok=True)
+            await self.artifacts.render_task(
+                "templates/TURN-dev-fix.md",
+                {"turn": turn + 1, "feedback": detail, "ticket": run["ticket"],
+                 "test_failures": []},
+                revision_path,
+            )
+            await self._emit(run["id"], "turn.completed", {"turn_num": turn, "verdict": verdict, "detail": detail})
+            if hasattr(self.executor, 'send_followup'):
+                await self._emit(run["id"], "turn.started", {"turn_num": turn + 1, "agent_type": "codex"})
+                if self.jobs:
+                    await self.jobs.increment_turn(job["id"])
+                    await self.jobs.record_turn(job["id"], turn, revision_path, verdict, detail)
+                await self.executor.send_followup(run["id"], "codex", revision_path, wt, 3600)
 
     async def _tick_merge_queued(self, run: dict) -> None:
         """Enqueue merge and advance to MERGING."""
@@ -399,6 +471,25 @@ class StateMachine:
                 await self._emit(run["id"], "run.completed", {})
             elif status == "conflict":
                 await self._update_stage(run["id"], "MERGING", "MERGE_CONFLICT")
+
+    # ------------------------------------------------------------------
+    # Evaluators
+    # ------------------------------------------------------------------
+
+    def _evaluate_design(self, artifacts, job=None) -> tuple[str, str]:
+        has_design = any(a["kind"] == "design" for a in artifacts)
+        has_adr = any(a["kind"] == "adr" for a in artifacts)
+        if not has_design:
+            return ("revise", "未生成设计文档 DES-{ticket}.md")
+        if not has_adr:
+            return ("revise", "未生成架构决策记录 ADR-{ticket}.md")
+        return ("accept", "")
+
+    def _evaluate_dev(self, artifacts, job=None, worktree=None) -> tuple[str, str]:
+        has_test_report = any(a["kind"] == "test-report" for a in artifacts)
+        if not has_test_report:
+            return ("revise", "未生成测试报告 TEST-REPORT-{ticket}.md")
+        return ("accept", "")
 
     # ------------------------------------------------------------------
     # Internal helpers
