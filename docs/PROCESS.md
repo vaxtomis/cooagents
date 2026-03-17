@@ -1,55 +1,79 @@
-# 多 Agent 协作流程（OpenClaw + Claude + Codex）
+# 多 Agent 协作流程
 
-## Phase A：需求确认（OpenClaw）
-1. 与需求方沟通并确认仓库
-2. 形成 `docs/req/REQ-<ticket>.md`
-3. Gate A：需求方确认后进入设计
+## 1. 总览
 
-## Phase B：需求设计（Claude）
-1. 创建设计 worktree 与分支 `feat/<ticket>-design`
-2. 在 tmux 会话中启动 Claude
-3. 完成设计文档并提交
-4. Gate B：OpenClaw 审核 + 需求方确认
+三角色协作：OpenClaw（需求管理）+ Claude Code（设计）+ Codex（开发）。
 
-## Phase C：开发实现（Codex）
-1. 创建开发 worktree 与分支 `feat/<ticket>-dev`
-2. 在 tmux 会话中启动 Codex
-3. 按设计实现、测试、提交
-4. Gate C：OpenClaw 汇总并准备 PR
+通过 HTTP API 驱动 15 阶段状态机，完成从需求到代码合并的全生命周期。
 
-## 分支规范
-- 设计分支：`feat/<ticket>-design`
-- 开发分支：`feat/<ticket>-dev`
+架构图参见 README.md。
 
-## tmux 会话规范
-- 设计：`design-<ticket>`
-- 开发：`dev-<ticket>`
+## 2. 15 阶段流程
 
-## 异步稳定模式（事件驱动）
+完整状态转移图参见 README.md 中的 mermaid 状态图。
 
-采用状态机推进，避免线性脚本中断导致全流程失败。
+| 阶段 | 输入 | 输出 | 模式 |
+|------|------|------|------|
+| INIT | create_task 调用 | run 记录 | 自动 |
+| REQ_COLLECTING | 需求内容 | 需求文档 | 自动 |
+| REQ_REVIEW | 需求文档 | 审批/驳回 | 人工 |
+| DESIGN_QUEUED | 审批通过 | 主机分配 | 自动 |
+| DESIGN_DISPATCHED | 主机分配 | acpx session | 自动 |
+| DESIGN_RUNNING | session | 设计文档 + ADR | 自动 |
+| DESIGN_REVIEW | 设计文档 | 审批/驳回 | 人工 |
+| DEV_QUEUED | 审批通过 | 主机分配 | 自动 |
+| DEV_DISPATCHED | 主机分配 | acpx session | 自动 |
+| DEV_RUNNING | session | 代码 + 测试 | 自动 |
+| DEV_REVIEW | 代码 + 测试报告 | 审批/驳回 | 人工 |
+| MERGE_QUEUED | 审批通过 | 合并队列位置 | 自动 |
+| MERGING | 队列位置 | 合并结果 | 自动 |
+| MERGED | 合并成功 | 完成通知 | 自动 |
+| MERGE_CONFLICT | 合并失败 | 冲突文件列表 | 人工 |
+| FAILED | 错误 | 重试/恢复决策 | 自动 |
 
-状态流转：
-- `INIT` -> `REQ_COLLECTING` -> `REQ_READY`(等待 req 审批)
-- `DESIGN_ASSIGNED`(等待 design ACK) -> `DESIGN_RUNNING` -> `DESIGN_DONE`(等待 design 审批)
-- `DEV_ASSIGNED`(等待 dev ACK) -> `DEV_RUNNING` -> `COMPLETED`
+## 3. 分支规范
 
-实现要点：
-- SQLite 存储运行状态/事件/审批/产物
-- `tick` 幂等：可重复执行，不重复创建会话和 worktree
-- `flock` 锁避免并发 tick 冲突
-- Gate 审批（req/design）显式触发下一阶段
-- 状态快照写入 `.coop/runs/<run_id>/state.json`，便于排障
-- `tick` 异常自动将 run 标记为 `failed`，可执行 retry
-- 进入设计/开发阶段时，自动生成任务单并通过 tmux 注入给 Claude/Codex
+- 设计分支：`feat/{ticket}-design`
+- 开发分支：`feat/{ticket}-dev`
 
-## 调度建议（cron）
+## 4. 产物规范
 
-示例：每 2 分钟推进运行中的流程、每 2 分钟拉取关键事件
+- 设计文档：`docs/design/DES-{ticket}.md`
+- 架构决策：`docs/design/ADR-{ticket}.md`
+- 测试报告：`docs/dev/TEST-REPORT-{ticket}.md`
 
-```cron
-*/2 * * * * cd /path/to/cooagents && scripts/workflow-tick-cron.sh >> .coop/cron-tick.log 2>&1
-*/2 * * * * cd /path/to/cooagents && python3 scripts/workflow-notify.py >> .coop/cron-notify.log 2>&1
-*/2 * * * * cd /path/to/cooagents && FEISHU_WEBHOOK_URL='https://open.feishu.cn/open-apis/bot/v2/hook/xxx' python3 scripts/workflow-notify-feishu.py >> .coop/cron-feishu.log 2>&1
-```
+## 5. 审批流程
 
+流程中包含三个人工审批门控：req、design、dev。
+
+### req 门控
+
+- 触发阶段：REQ_REVIEW
+- 审批通过：`POST /runs/{id}/approve`，body 传 `gate=req`、`by`、可选 `comment`；然后 `POST /runs/{id}/tick` 推进至 DESIGN_QUEUED
+- 驳回：`POST /runs/{id}/reject`，body 传 `gate=req`、`by`、`reason`；回退至 REQ_COLLECTING
+
+### design 门控
+
+- 触发阶段：DESIGN_REVIEW
+- 审批通过：`POST /runs/{id}/approve`，body 传 `gate=design`、`by`、可选 `comment`；然后 `POST /runs/{id}/tick` 推进至 DEV_QUEUED
+- 驳回：`POST /runs/{id}/reject`，body 传 `gate=design`、`by`、`reason`；回退至 DESIGN_QUEUED
+
+### dev 门控
+
+- 触发阶段：DEV_REVIEW
+- 审批通过：`POST /runs/{id}/approve`，body 传 `gate=dev`、`by`、可选 `comment`；然后 `POST /runs/{id}/tick` 推进至 MERGE_QUEUED
+- 驳回：`POST /runs/{id}/reject`，body 传 `gate=dev`、`by`、`reason`；回退至 DEV_QUEUED
+
+## 6. API 驱动
+
+所有操作均通过 HTTP API 完成，基础地址：`http://127.0.0.1:8321/api/v1`。
+
+所有操作均通过 HTTP 请求完成，不依赖任何外部脚本或后台进程。`tick` 端点幂等，可安全重复调用。
+
+关键端点（完整文档参见 openclaw-tools.json）：
+
+- `POST /runs` — 创建任务
+- `POST /runs/{id}/tick` — 推进阶段
+- `POST /runs/{id}/approve` — 审批通过
+- `POST /runs/{id}/reject` — 驳回
+- `GET /runs/{id}` — 查询状态
