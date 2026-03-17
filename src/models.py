@@ -171,6 +171,14 @@ class ArtifactContentResponse(ArtifactResponse):
     diff_from_prev: str | None = None
 
 
+class TurnResponse(BaseModel):
+    turn_num: int
+    verdict: str | None = None
+    detail: str | None = None
+    started_at: str
+    ended_at: str | None = None
+
+
 class JobResponse(BaseModel):
     id: str
     run_id: str
@@ -180,6 +188,9 @@ class JobResponse(BaseModel):
     status: str
     started_at: str
     ended_at: str | None
+    session_name: str | None = None
+    turn_count: int = 1
+    turns: list[TurnResponse] | None = None
 
 
 class AgentHostResponse(BaseModel):

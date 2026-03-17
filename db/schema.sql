@@ -104,6 +104,9 @@ CREATE TABLE IF NOT EXISTS jobs (
   ssh_session_id TEXT,
   snapshot_json  TEXT,
   resume_count   INTEGER DEFAULT 0,
+  session_name   TEXT,
+  turn_count     INTEGER DEFAULT 1,
+  events_file    TEXT,
   started_at     TEXT NOT NULL,
   ended_at       TEXT
 );
@@ -119,6 +122,21 @@ CREATE TABLE IF NOT EXISTS merge_queue (
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL
 );
+
+-- 10. turns — per-turn history within a job
+CREATE TABLE IF NOT EXISTS turns (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      TEXT NOT NULL REFERENCES jobs(id),
+    turn_num    INTEGER NOT NULL,
+    prompt_file TEXT,
+    verdict     TEXT,
+    detail      TEXT,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT,
+    UNIQUE(job_id, turn_num)
+);
+
+CREATE INDEX IF NOT EXISTS idx_turns_job ON turns(job_id);
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_runs_status   ON runs(status);
