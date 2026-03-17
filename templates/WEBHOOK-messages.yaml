@@ -32,3 +32,11 @@ review.reminder:
   message: "提醒: 任务 {{ticket}} 等待审阅 ({{stage}})"
 requirement.submitted:
   message: "任务 {{ticket}} 需求文档已提交"
+turn.started:
+  message: "任务 {{ticket}} 第 {{turn_num}} 轮开始 ({{agent_type}})"
+turn.completed:
+  message: "任务 {{ticket}} 第 {{turn_num}} 轮完成: {{verdict}}"
+session.created:
+  message: "任务 {{ticket}} 会话创建: {{session_name}}"
+session.closed:
+  message: "任务 {{ticket}} 会话关闭: {{session_name}}"

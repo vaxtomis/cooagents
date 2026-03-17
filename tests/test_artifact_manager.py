@@ -81,3 +81,13 @@ async def test_render_task(am, tmp_path):
     content = out.read_text()
     assert "Run: r123" in content
     assert "Ticket: T-1" in content
+
+async def test_render_task_jinja2(db, tmp_path):
+    am = ArtifactManager(db)
+    template = tmp_path / "template.md"
+    template.write_text("# Task for {{ ticket }}\n{% if feedback %}Feedback: {{ feedback }}{% endif %}")
+    output = tmp_path / "out.md"
+    await am.render_task(str(template), {"ticket": "T-1", "feedback": "needs ADR"}, str(output))
+    content = output.read_text()
+    assert "Task for T-1" in content
+    assert "Feedback: needs ADR" in content

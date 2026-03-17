@@ -130,10 +130,16 @@ class ArtifactManager:
         return h.hexdigest()
 
     async def render_task(self, template_path, variables: dict, output_path) -> str:
-        """Render a task template with {{variable}} substitution."""
-        content = Path(template_path).read_text(encoding="utf-8")
-        for key, value in variables.items():
-            content = content.replace("{{" + key + "}}", str(value))
+        """Render a task template with Jinja2."""
+        from jinja2 import Environment, FileSystemLoader
+
+        template_file = Path(template_path)
+        env = Environment(
+            loader=FileSystemLoader(str(template_file.parent)),
+            keep_trailing_newline=True,
+        )
+        template = env.get_template(template_file.name)
+        content = template.render(**variables)
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_text(content, encoding="utf-8")
         return output_path
