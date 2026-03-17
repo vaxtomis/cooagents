@@ -35,12 +35,25 @@ class MergeConfig(BaseModel):
     max_resume_count: int = 3
 
 
+class AcpxConfig(BaseModel):
+    permission_mode: str = "approve-all"
+    default_format: str = "json"
+    ttl: int = 600
+
+
+class TurnsConfig(BaseModel):
+    design_max_turns: int = 3
+    dev_max_turns: int = 5
+
+
 class Settings(BaseModel):
     server: ServerConfig = ServerConfig()
     database: DatabaseConfig = DatabaseConfig()
     timeouts: TimeoutConfig = TimeoutConfig()
     health_check: HealthCheckConfig = HealthCheckConfig()
     merge: MergeConfig = MergeConfig()
+    acpx: AcpxConfig = AcpxConfig()
+    turns: TurnsConfig = TurnsConfig()
 
 
 def load_settings(path: Path | str | None = None) -> Settings:

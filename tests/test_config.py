@@ -19,3 +19,16 @@ def test_load_agent_hosts_empty(tmp_path):
     cfg.write_text("hosts: []\n")
     hosts = load_agent_hosts(cfg)
     assert hosts == []
+
+def test_acpx_config_defaults():
+    from src.config import Settings
+    s = Settings()
+    assert s.acpx.permission_mode == "approve-all"
+    assert s.acpx.default_format == "json"
+    assert s.acpx.ttl == 600
+
+def test_turns_config_defaults():
+    from src.config import Settings
+    s = Settings()
+    assert s.turns.design_max_turns == 3
+    assert s.turns.dev_max_turns == 5
