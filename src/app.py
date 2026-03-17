@@ -7,7 +7,7 @@ from src.database import Database
 from src.artifact_manager import ArtifactManager
 from src.host_manager import HostManager
 from src.job_manager import JobManager
-from src.agent_executor import AgentExecutor
+from src.acpx_executor import AcpxExecutor
 from src.webhook_notifier import WebhookNotifier
 from src.merge_manager import MergeManager
 from src.state_machine import StateMachine
@@ -26,8 +26,8 @@ async def lifespan(app: FastAPI):
     webhooks = WebhookNotifier(db)
     merger = MergeManager(db, webhooks)
 
-    executor = AgentExecutor(db, jobs, hosts, artifacts, webhooks, coop_dir=".coop")
-    sm = StateMachine(db, artifacts, hosts, executor, webhooks, merger, coop_dir=".coop")
+    executor = AcpxExecutor(db, jobs, hosts, artifacts, webhooks, config=settings, coop_dir=".coop")
+    sm = StateMachine(db, artifacts, hosts, executor, webhooks, merger, coop_dir=".coop", config=settings, job_manager=jobs)
     executor.set_state_machine(sm)
 
     agent_config = load_agent_hosts()
