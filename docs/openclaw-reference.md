@@ -25,17 +25,21 @@ Skills 是 **Markdown 文件 + YAML frontmatter**，位于 `skills/<name>/SKILL.
 ---
 name: my-skill
 description: 一行描述，用于判断是否加载该 skill
-primaryEnv: python          # 可选：主运行环境
-emoji: 🔧                   # 可选：显示图标
-always: false               # 可选：是否始终加载
-user-invocable: true        # 可选：用户是否可直接调用
-disable-model-invocation: false  # 可选：禁止模型主动调用
-requires:                   # 可选：依赖检查
-  binaries: [git, python3]
-  env: [API_KEY]
-install:                    # 可选：自动安装
-  brew: [tool-name]
-  node: [package-name]
+user-invocable: true                    # 可选：用户是否可直接调用（顶层字段）
+disable-model-invocation: false         # 可选：禁止模型主动调用（顶层字段）
+metadata:
+  {
+    "openclaw":
+      {
+        "emoji": "🔧",
+        "always": false,
+        "primaryEnv": "python",
+        "requires": { "bins": ["git", "python3"], "env": ["API_KEY"] },
+        "install": [
+          { "id": "brew", "kind": "brew", "formula": "tool-name", "bins": ["tool-name"] }
+        ]
+      }
+  }
 ---
 
 # Skill 标题
@@ -43,6 +47,8 @@ install:                    # 可选：自动安装
 详细的 skill 内容，指导 Agent 如何完成任务。
 支持完整的 Markdown 格式。
 ```
+
+> **注意**：`emoji`、`always`、`requires`、`install` 等 OpenClaw 特有字段必须放在 `metadata` 的 `"openclaw"` JSON5 块内，而非顶层 frontmatter。`user-invocable` 和 `disable-model-invocation` 是顶层字段。详见 `frontmatter.ts` 中 `resolveOpenClawManifestBlock()` 的解析逻辑。
 
 ### 加载机制
 
