@@ -21,6 +21,9 @@ flowchart LR
 - [模板系统](#模板系统)
 - [数据库设计](#数据库设计)
 - [OpenClaw 集成](#openclaw-集成)
+  - [cooagents-workflow Skill](#cooagents-workflow-skill)
+  - [API 参考文档](#api-参考文档)
+  - [OpenClaw Skill 部署](#openclaw-skill-部署)
 - [测试](#测试)
 - [项目结构](#项目结构)
 
@@ -397,13 +400,41 @@ erDiagram
 
 ## OpenClaw 集成
 
-`docs/openclaw-tools.json` 提供了 11 个函数调用定义，可直接导入 OpenClaw 实现飞书对话式任务管理：
+### cooagents-workflow Skill
+
+项目内置了面向 OpenClaw 的 Skill（`skills/cooagents-workflow/`），使 OpenClaw Agent 自动扮演**项目经理**角色，通过 `exec` + `curl` 编排 cooagents 15 阶段工作流。
+
+```
+skills/cooagents-workflow/
+├── SKILL.md                    # 核心决策逻辑（~114 行，注入 Agent prompt）
+└── references/
+    ├── api-playbook.md         # 8 个 curl 操作场景（按需 Read）
+    ├── error-handling.md       # 自动错误恢复策略
+    └── feishu-interaction.md   # 3 类回复消息模板
+```
+
+**Skill 能力：**
+
+| 操作 | 模式 | 说明 |
+|------|------|------|
+| 创建任务、提交需求、tick 推进 | 自动 | Agent 通过 `exec curl` 直接调用 API |
+| 监控 RUNNING 状态 | 自动 | 响应 webhook 事件或轮询 |
+| 需求/设计/开发审批 | 人工 | Agent 格式化审批模板回复用户，等待用户消息后执行 approve/reject |
+| 超时/失败恢复 | 自动 | 按策略自动 retry/recover，超限后通知用户 |
+| 合并冲突 | 人工 | 通知用户并附冲突文件列表 |
+
+**部署机制：** cooagents 启动时，`src/skill_deployer.py` 自动将 `skills/` 目录同步到 OpenClaw 的托管 skills 目录（默认 `~/.openclaw/skills/`），支持本地复制和 SSH 远程部署。配置见 [OpenClaw Skill 部署](#openclaw-skill-部署)。
+
+### API 参考文档
+
+`docs/openclaw-tools.json` 提供了 12 个函数调用定义，可作为 API 参考：
 
 | 函数 | 对应 API |
 |------|----------|
 | `create_task` | `POST /api/v1/runs` |
 | `list_tasks` | `GET /api/v1/runs` |
 | `get_task_status` | `GET /api/v1/runs/{id}` |
+| `tick_task` | `POST /api/v1/runs/{id}/tick` |
 | `submit_requirement` | `POST /api/v1/runs/{id}/submit-requirement` |
 | `approve_gate` | `POST /api/v1/runs/{id}/approve` |
 | `reject_gate` | `POST /api/v1/runs/{id}/reject` |
@@ -439,6 +470,31 @@ curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
 | Session | `session.created` `session.closed` |
 | 其他 | `review.reminder` `requirement.submitted` |
 
+### OpenClaw Skill 部署
+
+cooagents 启动时自动将 `skills/` 目录下的 Skill 同步到 OpenClaw。在 `config/settings.yaml` 中配置：
+
+```yaml
+openclaw:
+  deploy_skills: true              # 启动时是否同步 Skill
+  targets:
+    - type: local                  # 本地复制
+      skills_dir: "~/.openclaw/skills"
+    # - type: ssh                  # 远程部署（规划中）
+    #   host: "remote-host"
+    #   port: 22
+    #   user: "deploy"
+    #   key: "~/.ssh/id_rsa"
+    #   skills_dir: "~/.openclaw/skills"
+```
+
+部署流程：
+1. 扫描 `skills/` 下包含 `SKILL.md` 的子目录
+2. 对每个目标执行全量同步（先清除旧文件，再复制新文件）
+3. 日志记录部署结果
+
+OpenClaw 发现 Skill 后，Agent 在对话中检测到工作流相关意图时会自动加载 `cooagents-workflow` Skill。用户也可通过 `/cooagents-workflow` 直接调用。
+
 ## 测试
 
 ```bash
@@ -451,7 +507,7 @@ pytest tests/test_e2e.py -v
 pytest tests/test_acpx_executor.py -v
 ```
 
-测试覆盖（97 个测试）：
+测试覆盖（103 个测试）：
 
 | 模块 | 测试数 | 说明 |
 |------|--------|------|
@@ -461,6 +517,7 @@ pytest tests/test_acpx_executor.py -v
 | `test_artifact_manager.py` | 7 | 注册、版本、Jinja2 渲染 |
 | `test_merge_manager.py` | 7 | 队列、优先级、冲突 |
 | `test_api.py` | 7 | HTTP 端点集成测试 |
+| `test_skill_deployer.py` | 6 | Skill 部署、覆盖、SSH 降级 |
 | `test_git_utils.py` | 6 | worktree、冲突检测 |
 | `test_webhook_notifier.py` | 6 | 订阅、过滤、投递 |
 | `test_config.py` | 5 | 配置加载、默认值 |
@@ -475,14 +532,18 @@ pytest tests/test_acpx_executor.py -v
 cooagents/
 ├── config/
 │   ├── agents.yaml            # Agent 主机配置
-│   └── settings.yaml          # 服务配置
+│   └── settings.yaml          # 服务配置（含 OpenClaw 部署配置）
 ├── db/
 │   └── schema.sql             # 数据库 Schema（10 表）
 ├── docs/
 │   ├── PROCESS.md             # 流程说明
-│   ├── openclaw-tools.json    # OpenClaw 函数定义
+│   ├── openclaw-tools.json    # OpenClaw API 参考（12 函数）
 │   ├── design/                # 设计文档模板
 │   └── dev/                   # 开发文档模板
+├── skills/                    # OpenClaw Skills（启动时部署）
+│   └── cooagents-workflow/
+│       ├── SKILL.md           # 核心决策逻辑
+│       └── references/        # 参考文档（api-playbook, error-handling, feishu-interaction）
 ├── routes/                    # FastAPI 路由
 │   ├── runs.py                # 工作流端点
 │   ├── artifacts.py           # 产物端点
@@ -500,12 +561,13 @@ cooagents/
 │   ├── webhook_notifier.py    # Webhook 通知
 │   ├── scheduler.py           # 后台调度器
 │   ├── database.py            # 异步 SQLite
+│   ├── skill_deployer.py      # OpenClaw Skill 部署
 │   ├── config.py              # 配置加载
 │   ├── models.py              # Pydantic 模型
 │   ├── git_utils.py           # Git 操作工具
 │   └── exceptions.py          # 自定义异常
 ├── templates/                 # Jinja2 任务模板
-├── tests/                     # 测试套件（97 tests）
+├── tests/                     # 测试套件（103 tests）
 ├── scripts/
 │   └── bootstrap.sh           # 初始化脚本
 ├── requirements.txt
