@@ -31,3 +31,9 @@ acpx:
 turns:
   design_max_turns: 3
   dev_max_turns: 5
+
+openclaw:
+  deploy_skills: true
+  targets:
+    - type: local
+      skills_dir: "~/.openclaw/skills"

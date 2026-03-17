@@ -12,11 +12,14 @@ from src.webhook_notifier import WebhookNotifier
 from src.merge_manager import MergeManager
 from src.state_machine import StateMachine
 from src.exceptions import NotFoundError, ConflictError
+from src.skill_deployer import deploy_skills
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = load_settings()
+    await deploy_skills(settings)
+
     db = Database(db_path=settings.database.path, schema_path="db/schema.sql")
     await db.connect()
 

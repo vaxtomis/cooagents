@@ -50,6 +50,20 @@ class TurnsConfig(BaseModel):
     dev_max_turns: int = 5
 
 
+class OpenclawTarget(BaseModel):
+    type: str = "local"              # "local" or "ssh"
+    skills_dir: str = "~/.openclaw/skills"
+    host: str | None = None          # SSH only
+    port: int = 22                   # SSH only
+    user: str | None = None          # SSH only
+    key: str | None = None           # SSH only
+
+
+class OpenclawConfig(BaseModel):
+    deploy_skills: bool = True
+    targets: list[OpenclawTarget] = []
+
+
 class Settings(BaseModel):
     server: ServerConfig = ServerConfig()
     database: DatabaseConfig = DatabaseConfig()
@@ -58,6 +72,7 @@ class Settings(BaseModel):
     merge: MergeConfig = MergeConfig()
     acpx: AcpxConfig = AcpxConfig()
     turns: TurnsConfig = TurnsConfig()
+    openclaw: OpenclawConfig = OpenclawConfig()
 
 
 def load_settings(path: Path | str | None = None) -> Settings:
