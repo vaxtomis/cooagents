@@ -104,8 +104,11 @@ class HostManager:
             return False
         if host["host"] == "local":
             import shutil
-            has_agent = shutil.which("claude") or shutil.which("codex")
-            status = "active" if has_agent else "offline"
+            has_acpx = shutil.which("acpx")
+            if not has_acpx:
+                # Fallback: check for direct CLI availability
+                has_acpx = shutil.which("claude") or shutil.which("codex")
+            status = "active" if has_acpx else "offline"
         else:
             try:
                 import asyncssh
@@ -113,9 +116,9 @@ class HostManager:
                     host["host"],
                     known_hosts=None,
                     client_keys=[host["ssh_key"]] if host.get("ssh_key") else None,
-                ):
-                    pass
-                status = "active"
+                ) as conn:
+                    result = await conn.run("acpx --version")
+                    status = "active" if result.returncode == 0 else "offline"
             except Exception:
                 status = "offline"
         await self.set_status(host_id, status)
