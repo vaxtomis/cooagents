@@ -13,7 +13,7 @@ from src.database import Database
 from src.artifact_manager import ArtifactManager
 from src.host_manager import HostManager
 from src.job_manager import JobManager
-from src.agent_executor import AgentExecutor
+from src.acpx_executor import AcpxExecutor
 from src.webhook_notifier import WebhookNotifier
 from src.merge_manager import MergeManager
 from src.state_machine import StateMachine
@@ -37,7 +37,9 @@ async def setup(tmp_path):
     jobs = JobManager(db)
     webhooks = WebhookNotifier(db)
     merger = MergeManager(db, webhooks)
-    executor = AgentExecutor(db, jobs, hosts, artifacts, webhooks, coop_dir=coop)
+    executor = AcpxExecutor(db, jobs, hosts, artifacts, webhooks, coop_dir=coop)
+    executor.close_session = AsyncMock()
+    executor.send_followup = AsyncMock()
 
     # Fake worktree function — avoids needing a real git repo in e2e tests
     async def fake_ensure_worktree(repo_path, ticket, phase, run_suffix=""):
@@ -47,7 +49,7 @@ async def setup(tmp_path):
         branch = f"feat/{ticket}-{phase}"
         return branch, wt
 
-    sm = StateMachine(db, artifacts, hosts, executor, webhooks, merger, coop_dir=coop, ensure_worktree_fn=fake_ensure_worktree)
+    sm = StateMachine(db, artifacts, hosts, executor, webhooks, merger, coop_dir=coop, ensure_worktree_fn=fake_ensure_worktree, job_manager=jobs)
     executor.set_state_machine(sm)
 
     # Register a local test host
@@ -128,14 +130,14 @@ async def test_full_workflow_happy_path(setup):
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
 
-    async def mock_design_dispatch(rid, host, atype, tf, wt, timeout):
+    async def mock_design_dispatch(rid, host, atype, tf, wt, timeout, revision=None):
         await db.execute(
             "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,started_at) VALUES(?,?,?,?,?,?,?,?,?)",
             ("job-design-1", rid, host["id"], atype, "DESIGN_DISPATCHED", "starting", tf, wt, now)
         )
         return "job-design-1"
 
-    with patch.object(executor, "dispatch", side_effect=mock_design_dispatch):
+    with patch.object(executor, "start_session", side_effect=mock_design_dispatch):
         resp = await client.post(f"/api/v1/runs/{run_id}/tick")
         assert resp.json()["current_stage"] == "DESIGN_DISPATCHED"
 
@@ -144,10 +146,12 @@ async def test_full_workflow_happy_path(setup):
     resp = await client.post(f"/api/v1/runs/{run_id}/tick")
     assert resp.json()["current_stage"] == "DESIGN_RUNNING"
 
-    # Create a fake design artifact and mark job completed
-    design_dir = tmp_path / "docs" / "design"
+    # Create fake design + ADR artifacts in the worktree directory
+    wt_design = tmp_path / ".worktrees" / "E2E-1-design"
+    design_dir = wt_design / "docs" / "design"
     design_dir.mkdir(parents=True, exist_ok=True)
     (design_dir / "DES-E2E-1.md").write_text("# Design for E2E-1\nArchitecture details.")
+    (design_dir / "ADR-E2E-1.md").write_text("# ADR for E2E-1\nDecision record.")
     await db.execute("UPDATE jobs SET status='completed', ended_at=? WHERE id='job-design-1'", (now,))
     resp = await client.post(f"/api/v1/runs/{run_id}/tick")
     assert resp.json()["current_stage"] == "DESIGN_REVIEW"
@@ -158,7 +162,7 @@ async def test_full_workflow_happy_path(setup):
     assert resp.json()["current_stage"] == "DEV_QUEUED"
 
     # 7. Simulate dev agent
-    async def mock_dev_dispatch(rid, host, atype, tf, wt, timeout):
+    async def mock_dev_dispatch(rid, host, atype, tf, wt, timeout, revision=None):
         dev_now = datetime.now(timezone.utc).isoformat()
         await db.execute(
             "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,started_at) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -166,7 +170,7 @@ async def test_full_workflow_happy_path(setup):
         )
         return "job-dev-1"
 
-    with patch.object(executor, "dispatch", side_effect=mock_dev_dispatch):
+    with patch.object(executor, "start_session", side_effect=mock_dev_dispatch):
         resp = await client.post(f"/api/v1/runs/{run_id}/tick")
         assert resp.json()["current_stage"] == "DEV_DISPATCHED"
 
@@ -174,6 +178,11 @@ async def test_full_workflow_happy_path(setup):
     resp = await client.post(f"/api/v1/runs/{run_id}/tick")
     assert resp.json()["current_stage"] == "DEV_RUNNING"
 
+    # Create fake test-report artifact in the dev worktree
+    wt_dev = tmp_path / ".worktrees" / "E2E-1-dev"
+    dev_dir = wt_dev / "docs" / "dev"
+    dev_dir.mkdir(parents=True, exist_ok=True)
+    (dev_dir / "TEST-REPORT-E2E-1.md").write_text("# Test Report\nAll tests passed.")
     await db.execute("UPDATE jobs SET status='completed', ended_at=? WHERE id='job-dev-1'", (now,))
     resp = await client.post(f"/api/v1/runs/{run_id}/tick")
     assert resp.json()["current_stage"] == "DEV_REVIEW"
@@ -205,18 +214,25 @@ async def test_design_rejection_and_redo(setup):
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
 
-    async def mock_dispatch(rid, host, atype, tf, wt, timeout):
+    async def mock_dispatch(rid, host, atype, tf, wt, timeout, revision=None):
         await db.execute(
             "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,started_at) VALUES(?,?,?,?,?,?,?,?,?)",
             ("job-d1", rid, host["id"], atype, "DESIGN_DISPATCHED", "starting", tf, wt, now)
         )
         return "job-d1"
 
-    with patch.object(executor, "dispatch", side_effect=mock_dispatch):
+    with patch.object(executor, "start_session", side_effect=mock_dispatch):
         await client.post(f"/api/v1/runs/{run_id}/tick")
 
     await db.execute("UPDATE jobs SET status='running' WHERE id='job-d1'")
     await client.post(f"/api/v1/runs/{run_id}/tick")
+
+    # Create design + ADR artifacts in the worktree
+    wt_design = tmp_path / ".worktrees" / "E2E-REJ-design"
+    design_dir = wt_design / "docs" / "design"
+    design_dir.mkdir(parents=True, exist_ok=True)
+    (design_dir / "DES-E2E-REJ.md").write_text("# Design\nInitial design.")
+    (design_dir / "ADR-E2E-REJ.md").write_text("# ADR\nDecision record.")
     await db.execute("UPDATE jobs SET status='completed', ended_at=? WHERE id='job-d1'", (now,))
     await client.post(f"/api/v1/runs/{run_id}/tick")
 

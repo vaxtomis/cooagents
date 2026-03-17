@@ -295,8 +295,6 @@ class StateMachine:
         os.makedirs(os.path.dirname(task_path), exist_ok=True)
 
         template = "templates/INIT-design.md"
-        if not Path(template).exists():
-            template = "templates/TASK-claude.md"
 
         await self.artifacts.render_task(
             template,
@@ -383,8 +381,6 @@ class StateMachine:
         design_path = design_arts[0]["path"] if design_arts else ""
 
         template = "templates/INIT-dev.md"
-        if not Path(template).exists():
-            template = "templates/TASK-codex.md"
 
         await self.artifacts.render_task(
             template,
