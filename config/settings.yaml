@@ -23,6 +23,10 @@ acpx:
   permission_mode: "approve-all"
   default_format: "json"
   ttl: 600
+  json_strict: true
+  model: null                      # 留空使用 agent 默认模型
+  allowed_tools_design: null       # 设计阶段工具白名单（逗号分隔），null 不限制
+  allowed_tools_dev: null          # 开发阶段工具白名单
 
 turns:
   design_max_turns: 3

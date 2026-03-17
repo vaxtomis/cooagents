@@ -39,6 +39,10 @@ class AcpxConfig(BaseModel):
     permission_mode: str = "approve-all"
     default_format: str = "json"
     ttl: int = 600
+    json_strict: bool = True
+    model: str | None = None
+    allowed_tools_design: str | None = None
+    allowed_tools_dev: str | None = None
 
 
 class TurnsConfig(BaseModel):

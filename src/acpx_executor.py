@@ -28,12 +28,13 @@ class AcpxExecutor:
         self.coop_dir = coop_dir
         self._state_machine = None
         self._tasks = {}  # job_id -> asyncio.Task
+        self._resources = {}  # job_id -> {"stderr_fh": fh, "ssh_conn": conn}
 
     def set_state_machine(self, sm):
         self._state_machine = sm
 
     # ------------------------------------------------------------------
-    # Session name helpers
+    # Helpers
     # ------------------------------------------------------------------
 
     def _make_session_name(self, run_id, phase, revision=None):
@@ -45,12 +46,27 @@ class AcpxExecutor:
     def _map_exit_code(self, rc):
         return _EXIT_CODE_MAP.get(rc, "failed")
 
+    def _resolve_agent(self, agent_type):
+        return "claude" if agent_type == "claude" else "codex"
+
+    def _acpx_cfg(self):
+        """Return the AcpxConfig or None."""
+        return getattr(self.config, "acpx", None) if self.config else None
+
+    def _get_allowed_tools(self, agent_type):
+        cfg = self._acpx_cfg()
+        if not cfg:
+            return None
+        if agent_type == "claude":
+            return getattr(cfg, "allowed_tools_design", None)
+        return getattr(cfg, "allowed_tools_dev", None)
+
     # ------------------------------------------------------------------
     # Command builders
     # ------------------------------------------------------------------
 
     def _build_acpx_prompt_cmd(self, agent_type, session_name, worktree, timeout_sec, task_file=None):
-        agent = "claude" if agent_type == "claude" else "codex"
+        agent = self._resolve_agent(agent_type)
         cmd = [
             "acpx", agent,
             "-s", session_name,
@@ -59,25 +75,107 @@ class AcpxExecutor:
             "--approve-all",
             "--timeout", str(timeout_sec),
         ]
+        cfg = self._acpx_cfg()
+        if cfg:
+            cmd += ["--ttl", str(cfg.ttl)]
+            if getattr(cfg, "json_strict", False):
+                cmd.append("--json-strict")
+            if getattr(cfg, "model", None):
+                cmd += ["--model", cfg.model]
+        allowed = self._get_allowed_tools(agent_type)
+        if allowed:
+            cmd += ["--allowed-tools", allowed]
         if task_file:
             cmd += ["--file", task_file]
         return cmd
 
+    def _build_acpx_exec_cmd(self, agent_type, worktree, timeout_sec, task_file=None, prompt=None):
+        agent = self._resolve_agent(agent_type)
+        cmd = [
+            "acpx", agent, "exec",
+            "--cwd", worktree,
+            "--format", "json",
+            "--approve-all",
+            "--timeout", str(timeout_sec),
+        ]
+        cfg = self._acpx_cfg()
+        if cfg:
+            if getattr(cfg, "json_strict", False):
+                cmd.append("--json-strict")
+            if getattr(cfg, "model", None):
+                cmd += ["--model", cfg.model]
+        if task_file:
+            cmd += ["--file", task_file]
+        elif prompt:
+            cmd.append(prompt)
+        return cmd
+
     def _build_acpx_ensure_cmd(self, agent_type, session_name, worktree):
-        agent = "claude" if agent_type == "claude" else "codex"
+        agent = self._resolve_agent(agent_type)
         return ["acpx", agent, "--cwd", worktree, "sessions", "ensure", "--name", session_name]
 
     def _build_acpx_cancel_cmd(self, agent_type, session_name, worktree):
-        agent = "claude" if agent_type == "claude" else "codex"
+        agent = self._resolve_agent(agent_type)
         return ["acpx", agent, "cancel", "-s", session_name, "--cwd", worktree]
 
     def _build_acpx_close_cmd(self, agent_type, session_name, worktree):
-        agent = "claude" if agent_type == "claude" else "codex"
+        agent = self._resolve_agent(agent_type)
         return ["acpx", agent, "--cwd", worktree, "sessions", "close", session_name]
 
     def _build_acpx_status_cmd(self, agent_type, session_name, worktree):
-        agent = "claude" if agent_type == "claude" else "codex"
+        agent = self._resolve_agent(agent_type)
         return ["acpx", agent, "status", "-s", session_name, "--cwd", worktree, "--format", "json"]
+
+    def _build_acpx_show_cmd(self, agent_type, session_name, worktree):
+        """Build command for ``acpx <agent> sessions show`` (rich metadata)."""
+        agent = self._resolve_agent(agent_type)
+        return ["acpx", agent, "--cwd", worktree, "--format", "json", "sessions", "show", session_name]
+
+    def _build_acpx_history_cmd(self, agent_type, session_name, worktree, limit=20):
+        """Build command for ``acpx <agent> sessions history``."""
+        agent = self._resolve_agent(agent_type)
+        return ["acpx", agent, "--cwd", worktree, "--format", "json",
+                "sessions", "history", session_name, "--limit", str(limit)]
+
+    def _build_acpx_set_mode_cmd(self, agent_type, session_name, worktree, mode):
+        agent = self._resolve_agent(agent_type)
+        return ["acpx", agent, "set-mode", mode, "-s", session_name, "--cwd", worktree]
+
+    def _build_acpx_set_cmd(self, agent_type, session_name, worktree, key, value):
+        agent = self._resolve_agent(agent_type)
+        return ["acpx", agent, "set", key, value, "-s", session_name, "--cwd", worktree]
+
+    # ------------------------------------------------------------------
+    # Command routing (local vs SSH)
+    # ------------------------------------------------------------------
+
+    async def _route_cmd(self, host_id, cmd, worktree="."):
+        """Route command execution to local or SSH based on host."""
+        if host_id:
+            host = await self.db.fetchone("SELECT * FROM agent_hosts WHERE id=?", (host_id,))
+            if host and host["host"] != "local":
+                return await self._run_ssh_cmd(dict(host), cmd)
+        return await self._run_cmd(cmd, worktree)
+
+    async def _run_cmd(self, cmd, cwd):
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        return stdout.decode().strip(), stderr.decode().strip(), proc.returncode
+
+    async def _run_ssh_cmd(self, host, cmd):
+        import asyncssh
+        import shlex
+        remote_cmd = " ".join(shlex.quote(c) for c in cmd)
+        connect_args = {"host": host["host"], "known_hosts": None}
+        if host.get("ssh_key"):
+            connect_args["client_keys"] = [host["ssh_key"]]
+        async with asyncssh.connect(**connect_args) as conn:
+            result = await conn.run(remote_cmd)
+            return result.stdout.strip(), result.stderr.strip(), result.returncode
 
     # ------------------------------------------------------------------
     # Core session lifecycle
@@ -123,11 +221,7 @@ class AcpxExecutor:
         return job_id
 
     async def send_followup(self, run_id, agent_type, prompt_file, worktree, timeout_sec) -> None:
-        """Send a followup prompt to an existing session.
-
-        Launches a background watcher task (non-blocking) that triggers
-        state_machine.tick() on completion, just like start_session does.
-        """
+        """Send a followup prompt to an existing session (non-blocking)."""
         job = await self.db.fetchone(
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
             (run_id,),
@@ -146,7 +240,6 @@ class AcpxExecutor:
         else:
             process = await self._start_ssh(dict(host), prompt_cmd, job["id"])
 
-        # Background watcher -- triggers tick on completion
         task = asyncio.create_task(self._watch(job["id"], process, run_id, host_id, session_name))
         self._tasks[job["id"]] = task
 
@@ -161,11 +254,10 @@ class AcpxExecutor:
 
         cancel_cmd = self._build_acpx_cancel_cmd(agent_type, job["session_name"], job["worktree"])
         try:
-            await self._run_cmd(cancel_cmd, job["worktree"])
+            await self._route_cmd(job["host_id"], cancel_cmd, job["worktree"])
         except Exception:
             pass
 
-        # Also cancel the asyncio task
         task = self._tasks.get(job["id"])
         if task:
             task.cancel()
@@ -184,14 +276,14 @@ class AcpxExecutor:
 
         close_cmd = self._build_acpx_close_cmd(agent_type, job["session_name"], job["worktree"])
         try:
-            await self._run_cmd(close_cmd, job["worktree"])
+            await self._route_cmd(job["host_id"], close_cmd, job["worktree"])
         except Exception:
             pass
 
         await self._emit_event(run_id, "session.closed", {"session_name": job["session_name"]})
 
     async def get_session_status(self, run_id, agent_type, host=None) -> dict | None:
-        """Query acpx session status."""
+        """Query acpx local process status (running/dead/no-session)."""
         job = await self.db.fetchone(
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
             (run_id,),
@@ -200,15 +292,95 @@ class AcpxExecutor:
             return None
 
         status_cmd = self._build_acpx_status_cmd(agent_type, job["session_name"], job["worktree"])
-
         try:
             if host and host["host"] != "local":
                 stdout, _, _ = await self._run_ssh_cmd(host, status_cmd)
             else:
-                stdout, _, _ = await self._run_cmd(status_cmd, job["worktree"])
+                stdout, _, _ = await self._route_cmd(job["host_id"], status_cmd, job["worktree"])
             return json.loads(stdout)
         except Exception:
             return None
+
+    async def get_session_detail(self, run_id, agent_type) -> dict | None:
+        """Query rich session metadata via ``sessions show`` (token usage, exit code, etc.)."""
+        job = await self.db.fetchone(
+            "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+            (run_id,),
+        )
+        if not job or not job.get("session_name"):
+            return None
+
+        show_cmd = self._build_acpx_show_cmd(agent_type, job["session_name"], job["worktree"])
+        try:
+            stdout, _, _ = await self._route_cmd(job["host_id"], show_cmd, job["worktree"])
+            return json.loads(stdout)
+        except Exception:
+            return None
+
+    async def get_session_history(self, run_id, agent_type, limit=20) -> list | None:
+        """Retrieve conversation turn history via ``sessions history``."""
+        job = await self.db.fetchone(
+            "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+            (run_id,),
+        )
+        if not job or not job.get("session_name"):
+            return None
+
+        history_cmd = self._build_acpx_history_cmd(
+            agent_type, job["session_name"], job["worktree"], limit,
+        )
+        try:
+            stdout, _, _ = await self._route_cmd(job["host_id"], history_cmd, job["worktree"])
+            return json.loads(stdout)
+        except Exception:
+            return None
+
+    async def set_mode(self, run_id, agent_type, mode) -> bool:
+        """Set session mode at runtime (e.g. plan/act)."""
+        job = await self.db.fetchone(
+            "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+            (run_id,),
+        )
+        if not job or not job.get("session_name"):
+            return False
+
+        cmd = self._build_acpx_set_mode_cmd(
+            agent_type, job["session_name"], job["worktree"], mode,
+        )
+        try:
+            _, _, rc = await self._route_cmd(job["host_id"], cmd, job["worktree"])
+            return rc == 0
+        except Exception:
+            return False
+
+    async def set_config_option(self, run_id, agent_type, key, value) -> bool:
+        """Set a session config option at runtime (e.g. reasoning_effort)."""
+        job = await self.db.fetchone(
+            "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+            (run_id,),
+        )
+        if not job or not job.get("session_name"):
+            return False
+
+        cmd = self._build_acpx_set_cmd(
+            agent_type, job["session_name"], job["worktree"], key, value,
+        )
+        try:
+            _, _, rc = await self._route_cmd(job["host_id"], cmd, job["worktree"])
+            return rc == 0
+        except Exception:
+            return False
+
+    async def run_once(self, agent_type, worktree, timeout_sec, task_file=None, prompt=None) -> tuple[str, int]:
+        """One-shot exec mode — no persistent session. Returns (stdout, exit_code)."""
+        cmd = self._build_acpx_exec_cmd(agent_type, worktree, timeout_sec, task_file, prompt)
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=worktree,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        return stdout.decode().strip(), proc.returncode
 
     # ------------------------------------------------------------------
     # Recovery
@@ -226,7 +398,6 @@ class AcpxExecutor:
         agent_type = job["agent_type"]
 
         if action == "resume":
-            # Send RESUME.md to the same session
             resume_prompt = os.path.join(self.coop_dir, "runs", run_id, "RESUME.md")
             os.makedirs(os.path.dirname(resume_prompt), exist_ok=True)
             await self.artifacts.render_task(
@@ -258,7 +429,6 @@ class AcpxExecutor:
         for job in jobs:
             j = dict(job)
             if j.get("session_name"):
-                # Look up host for SSH routing
                 host = None
                 if j.get("host_id"):
                     host = await self.db.fetchone(
@@ -275,35 +445,17 @@ class AcpxExecutor:
     # Process management (private)
     # ------------------------------------------------------------------
 
-    async def _run_cmd(self, cmd, cwd):
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        return stdout.decode().strip(), stderr.decode().strip(), proc.returncode
-
-    async def _run_ssh_cmd(self, host, cmd):
-        import asyncssh
-        import shlex
-        remote_cmd = " ".join(shlex.quote(c) for c in cmd)
-        connect_args = {"host": host["host"], "known_hosts": None}
-        if host.get("ssh_key"):
-            connect_args["client_keys"] = [host["ssh_key"]]
-        async with asyncssh.connect(**connect_args) as conn:
-            result = await conn.run(remote_cmd)
-            return result.stdout.strip(), result.stderr.strip(), result.returncode
-
     async def _start_local(self, cmd, worktree, job_id):
         log_dir = Path(self.coop_dir) / "jobs" / job_id
         log_dir.mkdir(parents=True, exist_ok=True)
 
+        stderr_fh = open(log_dir / "stderr.log", "w", encoding="utf-8")
         process = await asyncio.create_subprocess_exec(
             *cmd, cwd=worktree,
             stdout=asyncio.subprocess.PIPE,
-            stderr=open(log_dir / "stderr.log", "w", encoding="utf-8"),
+            stderr=stderr_fh,
         )
+        self._resources[job_id] = {"stderr_fh": stderr_fh}
         return process
 
     async def _start_ssh(self, host, cmd, job_id):
@@ -315,6 +467,7 @@ class AcpxExecutor:
             connect_args["client_keys"] = [host["ssh_key"]]
         conn = await asyncssh.connect(**connect_args)
         process = await conn.create_process(remote_cmd)
+        self._resources[job_id] = {"ssh_conn": conn}
         return process
 
     async def _watch(self, job_id, process, run_id, host_id, session_name):
@@ -355,6 +508,23 @@ class AcpxExecutor:
         finally:
             await self.hosts.decrement_load(host_id)
             self._tasks.pop(job_id, None)
+            self._cleanup_resources(job_id)
+
+    def _cleanup_resources(self, job_id):
+        """Close file handles and SSH connections for a finished job."""
+        res = self._resources.pop(job_id, {})
+        fh = res.get("stderr_fh")
+        if fh:
+            try:
+                fh.close()
+            except Exception:
+                pass
+        conn = res.get("ssh_conn")
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     async def _parse_ndjson_stream(self, process, job_id, events_file):
         """Parse NDJSON lines from process stdout, append to events file."""
