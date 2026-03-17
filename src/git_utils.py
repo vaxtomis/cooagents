@@ -189,24 +189,6 @@ async def cleanup_worktree(repo_path: str, worktree: str, branch: str) -> None:
     await run_git("branch", "-D", branch, cwd=repo_path, check=False)
 
 
-async def stash_save(worktree: str, message: str) -> bool:
-    """Run ``git stash push``.
-
-    Returns ``True`` if something was stashed.
-    """
-    out, _, _ = await run_git("stash", "push", "-m", message, cwd=worktree)
-    return "No local changes" not in out
-
-
-async def stash_pop(worktree: str) -> bool:
-    """Run ``git stash pop``.
-
-    Returns ``True`` if successful.
-    """
-    _, _, rc = await run_git("stash", "pop", cwd=worktree, check=False)
-    return rc == 0
-
-
 async def get_head_commit(worktree: str) -> str:
     """Return the HEAD commit hash (40-char hex string)."""
     out, _, _ = await run_git("rev-parse", "HEAD", cwd=worktree)
