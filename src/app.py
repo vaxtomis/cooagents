@@ -85,34 +85,14 @@ async def health(request: Request):
     }
 
 
-# Import and register routers — these will be created in Tasks 14-17
-# We'll import them with try/except so the app can start even if routes don't exist yet
-try:
-    from routes.runs import router as runs_router
-    app.include_router(runs_router, prefix="/api/v1")
-except ImportError:
-    pass
+from routes.runs import router as runs_router
+from routes.artifacts import router as artifacts_router
+from routes.agent_hosts import router as hosts_router
+from routes.webhooks import router as webhooks_router
+from routes.repos import router as repos_router
 
-try:
-    from routes.artifacts import router as artifacts_router
-    app.include_router(artifacts_router, prefix="/api/v1")
-except ImportError:
-    pass
-
-try:
-    from routes.agent_hosts import router as hosts_router
-    app.include_router(hosts_router, prefix="/api/v1")
-except ImportError:
-    pass
-
-try:
-    from routes.webhooks import router as webhooks_router
-    app.include_router(webhooks_router, prefix="/api/v1")
-except ImportError:
-    pass
-
-try:
-    from routes.repos import router as repos_router
-    app.include_router(repos_router, prefix="/api/v1")
-except ImportError:
-    pass
+app.include_router(runs_router, prefix="/api/v1")
+app.include_router(artifacts_router, prefix="/api/v1")
+app.include_router(hosts_router, prefix="/api/v1")
+app.include_router(webhooks_router, prefix="/api/v1")
+app.include_router(repos_router, prefix="/api/v1")

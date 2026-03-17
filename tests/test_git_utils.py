@@ -10,8 +10,6 @@ import pytest
 from src.git_utils import (
     check_conflicts,
     ensure_worktree,
-    get_commit_log,
-    get_diff_stat,
     get_head_commit,
     run_git,
 )
@@ -100,42 +98,6 @@ async def test_ensure_worktree_with_suffix(repo: Path) -> None:
         str(repo), ticket="T-3", phase="dev", run_suffix="r2"
     )
     assert branch == "feat/T-3-dev-r2"
-
-
-async def test_get_diff_stat(repo: Path) -> None:
-    """get_diff_stat should return non-empty output after commits beyond base."""
-    _, wt_path = await ensure_worktree(str(repo), ticket="T-4", phase="design")
-
-    base = await _git("rev-parse", "HEAD", cwd=wt_path)
-
-    # Make a commit in the worktree
-    (Path(wt_path) / "new_file.txt").write_text("hello\n")
-    await _git("add", "new_file.txt", cwd=wt_path)
-    await _git("commit", "-m", "add new_file", cwd=wt_path)
-
-    stat = await get_diff_stat(wt_path, base)
-    assert "new_file.txt" in stat
-
-
-async def test_get_commit_log(repo: Path) -> None:
-    """get_commit_log should return one entry per commit made after base."""
-    _, wt_path = await ensure_worktree(str(repo), ticket="T-5", phase="design")
-
-    base = await _git("rev-parse", "HEAD", cwd=wt_path)
-
-    for i in range(3):
-        (Path(wt_path) / f"f{i}.txt").write_text(f"content {i}\n")
-        await _git("add", f"f{i}.txt", cwd=wt_path)
-        await _git("commit", "-m", f"commit {i}", cwd=wt_path)
-
-    log = await get_commit_log(wt_path, base)
-
-    assert len(log) == 3
-    for entry in log:
-        assert len(entry["hash"]) == 40
-        assert "commit" in entry["message"]
-        assert entry["files_changed"] >= 1
-        assert entry["insertions"] >= 1
 
 
 async def test_check_conflicts_no_conflict(repo: Path) -> None:

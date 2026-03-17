@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from src.models import (
     CreateRunRequest, ApproveRequest, RejectRequest, RetryRequest,
-    RecoverRequest, SubmitRequirementRequest, RunResponse, RunDetailResponse
+    RecoverRequest, SubmitRequirementRequest,
 )
 from src.exceptions import NotFoundError, ConflictError
 

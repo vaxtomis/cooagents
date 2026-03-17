@@ -1,7 +1,6 @@
 """Async git utilities for cooagents workflow management."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 
@@ -65,66 +64,6 @@ async def ensure_worktree(
     return branch, wt_path
 
 
-async def get_diff_stat(worktree: str, base_commit: str) -> str:
-    """Return ``git diff --stat base_commit..HEAD`` output."""
-    out, _, _ = await run_git(
-        "diff", "--stat", f"{base_commit}..HEAD", cwd=worktree
-    )
-    return out
-
-
-async def get_commit_log(worktree: str, base_commit: str) -> list[dict]:
-    """Return a list of commit dicts from *base_commit* to HEAD.
-
-    Each dict has keys: ``hash``, ``message``, ``files_changed``,
-    ``insertions``, ``deletions``.
-    """
-    out, _, _ = await run_git(
-        "log",
-        f"{base_commit}..HEAD",
-        "--format=%H|%s",
-        "--shortstat",
-        cwd=worktree,
-    )
-    commits: list[dict] = []
-    lines = out.split("\n")
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        if not line:
-            i += 1
-            continue
-        if "|" in line and len(line.split("|")[0]) == 40:
-            parts = line.split("|", 1)
-            commit: dict = {
-                "hash": parts[0],
-                "message": parts[1],
-                "files_changed": 0,
-                "insertions": 0,
-                "deletions": 0,
-            }
-            # git log --shortstat places a blank line between the subject and
-            # the stat summary, so look for the next *non-empty* line.
-            j = i + 1
-            while j < len(lines) and not lines[j].strip():
-                j += 1
-            if j < len(lines) and lines[j].strip() and "|" not in lines[j].split()[0]:
-                stat = lines[j].strip()
-                fc = re.search(r"(\d+) file", stat)
-                ins = re.search(r"(\d+) insertion", stat)
-                dels = re.search(r"(\d+) deletion", stat)
-                if fc:
-                    commit["files_changed"] = int(fc.group(1))
-                if ins:
-                    commit["insertions"] = int(ins.group(1))
-                if dels:
-                    commit["deletions"] = int(dels.group(1))
-                i = j  # advance past the consumed stat line
-            commits.append(commit)
-        i += 1
-    return commits
-
-
 async def check_conflicts(worktree: str, target_branch: str = "main") -> list[str]:
     """Dry-run merge to detect conflicts.
 
@@ -177,16 +116,6 @@ async def merge_to_main(repo_path: str, branch: str) -> tuple[bool, str]:
         return False, err
     out, _, _ = await run_git("rev-parse", "HEAD", cwd=repo_path)
     return True, out
-
-
-async def cleanup_worktree(repo_path: str, worktree: str, branch: str) -> None:
-    """Remove *worktree* directory and delete the local *branch*."""
-    await run_git(
-        "worktree", "remove", worktree, "--force",
-        cwd=repo_path,
-        check=False,
-    )
-    await run_git("branch", "-D", branch, cwd=repo_path, check=False)
 
 
 async def get_head_commit(worktree: str) -> str:

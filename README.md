@@ -2,9 +2,12 @@
 
 多 Agent 协作流程管理系统 —— 通过 HTTP API 编排 Claude Code / Codex 完成从需求到合并的全生命周期。
 
-```
-OpenClaw (Feishu) ──HTTP──▶ cooagents API ──acpx/SSH──▶ Claude Code / Codex
-                   ◀─webhook─              ◀─artifacts──
+```mermaid
+flowchart LR
+    OC(["OpenClaw (Feishu)"]) -->|HTTP| API["cooagents API"]
+    API -->|"acpx / SSH"| Agent["Claude Code / Codex"]
+    Agent -.->|artifacts| API
+    API -.->|webhook| OC
 ```
 
 ## 目录
@@ -35,31 +38,24 @@ OpenClaw (Feishu) ──HTTP──▶ cooagents API ──acpx/SSH──▶ Clau
 
 ## 架构概览
 
-```
-┌──────────────┐     ┌─────────────────────────────────────────────┐
-│   OpenClaw   │     │              cooagents API                  │
-│   (Feishu)   │────▶│                                             │
-│              │◀────│  ┌─────────┐  ┌──────────┐  ┌───────────┐  │
-└──────────────┘     │  │  State   │  │  Acpx    │  │ Artifact  │  │
-   webhook           │  │ Machine  │──│ Executor │  │ Manager   │  │
-                     │  └─────────┘  └──────────┘  └───────────┘  │
-                     │  ┌─────────┐  ┌──────────┐  ┌───────────┐  │
-                     │  │  Host   │  │  Merge   │  │  Webhook  │  │
-                     │  │ Manager │  │ Manager  │  │ Notifier  │  │
-                     │  └─────────┘  └──────────┘  └───────────┘  │
-                     │  ┌─────────┐  ┌──────────┐                 │
-                     │  │   Job   │  │Scheduler │                 │
-                     │  │ Manager │  │(Background)               │
-                     │  └─────────┘  └──────────┘                 │
-                     │         SQLite (aiosqlite)                  │
-                     └─────────────────────────────────────────────┘
-                                │                │
-                     ┌──────────┘                └──────────┐
-                     ▼                                      ▼
-              ┌─────────────┐                       ┌─────────────┐
-              │ Claude Code │                       │    Codex    │
-              │  (设计阶段)  │                       │  (开发阶段)  │
-              └─────────────┘                       └─────────────┘
+```mermaid
+flowchart TB
+    OC(["OpenClaw (Feishu)"]) <-->|"HTTP / Webhook"| APP
+
+    subgraph APP["cooagents API"]
+        direction TB
+        SM["State Machine"] --- AE["Acpx Executor"]
+        SM --- AM["Artifact Manager"]
+        SM --- MM["Merge Manager"]
+        HM["Host Manager"] --- AE
+        JM["Job Manager"] --- AE
+        WH["Webhook Notifier"]
+        SCH["Scheduler"]
+        DB[("SQLite (aiosqlite)")]
+    end
+
+    AE -->|"acpx session"| CC["Claude Code\n(设计阶段)"]
+    AE -->|"acpx session"| CX["Codex\n(开发阶段)"]
 ```
 
 **技术栈：** FastAPI + aiosqlite + asyncssh + Jinja2 + Pydantic v2
@@ -169,18 +165,32 @@ COOAGENTS_COOP_DIR=.coop     # 运行时状态目录
 
 ## 工作流阶段
 
-```
-INIT ─▶ REQ_COLLECTING ─▶ REQ_REVIEW ─▶ DESIGN_QUEUED ─▶ DESIGN_DISPATCHED
-                              🚦                              │
-                                                              ▼
-MERGED ◀── MERGING ◀── MERGE_QUEUED ◀── DEV_REVIEW ◀── DEV_RUNNING ◀── DEV_DISPATCHED
-                                           🚦            🔄 (≤5轮)
-                              ◀── DESIGN_REVIEW ◀── DESIGN_RUNNING
-                                      🚦              🔄 (≤3轮)
+```mermaid
+flowchart LR
+    INIT:::auto --> RC["REQ_COLLECTING"]
+    RC --> RR{"REQ_REVIEW 🚦"}
+    RR -->|approve| DQ["DESIGN_QUEUED"]
+    RR -->|reject| RC
+
+    DQ --> DD["DESIGN_DISPATCHED"]:::auto --> DR["DESIGN_RUNNING"]
+    DR -->|"revise ≤3轮"| DR
+    DR --> DRV{"DESIGN_REVIEW 🚦"}
+    DRV -->|approve| VQ["DEV_QUEUED"]
+    DRV -->|reject| DQ
+
+    VQ --> VD["DEV_DISPATCHED"]:::auto --> VR["DEV_RUNNING"]
+    VR -->|"revise ≤5轮"| VR
+    VR --> VRV{"DEV_REVIEW 🚦"}
+    VRV -->|approve| MQ["MERGE_QUEUED"]:::auto
+    VRV -->|reject| VQ
+
+    MQ --> MG["MERGING"]:::auto --> MD(["MERGED"])
+
+    classDef auto fill:#e8f5e9,stroke:#4caf50
 ```
 
-- 🚦 **审批 Gate** — 需要调用 `approve` 或 `reject` 端点通过
-- 🔄 **多轮评估** — 自动检查产物完整性，不通过则发送修订指令继续
+- **🚦 审批 Gate** — 需要调用 `approve` 或 `reject` 端点通过
+- **revise** — 自动检查产物完整性，不通过则发送修订指令继续
 
 ### 各阶段详细说明
 
@@ -326,25 +336,50 @@ curl http://127.0.0.1:8321/api/v1/runs/{run_id}
 
 SQLite 数据库包含 10 张表：
 
-```
-┌─────────┐     ┌─────────┐     ┌──────────┐
-│  runs   │──┬──│  steps  │     │ webhooks │
-│         │  │  └─────────┘     └──────────┘
-│         │  ├──┌──────────┐
-│         │  │  │  events  │    ┌─────────────┐
-│         │  │  └──────────┘    │ agent_hosts │
-│         │  ├──┌───────────┐   └─────────────┘
-│         │  │  │ approvals │
-│         │  │  └───────────┘
-│         │  ├──┌───────────┐   ┌─────────┐
-│         │  │  │ artifacts │   │  turns  │
-│         │  │  └───────────┘   └────┬────┘
-│         │  ├──┌──────┐             │
-│         │  │  │ jobs │─────────────┘
-│         │  │  └──────┘
-│         │  └──┌─────────────┐
-└─────────┘     │ merge_queue │
-                └─────────────┘
+```mermaid
+erDiagram
+    RUNS ||--o{ STEPS : has
+    RUNS ||--o{ EVENTS : logs
+    RUNS ||--o{ APPROVALS : has
+    RUNS ||--o{ ARTIFACTS : produces
+    RUNS ||--o{ JOBS : dispatches
+    RUNS ||--o{ MERGE_QUEUE : enqueues
+    JOBS ||--o{ TURNS : tracks
+
+    RUNS {
+        text id PK
+        text ticket
+        text repo_path
+        text status
+        text current_stage
+    }
+    JOBS {
+        text id PK
+        text run_id FK
+        text host_id FK
+        text agent_type
+        text session_name
+        int turn_count
+    }
+    ARTIFACTS {
+        int id PK
+        text run_id FK
+        text kind
+        int version
+        text status
+    }
+    AGENT_HOSTS {
+        text id PK
+        text host
+        text agent_type
+        int max_concurrent
+    }
+    WEBHOOKS {
+        int id PK
+        text url
+        text events_json
+        text status
+    }
 ```
 
 | 表 | 说明 |
@@ -416,24 +451,23 @@ pytest tests/test_e2e.py -v
 pytest tests/test_acpx_executor.py -v
 ```
 
-测试覆盖（88 个测试）：
+测试覆盖（97 个测试）：
 
 | 模块 | 测试数 | 说明 |
 |------|--------|------|
-| `test_e2e.py` | 4 | 完整流程、驳回重做、取消、重试 |
+| `test_acpx_executor.py` | 24 | 命令构建、session 管理、exit code |
 | `test_state_machine.py` | 16 | 状态转换、Gate、多轮评估 |
-| `test_acpx_executor.py` | 8 | 命令构建、session 命名、exit code |
-| `test_artifact_manager.py` | 7 | 注册、版本、Jinja2 渲染 |
 | `test_host_manager.py` | 8 | 选择、负载、健康检查 |
-| `test_git_utils.py` | 8 | worktree、diff、冲突检测 |
-| `test_merge_manager.py` | 6 | 队列、优先级、冲突 |
+| `test_artifact_manager.py` | 7 | 注册、版本、Jinja2 渲染 |
+| `test_merge_manager.py` | 7 | 队列、优先级、冲突 |
+| `test_api.py` | 7 | HTTP 端点集成测试 |
+| `test_git_utils.py` | 6 | worktree、冲突检测 |
 | `test_webhook_notifier.py` | 6 | 订阅、过滤、投递 |
-| `test_api.py` | 6 | HTTP 端点集成测试 |
-| `test_agent_executor.py` | 5 | 旧版执行器兼容测试 |
 | `test_config.py` | 5 | 配置加载、默认值 |
+| `test_e2e.py` | 4 | 完整流程、驳回重做、取消、重试 |
 | `test_job_manager.py` | 3 | session、轮次追踪 |
 | `test_database.py` | 3 | 连接、事务 |
-| `test_scheduler.py` | 3 | 启动、停止 |
+| `test_scheduler.py` | 1 | 启动、停止 |
 
 ## 项目结构
 
@@ -447,10 +481,8 @@ cooagents/
 ├── docs/
 │   ├── PROCESS.md             # 流程说明
 │   ├── openclaw-tools.json    # OpenClaw 函数定义
-│   ├── req/                   # 需求文档模板
 │   ├── design/                # 设计文档模板
-│   ├── dev/                   # 开发文档模板
-│   └── ops/                   # 运维交接模板
+│   └── dev/                   # 开发文档模板
 ├── routes/                    # FastAPI 路由
 │   ├── runs.py                # 工作流端点
 │   ├── artifacts.py           # 产物端点
@@ -460,7 +492,7 @@ cooagents/
 ├── src/                       # 核心模块
 │   ├── app.py                 # FastAPI 应用入口
 │   ├── state_machine.py       # 15 阶段状态机
-│   ├── acpx_executor.py       # acpx session 执行器
+│   ├── acpx_executor.py       # acpx session 执行器（唯一执行器）
 │   ├── artifact_manager.py    # 产物版本管理
 │   ├── host_manager.py        # 多主机管理
 │   ├── job_manager.py         # Job/轮次追踪
@@ -473,7 +505,7 @@ cooagents/
 │   ├── git_utils.py           # Git 操作工具
 │   └── exceptions.py          # 自定义异常
 ├── templates/                 # Jinja2 任务模板
-├── tests/                     # 测试套件（88 tests）
+├── tests/                     # 测试套件（97 tests）
 ├── scripts/
 │   └── bootstrap.sh           # 初始化脚本
 ├── requirements.txt

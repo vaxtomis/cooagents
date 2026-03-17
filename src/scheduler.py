@@ -73,7 +73,7 @@ class Scheduler:
                     else:
                         timeout = self.config.timeouts.dev_execution
                     if (now - started).total_seconds() > timeout:
-                        await self.executor.cancel(j["id"])
+                        await self.executor.cancel_session(j["run_id"], j["agent_type"])
                         await self.webhooks.notify("job.timeout", {"job_id": j["id"], "run_id": j["run_id"]})
 
             except asyncio.CancelledError:
