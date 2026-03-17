@@ -1,19 +1,27 @@
 # OpenClaw cooagents-workflow SKILL 设计文档
 
 > 日期：2026-03-17
-> 状态：待评审（v2 — 修正 OpenClaw 集成机制）
+> 状态：待评审（v3 — skill 源归属 cooagents，启动时部署到 OpenClaw）
 
 ## 1. 目标
 
-为 OpenClaw 创建一个全局 SKILL，使其 Agent 具备"项目经理"能力——自主编排 cooagents 15 阶段工作流，自动完成机械性操作，在需要人工判断的审批环节通过对话回复拉人介入。
+为 OpenClaw 创建一个 SKILL，使其 Agent 具备"项目经理"能力——自主编排 cooagents 15 阶段工作流，自动完成机械性操作，在需要人工判断的审批环节通过对话回复拉人介入。
 
 ## 2. 约束与决策
 
-### 部署位置
-- OpenClaw 全局 `skills/` 目录：`C:\Work\github\openclaw\skills\cooagents-workflow\`
-- 非项目级 skill，任何 workspace 下都可用
+### 源码归属
+
+- Skill 文件在 **cooagents 项目内维护**：`C:\Work\codex\cooagents\skills\cooagents-workflow\`
+- 理由：skill 描述的是 cooagents 自身的 API 和工作流，应跟随 cooagents 版本迭代
+
+### 部署方式
+
+- cooagents 启动时将 skill 文件复制到 OpenClaw 的托管 skills 目录
+- 默认目标：`~/.openclaw/skills/cooagents-workflow/`
+- 支持远程部署（通过 SSH），不要求 cooagents 和 OpenClaw 在同一台服务器
 
 ### 使用者
+
 - OpenClaw Agent 自身（非终端用户直接使用的工具）
 - Agent 通过 skill description 判断何时遵循本 skill 的指令
 
@@ -45,32 +53,53 @@
 
 ## 3. 方案选择
 
-**选定方案 B：SKILL + references 子目录**
+**选定方案 B：SKILL + references 子目录 + 启动部署**
 
 - 主 `SKILL.md`（~150 行）：核心决策逻辑，注入 Agent prompt
 - `references/` 子目录：详细参考文档，Agent 用 `Read` 工具按需读取
-- `openclaw-tools.json` 保留为项目 API 参考文档（非 OpenClaw 集成点）
+- 部署模块：cooagents 启动时自动同步 skill 到 OpenClaw
 
 淘汰方案：
 - A（单一大文件）：400+ 行 prompt 注入，token 浪费
 - C（TypeScript 插件）：开发量大，纯 Markdown 即可满足需求
+- D（extraDirs 配置）：要求同一台服务器，灵活性不足
 
 ## 4. 文件结构
 
+### 源文件（cooagents 项目内）
+
 ```
-C:\Work\github\openclaw\skills\cooagents-workflow\
-├── SKILL.md                        # 核心决策逻辑
-└── references/
-    ├── api-playbook.md             # curl 命令手册（按场景组织）
-    ├── error-handling.md           # 异常处理策略
-    └── feishu-interaction.md       # 回复消息模板
+C:\Work\codex\cooagents\
+├── skills\
+│   └── cooagents-workflow\
+│       ├── SKILL.md                        # 核心决策逻辑
+│       └── references\
+│           ├── api-playbook.md             # curl 命令手册（按场景组织）
+│           ├── error-handling.md           # 异常处理策略
+│           └── feishu-interaction.md       # 回复消息模板
+├── src\
+│   └── skill_deployer.py                  # 部署模块
+└── config\
+    └── settings.yaml                      # 新增 openclaw 配置节
 ```
 
-另需更新：
+### 部署目标
+
+```
+~/.openclaw/skills/cooagents-workflow/     # OpenClaw 托管 skills 目录
+├── SKILL.md
+└── references/
+    ├── api-playbook.md
+    ├── error-handling.md
+    └── feishu-interaction.md
+```
+
+### 另需更新
+
 ```
 C:\Work\codex\cooagents\docs\
-├── PROCESS.md                      # 重写：对齐 acpx + 15 阶段架构
-└── openclaw-tools.json             # 新增 tick 端点定义（API 参考文档）
+├── PROCESS.md                              # 重写：对齐 acpx + 15 阶段架构
+└── openclaw-tools.json                     # 已完成：新增 tick 端点定义
 ```
 
 ## 5. SKILL.md 设计
@@ -317,7 +346,47 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick
 建议：{suggestion}
 ```
 
-## 7. PROCESS.md 重写方案
+## 7. 部署机制设计
+
+### 7.1 配置
+
+在 `config/settings.yaml` 新增 `openclaw` 节：
+
+```yaml
+openclaw:
+  deploy_skills: true                        # 启动时是否同步 skill
+  targets:
+    - type: local                            # 本地复制
+      skills_dir: "~/.openclaw/skills"
+    # - type: ssh                            # 远程复制（可选）
+    #   host: "remote-host"
+    #   port: 22
+    #   user: "deploy"
+    #   key: "~/.ssh/id_rsa"
+    #   skills_dir: "~/.openclaw/skills"
+```
+
+### 7.2 部署模块 (`src/skill_deployer.py`)
+
+职责：
+- 读取 `skills/` 目录下的所有 skill
+- 根据 `openclaw.targets` 配置，将 skill 文件同步到目标位置
+- 本地目标：`shutil.copytree`（覆盖已有文件）
+- SSH 目标：复用 `asyncssh`（项目已有依赖），SFTP 传输
+- 启动时调用一次，日志记录部署结果
+
+接口：
+
+```python
+async def deploy_skills(settings: Settings) -> list[DeployResult]:
+    """将 skills/ 目录同步到所有配置的 OpenClaw 目标。"""
+```
+
+### 7.3 启动集成
+
+在应用启动流程（`main.py` 或 FastAPI lifespan）中调用 `deploy_skills`，在服务监听之前完成。
+
+## 8. PROCESS.md 重写方案
 
 完全重写 `docs/PROCESS.md`，删除所有 tmux/cron/flock 引用。新结构：
 
@@ -328,11 +397,9 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick
 5. **审批流程** — 三个 Gate 的触发条件、审批方式、驳回后行为
 6. **API 驱动** — 说明所有操作通过 HTTP API 完成，不再有 CLI 脚本
 
-## 8. 不在范围内
+## 9. 不在范围内
 
-- 不修改 cooagents 的 Python 源码
-- 不开发 OpenClaw TypeScript 插件
 - 不修改 OpenClaw 源码
+- 不开发 OpenClaw TypeScript 插件
 - 不实现 MCP Server
-
-**注意**：`openclaw-tools.json` 需新增 `tick` 端点定义（`POST /api/v1/runs/{run_id}/tick`），作为 API 参考文档使用。
+- 不直接在 OpenClaw 仓库中创建文件

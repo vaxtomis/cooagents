@@ -2,74 +2,35 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Create a global OpenClaw SKILL + reference docs that lets the OpenClaw Agent autonomously manage the cooagents 15-stage workflow via `exec` + `curl`, and update supporting project docs.
+**Goal:** Create a cooagents-workflow SKILL (maintained in cooagents project) + deployment mechanism that syncs the skill to OpenClaw on startup, and update supporting project docs.
 
-**Architecture:** Pure Markdown deliverables — a SKILL.md prompt (~150 lines) with 3 reference docs in a `references/` subdirectory, deployed to OpenClaw's global `skills/` directory. Agent calls cooagents REST API via `exec` tool running `curl` commands (consistent with OpenClaw skill conventions). Also updates `openclaw-tools.json` (add `tick`, as API reference doc) and rewrites `PROCESS.md`.
+**Architecture:** Skill source files live in `cooagents/skills/cooagents-workflow/`. On startup, `src/skill_deployer.py` copies them to OpenClaw's `~/.openclaw/skills/` (local or remote via SSH). SKILL.md (~150 lines) + 3 reference docs guide the OpenClaw Agent to manage the 15-stage workflow via `exec` + `curl`.
 
-**Tech Stack:** Markdown, YAML frontmatter, JSON
+**Tech Stack:** Markdown, YAML frontmatter, JSON, Python (asyncio, shutil, asyncssh)
 
 **Spec:** `docs/superpowers/specs/2026-03-17-openclaw-skill-design.md`
 
-**Cross-repo note:** Tasks 1 and 6 commit to `C:\Work\codex\cooagents` (current repo). Tasks 2-5 commit to `C:\Work\github\openclaw` (separate repo).
+**All files commit to this repo** (`C:\Work\codex\cooagents`).
 
 ---
 
-### Task 1: Add `tick` endpoint to `openclaw-tools.json`
+### Task 1: Add `tick` endpoint to `openclaw-tools.json` ✅
 
-**Files:**
-- Modify: `C:\Work\codex\cooagents\docs\openclaw-tools.json`
-
-The existing file has 11 tool definitions. The `tick` endpoint (`POST /api/v1/runs/{run_id}/tick`) is missing — it's the most frequently called operation in the workflow. This file serves as API reference documentation (not an OpenClaw tool registration mechanism).
-
-- [ ] **Step 1: Add the `tick_task` tool definition**
-
-Insert after the `get_task_status` entry (position 3 in the array). The endpoint takes no body parameters — only `run_id` in the path.
-
-```json
-{
-  "name": "tick_task",
-  "description": "推进任务到下一阶段（幂等操作，可安全重复调用）",
-  "method": "POST",
-  "endpoint": "/api/v1/runs/{run_id}/tick",
-  "parameters": {
-    "run_id": {"type": "string", "description": "任务运行ID", "required": true}
-  }
-}
-```
-
-- [ ] **Step 2: Validate JSON is well-formed**
-
-Run: `python -c "import json; json.load(open('docs/openclaw-tools.json')); print('OK')"`
-Expected: `OK`
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add docs/openclaw-tools.json
-git commit -m "feat: add tick_task endpoint to openclaw-tools.json"
-```
+> Already completed (commit 6ea28fc).
 
 ---
 
 ### Task 2: Create SKILL.md
 
 **Files:**
-- Create: `C:\Work\github\openclaw\skills\cooagents-workflow\SKILL.md`
+- Create: `skills/cooagents-workflow/SKILL.md`
 
 This is the core deliverable — the prompt injected into OpenClaw Agent's context. ~150 lines, structured per spec sections 5.1 and 5.2.
-
-- [ ] **Step 0: Verify the openclaw repo exists**
-
-```bash
-git -C "C:/Work/github/openclaw" status --short
-```
-
-Expected: git status output (confirms repo exists and is initialized). If this fails, stop and ask the user.
 
 - [ ] **Step 1: Create the directory**
 
 ```bash
-mkdir -p "C:/Work/github/openclaw/skills/cooagents-workflow/references"
+mkdir -p skills/cooagents-workflow/references
 ```
 
 - [ ] **Step 2: Write SKILL.md**
@@ -140,7 +101,7 @@ Validate frontmatter YAML is parseable:
 ```bash
 python -c "
 import yaml
-with open('C:/Work/github/openclaw/skills/cooagents-workflow/SKILL.md') as f:
+with open('skills/cooagents-workflow/SKILL.md') as f:
     content = f.read()
 parts = content.split('---', 2)
 fm = yaml.safe_load(parts[1])
@@ -158,9 +119,8 @@ Expected: `Frontmatter OK` and body line count ~120-150.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd "C:/Work/github/openclaw"
 git add skills/cooagents-workflow/SKILL.md
-git commit -m "feat: add cooagents-workflow skill — project manager for 15-stage workflow"
+git commit -m "feat: add cooagents-workflow SKILL.md for OpenClaw agent integration"
 ```
 
 ---
@@ -168,7 +128,7 @@ git commit -m "feat: add cooagents-workflow skill — project manager for 15-sta
 ### Task 3: Create `references/api-playbook.md`
 
 **Files:**
-- Create: `C:\Work\github\openclaw\skills\cooagents-workflow\references\api-playbook.md`
+- Create: `skills/cooagents-workflow/references/api-playbook.md`
 
 Organized by 8 operation scenarios per spec section 6.1. Each scenario includes: preconditions, complete `curl` commands, expected response JSON.
 
@@ -206,11 +166,9 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/tick
 
 All commands must use full URLs with `http://127.0.0.1:8321` prefix.
 
-- [ ] **Step 2: Verify file exists and commit**
+- [ ] **Step 2: Commit**
 
 ```bash
-ls -la "C:/Work/github/openclaw/skills/cooagents-workflow/references/api-playbook.md"
-cd "C:/Work/github/openclaw"
 git add skills/cooagents-workflow/references/api-playbook.md
 git commit -m "docs: add api-playbook reference for cooagents-workflow skill"
 ```
@@ -220,7 +178,7 @@ git commit -m "docs: add api-playbook reference for cooagents-workflow skill"
 ### Task 4: Create `references/error-handling.md`
 
 **Files:**
-- Create: `C:\Work\github\openclaw\skills\cooagents-workflow\references\error-handling.md`
+- Create: `skills/cooagents-workflow/references/error-handling.md`
 
 Defines autonomous error-handling rules per spec section 6.2.
 
@@ -243,11 +201,9 @@ Add sections:
 - **Escalation reply format**: Use the escalation template from `feishu-interaction.md`
 - **curl error detection**: Check HTTP status code from curl output (use `curl -s -o /dev/null -w "%{http_code}"` pattern)
 
-- [ ] **Step 2: Verify file exists and commit**
+- [ ] **Step 2: Commit**
 
 ```bash
-ls -la "C:/Work/github/openclaw/skills/cooagents-workflow/references/error-handling.md"
-cd "C:/Work/github/openclaw"
 git add skills/cooagents-workflow/references/error-handling.md
 git commit -m "docs: add error-handling reference for cooagents-workflow skill"
 ```
@@ -257,7 +213,7 @@ git commit -m "docs: add error-handling reference for cooagents-workflow skill"
 ### Task 5: Create `references/feishu-interaction.md`
 
 **Files:**
-- Create: `C:\Work\github\openclaw\skills\cooagents-workflow\references\feishu-interaction.md`
+- Create: `skills/cooagents-workflow/references/feishu-interaction.md`
 
 Three message template types per spec section 6.3. Clarify that these are **plain text reply templates** — the Agent formats its normal conversation reply using these templates. No feishu API calls needed.
 
@@ -304,27 +260,107 @@ Add guidance:
 - MERGED / run.completed → use status notification template
 - Gate approval/rejection → use status notification for confirmation
 
-- [ ] **Step 2: Verify file exists and commit**
+- [ ] **Step 2: Commit**
 
 ```bash
-ls -la "C:/Work/github/openclaw/skills/cooagents-workflow/references/feishu-interaction.md"
-cd "C:/Work/github/openclaw"
 git add skills/cooagents-workflow/references/feishu-interaction.md
 git commit -m "docs: add feishu-interaction reference for cooagents-workflow skill"
 ```
 
 ---
 
-### Task 6: Rewrite `docs/PROCESS.md`
+### Task 6: Add OpenClaw config + skill deployer
 
 **Files:**
-- Modify: `C:\Work\codex\cooagents\docs\PROCESS.md`
+- Modify: `config/settings.yaml` (add `openclaw` section)
+- Modify: `src/config.py` (add `OpenclawConfig` Pydantic model)
+- Create: `src/skill_deployer.py`
+- Create: `tests/test_skill_deployer.py`
 
-Complete rewrite per spec section 7. Delete all tmux/cron/flock/old-state-name references. The current content is 55 lines of outdated material.
+This task adds the deployment mechanism that copies skill files to OpenClaw on startup.
+
+- [ ] **Step 1: Add `openclaw` section to settings.yaml**
+
+```yaml
+openclaw:
+  deploy_skills: true
+  targets:
+    - type: local
+      skills_dir: "~/.openclaw/skills"
+```
+
+- [ ] **Step 2: Add Pydantic models to config.py**
+
+```python
+class OpenclawTarget(BaseModel):
+    type: str = "local"              # "local" or "ssh"
+    skills_dir: str = "~/.openclaw/skills"
+    host: str | None = None          # SSH only
+    port: int = 22                   # SSH only
+    user: str | None = None          # SSH only
+    key: str | None = None           # SSH only
+
+class OpenclawConfig(BaseModel):
+    deploy_skills: bool = True
+    targets: list[OpenclawTarget] = []
+```
+
+Add `openclaw: OpenclawConfig = OpenclawConfig()` to `Settings`.
+
+- [ ] **Step 3: Write `src/skill_deployer.py`**
+
+Responsibilities:
+- Scan `ROOT / "skills"` for skill directories (containing `SKILL.md`)
+- For each configured target:
+  - `local`: `shutil.copytree` with `dirs_exist_ok=True` to `{skills_dir}/{skill_name}/`
+  - `ssh`: Use `asyncssh` + SFTP to upload skill directory
+- Return `list[DeployResult]` with target, skill name, success/error
+- Log results at INFO level
+
+Key details:
+- Expand `~` in `skills_dir` paths
+- Create target directory if it doesn't exist
+- Overwrite existing files (skill updates)
+- SSH targets reuse the asyncssh patterns from `host_manager.py`
+
+- [ ] **Step 4: Write tests**
+
+Test cases:
+- `test_deploy_local_copies_files` — verify files are copied to a temp dir
+- `test_deploy_local_creates_dir` — verify target dir is created if missing
+- `test_deploy_local_overwrites` — verify existing files are replaced
+- `test_deploy_disabled` — verify no-op when `deploy_skills: false`
+- `test_deploy_no_targets` — verify graceful handling of empty targets list
+
+Use `tmp_path` fixture, mock `ROOT / "skills"` with test skill files.
+
+- [ ] **Step 5: Run tests**
+
+```bash
+python -m pytest tests/test_skill_deployer.py -v
+```
+
+Expected: all pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add config/settings.yaml src/config.py src/skill_deployer.py tests/test_skill_deployer.py
+git commit -m "feat: add skill deployer to sync cooagents skills to OpenClaw on startup"
+```
+
+---
+
+### Task 7: Rewrite `docs/PROCESS.md`
+
+**Files:**
+- Modify: `docs/PROCESS.md`
+
+Complete rewrite per spec section 8. Delete all tmux/cron/flock/old-state-name references. The current content is 55 lines of outdated material.
 
 - [ ] **Step 1: Write the new PROCESS.md**
 
-Structure per spec section 7 (6 sections):
+Structure per spec section 8 (6 sections):
 
 **1. Overview** — OpenClaw (requirements management) + Claude Code (design) + Codex (development) three-role collaboration. Reference README for architecture diagrams.
 
@@ -371,29 +407,32 @@ git commit -m "docs: rewrite PROCESS.md to reflect acpx + 15-stage architecture"
 
 ---
 
-### Task 7: Verify end-to-end
+### Task 8: Verify end-to-end
 
 - [ ] **Step 1: Validate all new files exist and are well-formed**
 
 ```bash
-# Check OpenClaw skill files
-ls -la "C:/Work/github/openclaw/skills/cooagents-workflow/SKILL.md"
-ls -la "C:/Work/github/openclaw/skills/cooagents-workflow/references/api-playbook.md"
-ls -la "C:/Work/github/openclaw/skills/cooagents-workflow/references/error-handling.md"
-ls -la "C:/Work/github/openclaw/skills/cooagents-workflow/references/feishu-interaction.md"
+# Check skill files in cooagents project
+ls -la skills/cooagents-workflow/SKILL.md
+ls -la skills/cooagents-workflow/references/api-playbook.md
+ls -la skills/cooagents-workflow/references/error-handling.md
+ls -la skills/cooagents-workflow/references/feishu-interaction.md
 
-# Check cooagents docs
+# Check deployer module
+ls -la src/skill_deployer.py
+
+# Check API reference
 python -c "import json; t=json.load(open('docs/openclaw-tools.json')); print(f'{len(t[\"tools\"])} tools'); assert any(x['name']=='tick_task' for x in t['tools']), 'tick missing'"
 ```
 
-Expected: 4 files exist, 12 tools, tick present.
+Expected: 4 skill files exist, deployer exists, 12 tools, tick present.
 
 - [ ] **Step 2: Validate SKILL.md frontmatter**
 
 ```bash
 python -c "
 import yaml
-with open('C:/Work/github/openclaw/skills/cooagents-workflow/SKILL.md') as f:
+with open('skills/cooagents-workflow/SKILL.md') as f:
     content = f.read()
 parts = content.split('---', 2)
 fm = yaml.safe_load(parts[1])
@@ -409,7 +448,7 @@ print('All validations passed')
 
 ```bash
 python -c "
-with open('C:/Work/github/openclaw/skills/cooagents-workflow/SKILL.md') as f:
+with open('skills/cooagents-workflow/SKILL.md') as f:
     content = f.read()
 # Should contain curl references
 assert 'curl' in content, 'Missing curl references'
@@ -422,7 +461,15 @@ print('No function-call patterns found — exec+curl only')
 "
 ```
 
-- [ ] **Step 4: Check no stale references remain in PROCESS.md**
+- [ ] **Step 4: Run deployer tests**
+
+```bash
+python -m pytest tests/test_skill_deployer.py -v
+```
+
+Expected: all pass.
+
+- [ ] **Step 5: Check no stale references remain in PROCESS.md**
 
 ```bash
 python -c "
@@ -439,10 +486,10 @@ else:
 
 Expected: `No stale references found`
 
-- [ ] **Step 5: Line count check on SKILL.md**
+- [ ] **Step 6: Line count check on SKILL.md**
 
 ```bash
-wc -l "C:/Work/github/openclaw/skills/cooagents-workflow/SKILL.md"
+wc -l skills/cooagents-workflow/SKILL.md
 ```
 
 Expected: 120-180 lines (target ~150)
