@@ -1,0 +1,554 @@
+"""
+Core workflow state machine for cooagents.
+
+Manages the 15-stage workflow lifecycle:
+INIT → REQ_COLLECTING → REQ_REVIEW → DESIGN_QUEUED → DESIGN_DISPATCHED
+→ DESIGN_RUNNING → DESIGN_REVIEW → DEV_QUEUED → DEV_DISPATCHED
+→ DEV_RUNNING → DEV_REVIEW → MERGE_QUEUED → MERGING → MERGED/MERGE_CONFLICT → FAILED
+"""
+from __future__ import annotations
+
+import json
+import os
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from src.exceptions import ConflictError, NotFoundError
+
+GATE_STAGES = {"req": "REQ_REVIEW", "design": "DESIGN_REVIEW", "dev": "DEV_REVIEW"}
+REJECT_TARGETS = {"req": "REQ_COLLECTING", "design": "DESIGN_QUEUED", "dev": "DEV_QUEUED"}
+
+
+class StateMachine:
+    """Orchestrates state transitions for a cooagents workflow run.
+
+    Parameters
+    ----------
+    db:
+        Async database wrapper (``src.database.Database``).
+    artifact_manager:
+        ``src.artifact_manager.ArtifactManager`` instance.
+    host_manager:
+        Object with ``select_host(agent_type, preferred_host=None)`` coroutine.
+    agent_executor:
+        Object with ``dispatch(run_id, host, agent_type, task_file, worktree,
+        timeout_sec)`` coroutine.
+    webhook_notifier:
+        Object with ``notify(event_type, payload)`` coroutine.
+    merge_manager:
+        Optional merge manager with ``enqueue`` / ``get_status`` coroutines.
+    coop_dir:
+        Directory where run state snapshots and task files are stored.
+    ensure_worktree_fn:
+        Optional override for ``src.git_utils.ensure_worktree``. Useful for
+        testing without a real git repository.  When *None* (default), the
+        real implementation is imported lazily on first use.
+    """
+
+    def __init__(
+        self,
+        db,
+        artifact_manager,
+        host_manager,
+        agent_executor,
+        webhook_notifier,
+        merge_manager=None,
+        coop_dir: str = ".coop",
+        ensure_worktree_fn=None,
+        config=None,
+        job_manager=None,
+    ):
+        self.db = db
+        self.artifacts = artifact_manager
+        self.hosts = host_manager
+        self.executor = agent_executor
+        self.webhooks = webhook_notifier
+        self.merge = merge_manager
+        self.coop_dir = coop_dir
+        self._ensure_worktree = ensure_worktree_fn
+        self._config = config
+        self.jobs = job_manager
+        self._design_max_turns = 3
+        self._dev_max_turns = 5
+        if config:
+            self._design_max_turns = getattr(getattr(config, 'turns', None), 'design_max_turns', 3)
+            self._dev_max_turns = getattr(getattr(config, 'turns', None), 'dev_max_turns', 5)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def create_run(
+        self,
+        ticket: str,
+        repo_path: str,
+        description: str | None = None,
+        preferences: dict | None = None,
+    ) -> dict:
+        """Create a new workflow run and advance it to REQ_COLLECTING.
+
+        Returns the run dict (possibly with a ``warning`` key if a duplicate
+        active run already exists for the same ticket).
+        """
+        run_id = f"run-{uuid.uuid4().hex[:12]}"
+        now = datetime.now(timezone.utc).isoformat()
+        prefs = json.dumps(preferences) if preferences else None
+
+        # Warn (but don't block) on duplicate active ticket
+        existing = await self.db.fetchone(
+            "SELECT id FROM runs WHERE ticket=? AND status='running'", (ticket,)
+        )
+        warning = f"Active run already exists for ticket {ticket}" if existing else None
+
+        await self.db.execute(
+            "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
+            "description,preferences_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (run_id, ticket, repo_path, "running", "INIT", description, prefs, now, now),
+        )
+        await self._update_stage(run_id, "INIT", "REQ_COLLECTING")
+        run = await self._get_run(run_id)
+        if warning:
+            run["warning"] = warning
+        return run
+
+    async def tick(self, run_id: str) -> dict:
+        """Advance the run one step if there is an automatic transition available.
+
+        Idempotent: review/waiting stages are no-ops.
+        """
+        run = await self._get_run(run_id)
+        if run["status"] != "running":
+            return run
+
+        handler = {
+            "REQ_COLLECTING": self._tick_req_collecting,
+            "REQ_REVIEW": self._tick_review,        # no-op, waits for approve/reject
+            "DESIGN_QUEUED": self._tick_design_queued,
+            "DESIGN_DISPATCHED": self._tick_design_dispatched,
+            "DESIGN_RUNNING": self._tick_design_running,
+            "DESIGN_REVIEW": self._tick_review,
+            "DEV_QUEUED": self._tick_dev_queued,
+            "DEV_DISPATCHED": self._tick_dev_dispatched,
+            "DEV_RUNNING": self._tick_dev_running,
+            "DEV_REVIEW": self._tick_review,
+            "MERGE_QUEUED": self._tick_merge_queued,
+            "MERGING": self._tick_merging,
+            "MERGE_CONFLICT": self._tick_review,    # waits for manual intervention
+        }.get(run["current_stage"])
+
+        if handler:
+            await handler(run)
+        return await self._get_run(run_id)
+
+    async def approve(
+        self,
+        run_id: str,
+        gate: str,
+        by: str,
+        comment: str | None = None,
+    ) -> dict:
+        """Approve a gate and advance to the next stage.
+
+        Raises
+        ------
+        ConflictError
+            If the run is not in the expected stage for the given gate.
+        """
+        run = await self._get_run(run_id)
+        expected = GATE_STAGES.get(gate)
+        if run["current_stage"] != expected:
+            raise ConflictError(
+                f"Cannot approve {gate}: run is in {run['current_stage']}, "
+                f"expected {expected}",
+                run["current_stage"],
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "INSERT INTO approvals(run_id,gate,decision,by,comment,created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (run_id, gate, "approved", by, comment, now),
+        )
+        await self._emit(run_id, "gate.approved", {"gate": gate, "by": by})
+
+        next_stages = {"req": "DESIGN_QUEUED", "design": "DEV_QUEUED", "dev": "MERGE_QUEUED"}
+        await self._update_stage(run_id, run["current_stage"], next_stages[gate])
+        return await self._get_run(run_id)
+
+    async def reject(
+        self,
+        run_id: str,
+        gate: str,
+        by: str,
+        reason: str,
+    ) -> dict:
+        """Reject a gate and revert to the previous collection/queued stage.
+
+        Raises
+        ------
+        ConflictError
+            If the run is not in the expected stage for the given gate.
+        """
+        run = await self._get_run(run_id)
+        expected = GATE_STAGES.get(gate)
+        if run["current_stage"] != expected:
+            raise ConflictError(
+                f"Cannot reject {gate}: wrong stage",
+                run["current_stage"],
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "INSERT INTO approvals(run_id,gate,decision,by,comment,created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (run_id, gate, "rejected", by, reason, now),
+        )
+        await self._emit(run_id, "gate.rejected", {"gate": gate, "by": by, "reason": reason})
+        target = REJECT_TARGETS[gate]
+        await self._update_stage(run_id, run["current_stage"], target)
+        return await self._get_run(run_id)
+
+    async def retry(self, run_id: str, by: str, note: str | None = None) -> dict:
+        """Retry a failed run, restoring it to the stage where it failed.
+
+        Raises
+        ------
+        ConflictError
+            If the run is not in ``failed`` status.
+        """
+        run = await self._get_run(run_id)
+        if run["status"] != "failed":
+            raise ConflictError("Can only retry failed runs", run["current_stage"])
+
+        restore_stage = run.get("failed_at_stage") or "INIT"
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE runs SET status='running', current_stage=?, updated_at=? WHERE id=?",
+            (restore_stage, now, run_id),
+        )
+        await self._emit(run_id, "run.retried", {"by": by, "note": note, "restored_to": restore_stage})
+        return await self._get_run(run_id)
+
+    async def cancel(self, run_id: str, cleanup: bool = False) -> dict:
+        """Cancel a run (any status → cancelled)."""
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE runs SET status='cancelled', updated_at=? WHERE id=?",
+            (now, run_id),
+        )
+        await self._emit(run_id, "run.cancelled", {})
+        return await self._get_run(run_id)
+
+    async def submit_requirement(self, run_id: str, content: str) -> dict:
+        """Write requirement content to disk, register as artifact, and advance stage.
+
+        Raises
+        ------
+        ConflictError
+            If the run is not in REQ_COLLECTING.
+        """
+        run = await self._get_run(run_id)
+        if run["current_stage"] != "REQ_COLLECTING":
+            raise ConflictError(
+                "Can only submit requirement in REQ_COLLECTING",
+                run["current_stage"],
+            )
+
+        # Write requirement file into the repo
+        req_dir = Path(run["repo_path"]) / "docs" / "req"
+        req_dir.mkdir(parents=True, exist_ok=True)
+        req_path = req_dir / f"REQ-{run['ticket']}.md"
+        req_path.write_text(content, encoding="utf-8")
+
+        # Register artifact and advance stage
+        await self.artifacts.register(run_id, "req", str(req_path), "REQ_COLLECTING")
+        await self._update_stage(run_id, "REQ_COLLECTING", "REQ_REVIEW")
+        await self._emit(run_id, "requirement.submitted", {"path": str(req_path)})
+        return await self._get_run(run_id)
+
+    # ------------------------------------------------------------------
+    # Tick handlers (private)
+    # ------------------------------------------------------------------
+
+    async def _tick_req_collecting(self, run: dict) -> None:
+        """No-op: waits for :meth:`submit_requirement`."""
+
+    async def _tick_review(self, run: dict) -> None:
+        """No-op: waits for :meth:`approve` or :meth:`reject`."""
+
+    async def _tick_design_queued(self, run: dict) -> None:
+        """Try to dispatch the design agent job if a host is available."""
+        host = await self.hosts.select_host("claude")
+        if not host:
+            return
+
+        branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "design")
+
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE runs SET design_worktree=?, design_branch=?, updated_at=? WHERE id=?",
+            (wt, branch, now, run["id"]),
+        )
+
+        task_path = os.path.join(self.coop_dir, "runs", run["id"], "TASK-design.md")
+        os.makedirs(os.path.dirname(task_path), exist_ok=True)
+
+        template = "templates/INIT-design.md"
+
+        await self.artifacts.render_task(
+            template,
+            {
+                "run_id": run["id"],
+                "ticket": run["ticket"],
+                "repo_path": run["repo_path"],
+                "worktree": wt,
+                "req_path": f"docs/req/REQ-{run['ticket']}.md",
+            },
+            task_path,
+        )
+
+        if hasattr(self.executor, 'start_session'):
+            await self.executor.start_session(run["id"], host, "claude", task_path, wt, 1800)
+        else:
+            await self.executor.dispatch(run["id"], host, "claude", task_path, wt, 1800)
+        await self._update_stage(run["id"], "DESIGN_QUEUED", "DESIGN_DISPATCHED")
+
+    async def _tick_design_dispatched(self, run: dict) -> None:
+        """Advance to DESIGN_RUNNING once the agent job reports as running."""
+        job = await self.db.fetchone(
+            "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+            (run["id"],),
+        )
+        if job and job["status"] == "running":
+            await self._update_stage(run["id"], "DESIGN_DISPATCHED", "DESIGN_RUNNING")
+
+    async def _tick_design_running(self, run: dict) -> None:
+        """Check design job result, evaluate, and either advance or request revision."""
+        job = await self.db.fetchone(
+            "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+            (run["id"],),
+        )
+        if not job or job["status"] != "completed":
+            return
+
+        turn = job.get("turn_count") or 1
+        wt = run.get("design_worktree", "")
+
+        await self.artifacts.scan_and_register(run["id"], run["ticket"], "DESIGN_RUNNING", wt)
+        all_artifacts = await self.artifacts.get_by_run(run["id"])
+        verdict, detail = self._evaluate_design(all_artifacts, job)
+
+        if verdict == "accept" or turn >= self._design_max_turns:
+            await self.artifacts.submit_all(run["id"], "DESIGN_RUNNING")
+            if hasattr(self.executor, 'close_session'):
+                await self.executor.close_session(run["id"], "claude")
+            await self._update_stage(run["id"], "DESIGN_RUNNING", "DESIGN_REVIEW")
+        elif verdict == "revise":
+            revision_path = os.path.join(self.coop_dir, "runs", run["id"], f"TURN-revision-{turn+1}.md")
+            os.makedirs(os.path.dirname(revision_path), exist_ok=True)
+            await self.artifacts.render_task(
+                "templates/TURN-revision.md",
+                {"turn": turn + 1, "feedback": detail, "ticket": run["ticket"],
+                 "missing_artifacts": []},
+                revision_path,
+            )
+            await self._emit(run["id"], "turn.completed", {"turn_num": turn, "verdict": verdict, "detail": detail})
+            if hasattr(self.executor, 'send_followup'):
+                await self._emit(run["id"], "turn.started", {"turn_num": turn + 1, "agent_type": "claude"})
+                if self.jobs:
+                    await self.jobs.increment_turn(job["id"])
+                    await self.jobs.record_turn(job["id"], turn, revision_path, verdict, detail)
+                await self.executor.send_followup(run["id"], "claude", revision_path, wt, 1800)
+
+    async def _tick_dev_queued(self, run: dict) -> None:
+        """Try to dispatch the dev agent job if a host is available."""
+        host = await self.hosts.select_host("codex")
+        if not host:
+            return
+
+        branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "dev")
+
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE runs SET dev_worktree=?, dev_branch=?, updated_at=? WHERE id=?",
+            (wt, branch, now, run["id"]),
+        )
+
+        task_path = os.path.join(self.coop_dir, "runs", run["id"], "TASK-dev.md")
+        os.makedirs(os.path.dirname(task_path), exist_ok=True)
+        design_arts = await self.artifacts.get_by_run(run["id"], kind="design", status="approved")
+        design_path = design_arts[0]["path"] if design_arts else ""
+
+        template = "templates/INIT-dev.md"
+
+        await self.artifacts.render_task(
+            template,
+            {
+                "run_id": run["id"],
+                "ticket": run["ticket"],
+                "repo_path": run["repo_path"],
+                "worktree": wt,
+                "design_path": design_path,
+            },
+            task_path,
+        )
+
+        if hasattr(self.executor, 'start_session'):
+            await self.executor.start_session(run["id"], host, "codex", task_path, wt, 3600)
+        else:
+            await self.executor.dispatch(run["id"], host, "codex", task_path, wt, 3600)
+        await self._update_stage(run["id"], "DEV_QUEUED", "DEV_DISPATCHED")
+
+    async def _tick_dev_dispatched(self, run: dict) -> None:
+        """Advance to DEV_RUNNING once the dev job reports as running."""
+        job = await self.db.fetchone(
+            "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+            (run["id"],),
+        )
+        if job and job["status"] == "running":
+            await self._update_stage(run["id"], "DEV_DISPATCHED", "DEV_RUNNING")
+
+    async def _tick_dev_running(self, run: dict) -> None:
+        """Check dev job result, evaluate, and either advance or request revision."""
+        job = await self.db.fetchone(
+            "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+            (run["id"],),
+        )
+        if not job or job["status"] != "completed":
+            return
+
+        turn = job.get("turn_count") or 1
+        wt = run.get("dev_worktree", "")
+
+        await self.artifacts.scan_and_register(run["id"], run["ticket"], "DEV_RUNNING", wt)
+        all_artifacts = await self.artifacts.get_by_run(run["id"])
+        verdict, detail = self._evaluate_dev(all_artifacts, job, wt)
+
+        if verdict == "accept" or turn >= self._dev_max_turns:
+            await self.artifacts.submit_all(run["id"], "DEV_RUNNING")
+            if hasattr(self.executor, 'close_session'):
+                await self.executor.close_session(run["id"], "codex")
+            await self._update_stage(run["id"], "DEV_RUNNING", "DEV_REVIEW")
+        elif verdict == "revise":
+            revision_path = os.path.join(self.coop_dir, "runs", run["id"], f"TURN-dev-fix-{turn+1}.md")
+            os.makedirs(os.path.dirname(revision_path), exist_ok=True)
+            await self.artifacts.render_task(
+                "templates/TURN-dev-fix.md",
+                {"turn": turn + 1, "feedback": detail, "ticket": run["ticket"],
+                 "test_failures": []},
+                revision_path,
+            )
+            await self._emit(run["id"], "turn.completed", {"turn_num": turn, "verdict": verdict, "detail": detail})
+            if hasattr(self.executor, 'send_followup'):
+                await self._emit(run["id"], "turn.started", {"turn_num": turn + 1, "agent_type": "codex"})
+                if self.jobs:
+                    await self.jobs.increment_turn(job["id"])
+                    await self.jobs.record_turn(job["id"], turn, revision_path, verdict, detail)
+                await self.executor.send_followup(run["id"], "codex", revision_path, wt, 3600)
+
+    async def _tick_merge_queued(self, run: dict) -> None:
+        """Enqueue merge and advance to MERGING."""
+        if self.merge:
+            await self.merge.enqueue(run["id"], run.get("dev_branch", ""), priority=0)
+            await self._update_stage(run["id"], "MERGE_QUEUED", "MERGING")
+
+    async def _tick_merging(self, run: dict) -> None:
+        """Check merge result and advance to MERGED or MERGE_CONFLICT."""
+        if self.merge:
+            status = await self.merge.get_status(run["id"])
+            if status == "merged":
+                now = datetime.now(timezone.utc).isoformat()
+                await self.db.execute(
+                    "UPDATE runs SET status='completed', current_stage='MERGED', "
+                    "updated_at=? WHERE id=?",
+                    (now, run["id"]),
+                )
+                await self._emit(run["id"], "run.completed", {})
+            elif status == "conflict":
+                await self._update_stage(run["id"], "MERGING", "MERGE_CONFLICT")
+
+    # ------------------------------------------------------------------
+    # Evaluators
+    # ------------------------------------------------------------------
+
+    def _evaluate_design(self, artifacts, job=None) -> tuple[str, str]:
+        has_design = any(a["kind"] == "design" for a in artifacts)
+        has_adr = any(a["kind"] == "adr" for a in artifacts)
+        if not has_design:
+            return ("revise", "未生成设计文档 DES-{ticket}.md")
+        if not has_adr:
+            return ("revise", "未生成架构决策记录 ADR-{ticket}.md")
+        return ("accept", "")
+
+    def _evaluate_dev(self, artifacts, job=None, worktree=None) -> tuple[str, str]:
+        has_test_report = any(a["kind"] == "test-report" for a in artifacts)
+        if not has_test_report:
+            return ("revise", "未生成测试报告 TEST-REPORT-{ticket}.md")
+        return ("accept", "")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    async def _resolve_worktree(
+        self, repo_path: str, ticket: str, phase: str
+    ) -> tuple[str, str]:
+        """Return ``(branch, worktree_path)`` using the injected or real implementation."""
+        if self._ensure_worktree is not None:
+            return await self._ensure_worktree(repo_path, ticket, phase)
+        from src.git_utils import ensure_worktree
+        return await ensure_worktree(repo_path, ticket, phase)
+
+    async def _get_run(self, run_id: str) -> dict:
+        """Fetch a run row or raise NotFoundError.
+
+        The DB column is ``id`` but callers (and tests) expect ``run_id`` as
+        well, so both keys are present in the returned dict.
+        """
+        run = await self.db.fetchone("SELECT * FROM runs WHERE id=?", (run_id,))
+        if not run:
+            raise NotFoundError(f"Run {run_id} not found")
+        row = dict(run)
+        # Expose ``run_id`` as a convenience alias for the ``id`` column so
+        # that API response dicts and test assertions can use the friendlier name.
+        row.setdefault("run_id", row["id"])
+        return row
+
+    async def _update_stage(
+        self,
+        run_id: str,
+        from_stage: str,
+        to_stage: str,
+        **extra,
+    ) -> None:
+        """Persist a stage transition, record a step row, emit an event, and snapshot."""
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE runs SET current_stage=?, updated_at=? WHERE id=?",
+            (to_stage, now, run_id),
+        )
+        await self.db.execute(
+            "INSERT INTO steps(run_id,from_stage,to_stage,triggered_by,created_at) "
+            "VALUES(?,?,?,?,?)",
+            (run_id, from_stage, to_stage, "system", now),
+        )
+        await self._emit(run_id, "stage.changed", {"from": from_stage, "to": to_stage, **extra})
+        await self._snapshot(run_id)
+
+    async def _emit(self, run_id: str, event_type: str, payload: dict | None = None) -> None:
+        """Persist an event row and fire the webhook notifier."""
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+            (run_id, event_type, json.dumps(payload) if payload else None, now),
+        )
+        if self.webhooks:
+            await self.webhooks.notify(event_type, {"run_id": run_id, **(payload or {})})
+
+    async def _snapshot(self, run_id: str) -> None:
+        """Write a JSON snapshot of the current run state to disk."""
+        run = await self._get_run(run_id)
+        snap_dir = Path(self.coop_dir) / "runs" / run_id
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        (snap_dir / "state.json").write_text(json.dumps(run, indent=2), encoding="utf-8")

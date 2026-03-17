@@ -1,0 +1,12 @@
+hosts: []
+# Example:
+# - id: local-pc
+#   host: local
+#   agent_type: both
+#   max_concurrent: 2
+# - id: dev-server
+#   host: dev@10.0.0.5
+#   agent_type: codex
+#   max_concurrent: 4
+#   ssh_key: ~/.ssh/id_rsa
+#   labels: [fast]

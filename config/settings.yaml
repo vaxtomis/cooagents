@@ -1,0 +1,29 @@
+server:
+  host: "127.0.0.1"
+  port: 8321
+
+database:
+  path: ".coop/state.db"
+
+timeouts:
+  dispatch_startup: 300
+  design_execution: 1800
+  dev_execution: 3600
+  review_reminder: 86400
+
+health_check:
+  interval: 60
+  ssh_timeout: 5
+
+merge:
+  auto_rebase: true
+  max_resume_count: 3
+
+acpx:
+  permission_mode: "approve-all"
+  default_format: "json"
+  ttl: 600
+
+turns:
+  design_max_turns: 3
+  dev_max_turns: 5
