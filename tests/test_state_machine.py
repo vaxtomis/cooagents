@@ -461,3 +461,53 @@ async def test_dev_dispatched_transitions_to_failed_on_job_failure(sm, db, mocks
     result = await sm.tick(rid)
     assert result["current_stage"] == "FAILED"
     assert result["status"] == "failed"
+
+
+async def test_design_dispatched_reconciles_dead_running_session_to_failed(sm, db, mocks, tmp_path):
+    """DESIGN_DISPATCHED should fail when DB says running but ACP session is dead."""
+    _, executor, _, _ = mocks
+    executor.get_session_status = AsyncMock(return_value={"status": "dead", "summary": "queue owner unavailable"})
+
+    run = await sm.create_run("T-DES-DEAD", str(tmp_path))
+    rid = run["id"]
+    await db.execute("UPDATE runs SET current_stage='DESIGN_DISPATCHED' WHERE id=?", (rid,))
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,session_name,worktree,started_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("job-des-dead", rid, "local", "claude", "DESIGN_DISPATCHED", "running", "run-des-dead-design", str(tmp_path), now),
+    )
+
+    result = await sm.tick(rid)
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-des-dead",))
+
+    assert result["current_stage"] == "FAILED"
+    assert result["status"] == "failed"
+    assert job["status"] == "interrupted"
+    assert job["ended_at"] is not None
+
+
+async def test_dev_running_reconciles_missing_running_session_to_failed(sm, db, mocks, tmp_path):
+    """DEV_RUNNING should fail when DB says running but ACP session cannot be found."""
+    _, executor, _, _ = mocks
+    executor.get_session_status = AsyncMock(return_value=None)
+
+    run = await sm.create_run("T-DEV-MISSING", str(tmp_path))
+    rid = run["id"]
+    await db.execute("UPDATE runs SET current_stage='DEV_RUNNING' WHERE id=?", (rid,))
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,session_name,worktree,started_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("job-dev-missing", rid, "local", "codex", "DEV_RUNNING", "running", "run-dev-missing-dev", str(tmp_path), now),
+    )
+
+    result = await sm.tick(rid)
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-dev-missing",))
+
+    assert result["current_stage"] == "FAILED"
+    assert result["status"] == "failed"
+    assert job["status"] == "interrupted"
+    assert job["ended_at"] is not None

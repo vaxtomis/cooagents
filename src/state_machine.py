@@ -373,6 +373,7 @@ class StateMachine:
         )
         if not job:
             return
+        job = await self._reconcile_job_session(run, dict(job))
         if job["status"] in ("failed", "timeout", "interrupted"):
             await self._transition_to_failed(run, job)
             return
@@ -387,6 +388,7 @@ class StateMachine:
         )
         if not job:
             return
+        job = await self._reconcile_job_session(run, dict(job))
         if job["status"] in ("failed", "timeout", "interrupted"):
             await self._transition_to_failed(run, job)
             return
@@ -482,6 +484,7 @@ class StateMachine:
         )
         if not job:
             return
+        job = await self._reconcile_job_session(run, dict(job))
         if job["status"] in ("failed", "timeout", "interrupted"):
             await self._transition_to_failed(run, job)
             return
@@ -496,6 +499,7 @@ class StateMachine:
         )
         if not job:
             return
+        job = await self._reconcile_job_session(run, dict(job))
         if job["status"] in ("failed", "timeout", "interrupted"):
             await self._transition_to_failed(run, job)
             return
@@ -628,6 +632,27 @@ class StateMachine:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
         return target.relative_to(Path(worktree)).as_posix()
+
+    async def _reconcile_job_session(self, run: dict, job: dict) -> dict:
+        if job["status"] != "running" or not hasattr(self.executor, "get_session_status"):
+            return job
+
+        host = None
+        if job.get("host_id"):
+            host = await self.db.fetchone("SELECT * FROM agent_hosts WHERE id=?", (job["host_id"],))
+            if host:
+                host = dict(host)
+
+        status = await self.executor.get_session_status(run["id"], job["agent_type"], host=host)
+        if status and status.get("status") == "running":
+            return job
+
+        now = datetime.now(timezone.utc).isoformat()
+        await self.jobs.update_status(job["id"], "interrupted", ended_at=now)
+        reason = status.get("status") if status else "missing"
+        await self._emit(run["id"], "job.interrupted", {"job_id": job["id"], "reason": reason})
+        updated = await self.db.fetchone("SELECT * FROM jobs WHERE id=?", (job["id"],))
+        return dict(updated) if updated else {**job, "status": "interrupted", "ended_at": now}
 
     async def _update_stage(
         self,
