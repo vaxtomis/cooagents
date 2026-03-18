@@ -78,17 +78,18 @@ flowchart TB
 
 - Python 3.11+
 - git
-- `acpx` CLI（acpx 可自动适配 `claude` / `codex` 后端）
+- Node.js（用于安装 acpx）
+- `acpx` CLI（bootstrap 脚本会自动安装，已有则跳过）
 
 ### 安装
 
 ```bash
 git clone git@github.com:vaxtomis/cooagents.git
 cd cooagents
-scripts/bootstrap.sh
+bash scripts/bootstrap.sh
 ```
 
-bootstrap 脚本会自动完成：检查 Python/git → 安装依赖 → 创建运行目录 → 初始化数据库。
+bootstrap 脚本会自动完成：Python ≥3.11 校验 → git/node 检查 → acpx 安装（已有则跳过）→ venv 创建 + 依赖安装 → 运行目录创建 → 数据库初始化。
 
 ### 启动服务
 
@@ -459,21 +460,21 @@ skills/cooagents-workflow/
 
 ```
 skills/cooagents-setup/
-├── SKILL.md                    # 6 阶段安装流程（注入 Agent prompt）
+├── SKILL.md                    # 4 阶段安装编排（注入 Agent prompt）
 └── references/
     └── troubleshooting.md      # 10 类常见问题排查（按需 Read）
 ```
 
-**安装流程（6 阶段）：**
+Skill 调用 `scripts/bootstrap.sh` 完成环境检查和依赖安装，自身专注于编排和容错：
+
+**安装流程（4 阶段）：**
 
 | 阶段 | 动作 | 成功判定 |
 |------|------|----------|
 | ① 定位代码 | 检查 `repo_path` 或 `git clone` | `src/app.py` 和 `config/settings.yaml` 存在 |
-| ② 检测环境 | `python3 ≥3.11`、`git`、`node` | 三个命令均成功 |
-| ③ 安装 acpx | `npm install -g acpx@latest` | `acpx --version` 成功 |
-| ④ 安装依赖 | venv + `pip install -r requirements.txt` | 退出码 0 |
-| ⑤ 初始化并启动 | 创建 DB、平台相关启动命令 | 进程已启动 |
-| ⑥ 健康检查 | `curl http://127.0.0.1:8321/health` | 返回 `"status": "ok"` |
+| ② 运行 bootstrap | `bash scripts/bootstrap.sh` | 退出码 0 |
+| ③ 启动服务 + 健康检查 | 平台相关启动命令 + 轮询 `/health` | 返回 `"status": "ok"` |
+| ④ 注册 Agent 主机 | `POST /api/v1/agent-hosts` | 本地主机已注册 |
 
 安装完成后自动注册本地 Agent 主机（`agent_type: both`，并发上限 2）。
 
