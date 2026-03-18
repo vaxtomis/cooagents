@@ -1,15 +1,26 @@
 {
   "tools": [
     {
+      "name": "ensure_repo",
+      "description": "确保仓库存在 — 创建任务前必须调用。已有 git 仓库返回 exists，不存在时 clone 或 init",
+      "method": "POST",
+      "endpoint": "/api/v1/repos/ensure",
+      "parameters": {
+        "repo_path": {"type": "string", "description": "本地仓库路径", "required": true},
+        "repo_url": {"type": "string", "description": "远程仓库 URL（可选，提供时 clone）"}
+      }
+    },
+    {
       "name": "create_task",
-      "description": "创建新的工作流任务",
+      "description": "创建新的工作流任务（repo_path 必须是已有的 git 仓库，否则返回 400）",
       "method": "POST",
       "endpoint": "/api/v1/runs",
       "parameters": {
         "ticket": {"type": "string", "description": "任务标识符", "required": true},
         "repo_path": {"type": "string", "description": "代码仓库路径", "required": true},
         "description": {"type": "string", "description": "任务描述"},
-        "preferences": {"type": "object", "description": "偏好设置（如指定主机）"}
+        "preferences": {"type": "object", "description": "偏好设置（如指定主机）"},
+        "repo_url": {"type": "string", "description": "远程仓库 URL（仅记录，不触发 clone）"}
       }
     },
     {

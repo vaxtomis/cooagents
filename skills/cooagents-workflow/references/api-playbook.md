@@ -9,10 +9,18 @@
 **前置条件：** 服务已在 `http://127.0.0.1:8321` 运行。
 
 ```bash
+# 0. 确保仓库存在（创建任务前必须调用）
+curl -s -X POST http://127.0.0.1:8321/api/v1/repos/ensure \
+  -H "Content-Type: application/json" \
+  -d '{"repo_path":"/path/to/repo","repo_url":"git@github.com:user/project.git"}'
+# repo_url 可选：提供时 clone，不提供时 git init
+# Response: {"status":"exists"} / {"status":"cloned"} / {"status":"initialized"}
+
 # 1. 创建任务
 curl -s -X POST http://127.0.0.1:8321/api/v1/runs \
   -H "Content-Type: application/json" \
-  -d '{"ticket":"PROJ-123","repo_path":"/path/to/repo","description":"任务描述"}'
+  -d '{"ticket":"PROJ-123","repo_path":"/path/to/repo","repo_url":"git@github.com:user/project.git","description":"任务描述"}'
+# repo_url 可选，仅做记录；repo_path 必须是已有的 git 仓库，否则返回 400
 # Response: {"id":"<run_id>","current_stage":"INIT",...}
 
 # 2. 提交需求

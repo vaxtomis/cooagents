@@ -36,8 +36,9 @@ metadata:
 ┌─────────────────────┬──────────┬─────────────────────────────────────────┐
 │ 阶段                │ 模式     │ 动作                                    │
 ├─────────────────────┼──────────┼─────────────────────────────────────────┤
-│ (新任务)            │ 自动     │ curl POST /runs → curl POST             │
-│                     │          │ /runs/{id}/submit-requirement → tick    │
+│ (新任务)            │ 自动     │ curl POST /repos/ensure → curl POST     │
+│                     │          │ /runs → /runs/{id}/submit-requirement   │
+│                     │          │ → tick                                  │
 │ INIT（瞬态）        │ 自动     │ curl POST /runs/{id}/tick（注：create   │
 │                     │          │ 自动推进到 REQ_COLLECTING，Agent 几乎    │
 │                     │          │ 不会观察到此阶段）                       │
