@@ -22,6 +22,7 @@ flowchart LR
 - [数据库设计](#数据库设计)
 - [OpenClaw 集成](#openclaw-集成)
   - [cooagents-workflow Skill](#cooagents-workflow-skill)
+  - [cooagents-setup Skill](#cooagents-setup-skill)
   - [API 参考文档](#api-参考文档)
   - [OpenClaw Skill 部署](#openclaw-skill-部署)
 - [测试](#测试)
@@ -452,12 +453,42 @@ skills/cooagents-workflow/
 
 **部署机制：** cooagents 启动时，`src/skill_deployer.py` 自动将 `skills/` 目录同步到 OpenClaw 的托管 skills 目录（默认 `~/.openclaw/skills/`），支持本地复制和 SSH 远程部署。配置见 [OpenClaw Skill 部署](#openclaw-skill-部署)。
 
+### cooagents-setup Skill
+
+项目内置了安装引导 Skill（`skills/cooagents-setup/`），使 OpenClaw Agent 能够**自主完成 cooagents 的安装与启动**，无需人工逐步操作。
+
+```
+skills/cooagents-setup/
+├── SKILL.md                    # 6 阶段安装流程（注入 Agent prompt）
+└── references/
+    └── troubleshooting.md      # 10 类常见问题排查（按需 Read）
+```
+
+**安装流程（6 阶段）：**
+
+| 阶段 | 动作 | 成功判定 |
+|------|------|----------|
+| ① 定位代码 | 检查 `repo_path` 或 `git clone` | `src/app.py` 和 `config/settings.yaml` 存在 |
+| ② 检测环境 | `python3 ≥3.11`、`git`、`node` | 三个命令均成功 |
+| ③ 安装 acpx | `npm install -g acpx@latest` | `acpx --version` 成功 |
+| ④ 安装依赖 | venv + `pip install -r requirements.txt` | 退出码 0 |
+| ⑤ 初始化并启动 | 创建 DB、平台相关启动命令 | 进程已启动 |
+| ⑥ 健康检查 | `curl http://127.0.0.1:8321/health` | 返回 `"status": "ok"` |
+
+安装完成后自动注册本地 Agent 主机（`agent_type: both`，并发上限 2）。
+
+**首次安装（引导问题）：** cooagents-setup Skill 由 cooagents 启动时自动部署到 OpenClaw，但首次安装时 cooagents 尚未运行。解决方式：
+1. **手动放置**：从仓库复制 `skills/cooagents-setup/` 到 `~/.openclaw/skills/cooagents-setup/`，然后调用 `/cooagents-setup`
+2. **从已 clone 的仓库**：告诉 OpenClaw Agent 读取 `{repo_path}/skills/cooagents-setup/SKILL.md` 并按指示操作
+3. **后续自动**：首次安装成功后，cooagents 启动时自动部署 Skill
+
 ### API 参考文档
 
-`docs/openclaw-tools.json` 提供了 12 个函数调用定义，可作为 API 参考：
+`docs/openclaw-tools.json` 提供了 13 个函数调用定义，可作为 API 参考：
 
 | 函数 | 对应 API |
 |------|----------|
+| `ensure_repo` | `POST /api/v1/repos/ensure` |
 | `create_task` | `POST /api/v1/runs` |
 | `list_tasks` | `GET /api/v1/runs` |
 | `get_task_status` | `GET /api/v1/runs/{id}` |
@@ -520,7 +551,7 @@ openclaw:
 2. 对每个目标执行全量同步（先清除旧文件，再复制新文件）
 3. 日志记录部署结果
 
-OpenClaw 发现 Skill 后，Agent 在对话中检测到工作流相关意图时会自动加载 `cooagents-workflow` Skill。用户也可通过 `/cooagents-workflow` 直接调用。
+OpenClaw 发现 Skill 后，Agent 在对话中检测到相关意图时会自动加载对应 Skill。用户也可通过 `/cooagents-workflow` 或 `/cooagents-setup` 直接调用。
 
 ## 测试
 
@@ -566,13 +597,16 @@ cooagents/
 │   └── schema.sql             # 数据库 Schema（10 表）
 ├── docs/
 │   ├── PROCESS.md             # 流程说明
-│   ├── openclaw-tools.json    # OpenClaw API 参考（12 函数）
+│   ├── openclaw-tools.json    # OpenClaw API 参考（13 函数）
 │   ├── design/                # 设计文档模板
 │   └── dev/                   # 开发文档模板
 ├── skills/                    # OpenClaw Skills（启动时部署）
-│   └── cooagents-workflow/
-│       ├── SKILL.md           # 核心决策逻辑
-│       └── references/        # 参考文档（api-playbook, error-handling, feishu-interaction）
+│   ├── cooagents-workflow/
+│   │   ├── SKILL.md           # 核心决策逻辑
+│   │   └── references/        # 参考文档（api-playbook, error-handling, feishu-interaction）
+│   └── cooagents-setup/
+│       ├── SKILL.md           # 6 阶段安装流程
+│       └── references/        # 排查文档（troubleshooting）
 ├── routes/                    # FastAPI 路由
 │   ├── runs.py                # 工作流端点
 │   ├── artifacts.py           # 产物端点
