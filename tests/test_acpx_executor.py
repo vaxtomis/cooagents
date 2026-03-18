@@ -59,9 +59,9 @@ def test_build_prompt_cmd(executor):
     """Without config, prompt cmd has no --ttl/--json-strict/--model."""
     cmd = executor._build_acpx_prompt_cmd("claude", "run-abc-design", "/wt", 1800, "/task.md")
     assert cmd == [
-        "acpx", "claude",
+        "acpx", "--cwd", "/wt",
+        "claude",
         "-s", "run-abc-design",
-        "--cwd", "/wt",
         "--format", "json",
         "--approve-all",
         "--timeout", "1800",
@@ -72,9 +72,9 @@ def test_build_prompt_cmd(executor):
 def test_build_prompt_cmd_codex(executor):
     cmd = executor._build_acpx_prompt_cmd("codex", "run-abc-dev", "/wt", 3600)
     assert cmd == [
-        "acpx", "codex",
+        "acpx", "--cwd", "/wt",
+        "codex",
         "-s", "run-abc-dev",
-        "--cwd", "/wt",
         "--format", "json",
         "--approve-all",
         "--timeout", "3600",
@@ -113,7 +113,7 @@ def test_build_prompt_cmd_codex_no_allowed_tools(executor_with_config):
 
 def test_build_exec_cmd(executor):
     cmd = executor._build_acpx_exec_cmd("claude", "/wt", 60, prompt="summarize")
-    assert cmd[:3] == ["acpx", "claude", "exec"]
+    assert cmd[:4] == ["acpx", "--cwd", "/wt", "claude"]
     assert "--cwd" in cmd
     assert "--approve-all" in cmd
     assert "summarize" in cmd
@@ -122,7 +122,7 @@ def test_build_exec_cmd(executor):
 
 def test_build_exec_cmd_with_file(executor):
     cmd = executor._build_acpx_exec_cmd("codex", "/wt", 120, task_file="/prompt.md")
-    assert cmd[:3] == ["acpx", "codex", "exec"]
+    assert cmd[:4] == ["acpx", "--cwd", "/wt", "codex"]
     assert "--file" in cmd
     assert cmd[cmd.index("--file") + 1] == "/prompt.md"
 
@@ -137,22 +137,22 @@ def test_build_exec_cmd_with_config(executor_with_config):
 
 def test_build_ensure_cmd(executor):
     cmd = executor._build_acpx_ensure_cmd("claude", "run-abc-design", "/wt")
-    assert cmd == ["acpx", "claude", "--cwd", "/wt", "sessions", "ensure", "--name", "run-abc-design"]
+    assert cmd == ["acpx", "--cwd", "/wt", "claude", "sessions", "ensure", "--name", "run-abc-design"]
 
 
 def test_build_cancel_cmd(executor):
     cmd = executor._build_acpx_cancel_cmd("claude", "run-abc-design", "/wt")
-    assert cmd == ["acpx", "claude", "cancel", "-s", "run-abc-design", "--cwd", "/wt"]
+    assert cmd == ["acpx", "--cwd", "/wt", "claude", "cancel", "-s", "run-abc-design"]
 
 
 def test_build_close_cmd(executor):
     cmd = executor._build_acpx_close_cmd("claude", "run-abc-design", "/wt")
-    assert cmd == ["acpx", "claude", "--cwd", "/wt", "sessions", "close", "run-abc-design"]
+    assert cmd == ["acpx", "--cwd", "/wt", "claude", "sessions", "close", "run-abc-design"]
 
 
 def test_build_status_cmd(executor):
     cmd = executor._build_acpx_status_cmd("claude", "run-abc-design", "/wt")
-    assert cmd == ["acpx", "claude", "status", "-s", "run-abc-design", "--cwd", "/wt", "--format", "json"]
+    assert cmd == ["acpx", "--cwd", "/wt", "claude", "status", "-s", "run-abc-design", "--format", "json"]
 
 
 def test_build_show_cmd(executor):
@@ -173,12 +173,12 @@ def test_build_history_cmd(executor):
 
 def test_build_set_mode_cmd(executor):
     cmd = executor._build_acpx_set_mode_cmd("codex", "run-abc-dev", "/wt", "plan")
-    assert cmd == ["acpx", "codex", "set-mode", "plan", "-s", "run-abc-dev", "--cwd", "/wt"]
+    assert cmd == ["acpx", "--cwd", "/wt", "codex", "set-mode", "plan", "-s", "run-abc-dev"]
 
 
 def test_build_set_cmd(executor):
     cmd = executor._build_acpx_set_cmd("codex", "run-abc-dev", "/wt", "reasoning_effort", "high")
-    assert cmd == ["acpx", "codex", "set", "reasoning_effort", "high", "-s", "run-abc-dev", "--cwd", "/wt"]
+    assert cmd == ["acpx", "--cwd", "/wt", "codex", "set", "reasoning_effort", "high", "-s", "run-abc-dev"]
 
 
 # ------------------------------------------------------------------

@@ -68,9 +68,9 @@ class AcpxExecutor:
     def _build_acpx_prompt_cmd(self, agent_type, session_name, worktree, timeout_sec, task_file=None):
         agent = self._resolve_agent(agent_type)
         cmd = [
-            "acpx", agent,
+            "acpx", "--cwd", worktree,
+            agent,
             "-s", session_name,
-            "--cwd", worktree,
             "--format", "json",
             "--approve-all",
             "--timeout", str(timeout_sec),
@@ -92,8 +92,8 @@ class AcpxExecutor:
     def _build_acpx_exec_cmd(self, agent_type, worktree, timeout_sec, task_file=None, prompt=None):
         agent = self._resolve_agent(agent_type)
         cmd = [
-            "acpx", agent, "exec",
-            "--cwd", worktree,
+            "acpx", "--cwd", worktree,
+            agent, "exec",
             "--format", "json",
             "--approve-all",
             "--timeout", str(timeout_sec),
@@ -112,38 +112,38 @@ class AcpxExecutor:
 
     def _build_acpx_ensure_cmd(self, agent_type, session_name, worktree):
         agent = self._resolve_agent(agent_type)
-        return ["acpx", agent, "--cwd", worktree, "sessions", "ensure", "--name", session_name]
+        return ["acpx", "--cwd", worktree, agent, "sessions", "ensure", "--name", session_name]
 
     def _build_acpx_cancel_cmd(self, agent_type, session_name, worktree):
         agent = self._resolve_agent(agent_type)
-        return ["acpx", agent, "cancel", "-s", session_name, "--cwd", worktree]
+        return ["acpx", "--cwd", worktree, agent, "cancel", "-s", session_name]
 
     def _build_acpx_close_cmd(self, agent_type, session_name, worktree):
         agent = self._resolve_agent(agent_type)
-        return ["acpx", agent, "--cwd", worktree, "sessions", "close", session_name]
+        return ["acpx", "--cwd", worktree, agent, "sessions", "close", session_name]
 
     def _build_acpx_status_cmd(self, agent_type, session_name, worktree):
         agent = self._resolve_agent(agent_type)
-        return ["acpx", agent, "status", "-s", session_name, "--cwd", worktree, "--format", "json"]
+        return ["acpx", "--cwd", worktree, agent, "status", "-s", session_name, "--format", "json"]
 
     def _build_acpx_show_cmd(self, agent_type, session_name, worktree):
         """Build command for ``acpx <agent> sessions show`` (rich metadata)."""
         agent = self._resolve_agent(agent_type)
-        return ["acpx", agent, "--cwd", worktree, "--format", "json", "sessions", "show", session_name]
+        return ["acpx", "--cwd", worktree, agent, "--format", "json", "sessions", "show", session_name]
 
     def _build_acpx_history_cmd(self, agent_type, session_name, worktree, limit=20):
         """Build command for ``acpx <agent> sessions history``."""
         agent = self._resolve_agent(agent_type)
-        return ["acpx", agent, "--cwd", worktree, "--format", "json",
+        return ["acpx", "--cwd", worktree, agent, "--format", "json",
                 "sessions", "history", session_name, "--limit", str(limit)]
 
     def _build_acpx_set_mode_cmd(self, agent_type, session_name, worktree, mode):
         agent = self._resolve_agent(agent_type)
-        return ["acpx", agent, "set-mode", mode, "-s", session_name, "--cwd", worktree]
+        return ["acpx", "--cwd", worktree, agent, "set-mode", mode, "-s", session_name]
 
     def _build_acpx_set_cmd(self, agent_type, session_name, worktree, key, value):
         agent = self._resolve_agent(agent_type)
-        return ["acpx", agent, "set", key, value, "-s", session_name, "--cwd", worktree]
+        return ["acpx", "--cwd", worktree, agent, "set", key, value, "-s", session_name]
 
     # ------------------------------------------------------------------
     # Command routing (local vs SSH)
