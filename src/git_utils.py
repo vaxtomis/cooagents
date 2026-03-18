@@ -122,3 +122,35 @@ async def get_head_commit(worktree: str) -> str:
     """Return the HEAD commit hash (40-char hex string)."""
     out, _, _ = await run_git("rev-parse", "HEAD", cwd=worktree)
     return out
+
+
+async def ensure_repo(repo_path: str, repo_url: str | None = None) -> str:
+    """Ensure a git repo exists at *repo_path*.
+
+    Returns
+    -------
+    str
+        ``"exists"`` if repo already present, ``"cloned"`` if cloned from
+        *repo_url*, or ``"initialized"`` if created via ``git init``.
+
+    Raises
+    ------
+    ValueError
+        If *repo_path* exists but is not a git repository.
+    RuntimeError
+        If cloning fails.
+    """
+    p = Path(repo_path)
+    if p.exists():
+        _, _, rc = await run_git("rev-parse", "--git-dir", cwd=repo_path, check=False)
+        if rc == 0:
+            return "exists"
+        raise ValueError(f"{repo_path} exists but is not a git repository")
+
+    if repo_url:
+        await run_git("clone", repo_url, repo_path)
+        return "cloned"
+
+    p.mkdir(parents=True, exist_ok=True)
+    await run_git("init", cwd=repo_path)
+    return "initialized"
