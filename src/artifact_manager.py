@@ -4,8 +4,15 @@ from datetime import datetime, timezone
 
 
 class ArtifactManager:
-    def __init__(self, db):
+    def __init__(self, db, project_root=None):
         self.db = db
+        self.project_root = Path(project_root) if project_root else Path(__file__).resolve().parents[1]
+
+    def _resolve_project_path(self, path) -> Path:
+        path = Path(path)
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path
 
     async def register(self, run_id, kind, path, stage, git_ref=None) -> int:
         """Register artifact. Computes content_hash and byte_size. Returns artifact id.
@@ -133,13 +140,14 @@ class ArtifactManager:
         """Render a task template with Jinja2."""
         from jinja2 import Environment, FileSystemLoader
 
-        template_file = Path(template_path)
+        template_file = self._resolve_project_path(template_path)
+        output_file = self._resolve_project_path(output_path)
         env = Environment(
             loader=FileSystemLoader(str(template_file.parent)),
             keep_trailing_newline=True,
         )
         template = env.get_template(template_file.name)
         content = template.render(**variables)
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(output_path).write_text(content, encoding="utf-8")
-        return output_path
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(content, encoding="utf-8")
+        return str(output_file)

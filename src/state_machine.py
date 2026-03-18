@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,6 +59,7 @@ class StateMachine:
         ensure_worktree_fn=None,
         config=None,
         job_manager=None,
+        project_root=None,
     ):
         self.db = db
         self.artifacts = artifact_manager
@@ -66,6 +68,9 @@ class StateMachine:
         self.webhooks = webhook_notifier
         self.merge = merge_manager
         self.coop_dir = coop_dir
+        self.project_root = Path(project_root) if project_root else Path(__file__).resolve().parents[1]
+        if not Path(self.coop_dir).is_absolute():
+            self.coop_dir = str(self.project_root / self.coop_dir)
         self._ensure_worktree = ensure_worktree_fn
         self._config = config
         self.jobs = job_manager
@@ -333,6 +338,12 @@ class StateMachine:
 
         task_path = os.path.join(self.coop_dir, "runs", run["id"], "TASK-design.md")
         os.makedirs(os.path.dirname(task_path), exist_ok=True)
+        req_source = Path(run["repo_path"]) / "docs" / "req" / f"REQ-{run['ticket']}.md"
+        req_path = self._copy_file_to_worktree(
+            req_source,
+            wt,
+            Path("docs") / "req" / req_source.name,
+        )
 
         template = "templates/INIT-design.md"
 
@@ -343,7 +354,7 @@ class StateMachine:
                 "ticket": run["ticket"],
                 "repo_path": run["repo_path"],
                 "worktree": wt,
-                "req_path": f"docs/req/REQ-{run['ticket']}.md",
+                "req_path": req_path,
             },
             task_path,
         )
@@ -432,8 +443,16 @@ class StateMachine:
 
         task_path = os.path.join(self.coop_dir, "runs", run["id"], "TASK-dev.md")
         os.makedirs(os.path.dirname(task_path), exist_ok=True)
-        design_arts = await self.artifacts.get_by_run(run["id"], kind="design", status="approved")
-        design_path = design_arts[0]["path"] if design_arts else ""
+        design_arts = await self.artifacts.get_by_run(run["id"], kind="design")
+        design_path = ""
+        if design_arts:
+            latest_design = design_arts[-1]
+            source_path = Path(latest_design["path"])
+            design_path = self._copy_file_to_worktree(
+                source_path,
+                wt,
+                Path("docs") / "design" / source_path.name,
+            )
 
         template = "templates/INIT-dev.md"
 
@@ -602,6 +621,13 @@ class StateMachine:
         # that API response dicts and test assertions can use the friendlier name.
         row.setdefault("run_id", row["id"])
         return row
+
+    def _copy_file_to_worktree(self, source_path: str | Path, worktree: str, relative_target: str | Path) -> str:
+        source = Path(source_path)
+        target = Path(worktree) / relative_target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        return target.relative_to(Path(worktree)).as_posix()
 
     async def _update_stage(
         self,

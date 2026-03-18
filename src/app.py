@@ -1,5 +1,6 @@
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from src.config import load_settings, load_agent_hosts
@@ -17,23 +18,31 @@ from src.skill_deployer import deploy_skills
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    project_root = Path(__file__).resolve().parents[1]
+    coop_dir = project_root / ".coop"
     settings = load_settings()
     await deploy_skills(settings)
 
     db = Database(db_path=settings.database.path, schema_path="db/schema.sql")
     await db.connect()
 
-    artifacts = ArtifactManager(db)
+    artifacts = ArtifactManager(db, project_root=project_root)
     hosts = HostManager(db)
-    jobs = JobManager(db)
+    jobs = JobManager(db, coop_dir=coop_dir, project_root=project_root)
     webhooks = WebhookNotifier(
         db,
         openclaw_hooks=settings.openclaw.hooks if settings.openclaw.hooks.enabled else None,
     )
     merger = MergeManager(db, webhooks)
 
-    executor = AcpxExecutor(db, jobs, hosts, artifacts, webhooks, config=settings, coop_dir=".coop")
-    sm = StateMachine(db, artifacts, hosts, executor, webhooks, merger, coop_dir=".coop", config=settings, job_manager=jobs)
+    executor = AcpxExecutor(
+        db, jobs, hosts, artifacts, webhooks,
+        config=settings, coop_dir=coop_dir, project_root=project_root,
+    )
+    sm = StateMachine(
+        db, artifacts, hosts, executor, webhooks, merger,
+        coop_dir=coop_dir, config=settings, job_manager=jobs, project_root=project_root,
+    )
     executor.set_state_machine(sm)
 
     agent_config = load_agent_hosts()

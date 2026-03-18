@@ -58,3 +58,14 @@ async def test_record_and_get_turns(db, tmp_path):
     assert len(turns) == 2
     assert turns[0]["verdict"] == "revise"
     assert turns[1]["verdict"] == "accept"
+
+
+async def test_get_output_uses_configured_coop_dir(db, tmp_path):
+    jm = JobManager(db, coop_dir=str(tmp_path / ".coop-custom"))
+    events_path = tmp_path / ".coop-custom" / "jobs" / "job-out" / "events.jsonl"
+    events_path.parent.mkdir(parents=True)
+    events_path.write_text('{"event":"ok"}\n', encoding="utf-8")
+
+    output = await jm.get_output("job-out")
+
+    assert output == '{"event":"ok"}\n'

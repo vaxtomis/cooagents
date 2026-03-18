@@ -18,7 +18,10 @@ class Database:
     """Async SQLite database wrapper."""
 
     def __init__(self, db_path: str | Path, schema_path: str | Path) -> None:
-        self._db_path = Path(db_path)
+        db = Path(db_path)
+        if not db.is_absolute():
+            db = ROOT / db
+        self._db_path = db
         # Resolve schema_path relative to project root if not absolute
         schema = Path(schema_path)
         if not schema.is_absolute():

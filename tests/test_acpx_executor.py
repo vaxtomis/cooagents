@@ -81,6 +81,25 @@ def test_build_prompt_cmd_codex(executor):
     ]
 
 
+def test_build_prompt_cmd_resolves_relative_task_file_to_absolute(executor, tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    task_file = repo_root / ".coop" / "runs" / "run-abc" / "TASK-design.md"
+    task_file.parent.mkdir(parents=True)
+    task_file.write_text("# task\n", encoding="utf-8")
+    monkeypatch.chdir(repo_root)
+
+    cmd = executor._build_acpx_prompt_cmd(
+        "claude",
+        "run-abc-design",
+        "/wt",
+        1800,
+        ".coop/runs/run-abc/TASK-design.md",
+    )
+
+    assert cmd[-2:] == ["--file", str(task_file.resolve())]
+
+
 # ------------------------------------------------------------------
 # Command builders — with config
 # ------------------------------------------------------------------
@@ -141,6 +160,24 @@ def test_build_exec_cmd_with_file(executor):
     assert cmd.index("exec") > agent_idx
     assert cmd.index("--file") > agent_idx
     assert cmd[cmd.index("--file") + 1] == "/prompt.md"
+
+
+def test_build_exec_cmd_resolves_relative_task_file_to_absolute(executor, tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    task_file = repo_root / ".coop" / "runs" / "run-abc" / "TASK-dev.md"
+    task_file.parent.mkdir(parents=True)
+    task_file.write_text("# task\n", encoding="utf-8")
+    monkeypatch.chdir(repo_root)
+
+    cmd = executor._build_acpx_exec_cmd(
+        "codex",
+        "/wt",
+        120,
+        task_file=".coop/runs/run-abc/TASK-dev.md",
+    )
+
+    assert cmd[cmd.index("--file") + 1] == str(task_file.resolve())
 
 
 def test_build_exec_cmd_with_config(executor_with_config):

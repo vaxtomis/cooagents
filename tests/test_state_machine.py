@@ -127,6 +127,19 @@ async def test_design_queued_no_host(sm, mocks, tmp_path):
     assert run["current_stage"] == "DESIGN_QUEUED"
 
 
+async def test_design_queued_copies_requirement_into_design_worktree(sm, tmp_path):
+    run = await sm.create_run("T-REQCOPY", str(tmp_path))
+    await sm.submit_requirement(run["run_id"], "# Requirement content")
+    await sm.approve(run["run_id"], "req", "user1")
+
+    await sm.tick(run["run_id"])
+
+    copied_req = tmp_path / ".worktrees" / "T-REQCOPY-design" / "docs" / "req" / "REQ-T-REQCOPY.md"
+    assert copied_req.read_text(encoding="utf-8") == "# Requirement content"
+    render_args = sm.artifacts.render_task.await_args.args
+    assert render_args[1]["req_path"] == "docs/req/REQ-T-REQCOPY.md"
+
+
 # ---------------------------------------------------------------------------
 # tick: review stages are idempotent
 # ---------------------------------------------------------------------------
@@ -306,6 +319,24 @@ async def test_tick_dev_running_job_timeout(sm, db, tmp_path):
     assert run["status"] == "failed"
     assert run["current_stage"] == "FAILED"
     assert run["failed_at_stage"] == "DEV_RUNNING"
+
+
+async def test_dev_queued_copies_design_into_dev_worktree(sm, db, tmp_path):
+    run = await sm.create_run("T-DESCOPY", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute("UPDATE runs SET current_stage='DEV_QUEUED' WHERE id=?", (rid,))
+
+    design_source = tmp_path / "design-output" / "DES-T-DESCOPY.md"
+    design_source.parent.mkdir(parents=True, exist_ok=True)
+    design_source.write_text("# Design content", encoding="utf-8")
+    await sm.artifacts.register(rid, "design", str(design_source), "DESIGN_RUNNING")
+
+    await sm.tick(rid)
+
+    copied_design = tmp_path / ".worktrees" / "T-DESCOPY-dev" / "docs" / "design" / "DES-T-DESCOPY.md"
+    assert copied_design.read_text(encoding="utf-8") == "# Design content"
+    render_args = sm.artifacts.render_task.await_args.args
+    assert render_args[1]["design_path"] == "docs/design/DES-T-DESCOPY.md"
 
 
 async def test_retry_after_job_failure(sm, db, tmp_path):

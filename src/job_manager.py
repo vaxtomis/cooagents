@@ -1,10 +1,19 @@
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 class JobManager:
-    def __init__(self, db):
+    def __init__(self, db, coop_dir=".coop", project_root=None):
         self.db = db
+        self.project_root = Path(project_root) if project_root else Path(__file__).resolve().parents[1]
+        self.coop_dir = self._resolve_path(coop_dir)
+
+    def _resolve_path(self, path):
+        path = Path(path)
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path
 
     async def create_job(self, run_id, host_id, agent_type, stage, task_file, worktree, base_commit, timeout_sec, session_name=None) -> str:
         job_id = f"job-{uuid.uuid4().hex[:12]}"
@@ -61,11 +70,10 @@ class JobManager:
         return [dict(r) for r in rows]
 
     async def get_output(self, job_id):
-        from pathlib import Path
-        events_path = Path(".coop") / "jobs" / job_id / "events.jsonl"
+        events_path = self.coop_dir / "jobs" / job_id / "events.jsonl"
         if events_path.exists():
             return events_path.read_text(encoding="utf-8")
-        log_path = Path(".coop") / "jobs" / job_id / "stdout.log"
+        log_path = self.coop_dir / "jobs" / job_id / "stdout.log"
         if log_path.exists():
             return log_path.read_text(encoding="utf-8")
         return ""

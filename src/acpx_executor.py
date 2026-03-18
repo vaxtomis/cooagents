@@ -18,14 +18,15 @@ _EXIT_CODE_MAP = {
 
 
 class AcpxExecutor:
-    def __init__(self, db, job_manager, host_manager, artifact_manager, webhook_notifier, config=None, coop_dir=".coop"):
+    def __init__(self, db, job_manager, host_manager, artifact_manager, webhook_notifier, config=None, coop_dir=".coop", project_root=None):
         self.db = db
         self.jobs = job_manager
         self.hosts = host_manager
         self.artifacts = artifact_manager
         self.webhooks = webhook_notifier
         self.config = config
-        self.coop_dir = coop_dir
+        self.project_root = Path(project_root) if project_root else Path(__file__).resolve().parents[1]
+        self.coop_dir = str(self._resolve_project_path(coop_dir))
         self._state_machine = None
         self._tasks = {}  # job_id -> asyncio.Task
         self._resources = {}  # job_id -> {"stderr_fh": fh, "ssh_conn": conn}
@@ -61,12 +62,24 @@ class AcpxExecutor:
             return getattr(cfg, "allowed_tools_design", None)
         return getattr(cfg, "allowed_tools_dev", None)
 
+    def _normalize_task_file(self, task_file):
+        if not task_file:
+            return None
+        return os.path.abspath(task_file)
+
+    def _resolve_project_path(self, path):
+        path = Path(path)
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path
+
     # ------------------------------------------------------------------
     # Command builders
     # ------------------------------------------------------------------
 
     def _build_acpx_prompt_cmd(self, agent_type, session_name, worktree, timeout_sec, task_file=None):
         agent = self._resolve_agent(agent_type)
+        task_file = self._normalize_task_file(task_file)
         # Global options must appear before the agent subcommand
         cmd = [
             "acpx", "--cwd", worktree,
@@ -93,6 +106,7 @@ class AcpxExecutor:
 
     def _build_acpx_exec_cmd(self, agent_type, worktree, timeout_sec, task_file=None, prompt=None):
         agent = self._resolve_agent(agent_type)
+        task_file = self._normalize_task_file(task_file)
         # Global options must appear before the agent subcommand
         cmd = [
             "acpx", "--cwd", worktree,
