@@ -3,6 +3,12 @@
 ## 基本信息
 - ticket: {{ ticket }}
 
+## 项目上下文（必须先阅读）
+在开始之前，请先阅读当前仓库中的以下文件（如果存在）：
+- `README.md` — 项目概述
+- `CLAUDE.md` — Claude Code 项目约定与规范
+- `AGENTS.md` — Codex 多智能体协作规范
+
 ## 输入资料（必须先阅读）
 1. {{ req_path }}
 2. docs/design/DES-template.md
