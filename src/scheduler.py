@@ -39,7 +39,7 @@ class Scheduler:
                         await self.webhooks.notify("host.offline", {"host_id": host["id"]})
                     elif old_status == "offline" and is_online:
                         await self.webhooks.notify("host.online", {"host_id": host["id"]})
-                        await self._tick_queued_runs()
+                        await self._tick_runnable_runs()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -78,6 +78,8 @@ class Scheduler:
                         await self.executor.cancel_session(j["run_id"], j["agent_type"])
                         await self.webhooks.notify("job.timeout", {"job_id": j["id"], "run_id": j["run_id"]})
 
+                await self._tick_runnable_runs()
+
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -108,15 +110,17 @@ class Scheduler:
             except Exception as e:
                 logger.error(f"Reminder loop error: {e}")
 
-    async def _tick_queued_runs(self):
-        """Tick all runs stuck in QUEUED stages so they can pick up newly available hosts."""
+    async def _tick_runnable_runs(self):
+        """Tick auto-progress stages so queued and stale in-flight runs can reconcile."""
         if not self.sm:
             return
-        queued = await self.db.fetchall(
-            "SELECT id FROM runs WHERE status='running' AND current_stage IN ('DESIGN_QUEUED','DEV_QUEUED')"
+        runnable = await self.db.fetchall(
+            "SELECT id FROM runs WHERE status='running' AND current_stage IN "
+            "('DESIGN_QUEUED','DESIGN_DISPATCHED','DESIGN_RUNNING',"
+            "'DEV_QUEUED','DEV_DISPATCHED','DEV_RUNNING')"
         )
-        for run in queued:
+        for run in runnable:
             try:
                 await self.sm.tick(run["id"])
             except Exception as e:
-                logger.error(f"Auto-tick queued run {run['id']} failed: {e}")
+                logger.error(f"Auto-tick run {run['id']} failed: {e}")

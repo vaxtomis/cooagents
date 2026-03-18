@@ -351,3 +351,34 @@ def test_cleanup_resources_noop_when_empty(executor):
     """_cleanup_resources should not raise when no resources exist."""
     executor._cleanup_resources("nonexistent-job")
     assert len(executor._resources) == 0
+
+
+# ------------------------------------------------------------------
+# Startup reconciliation
+# ------------------------------------------------------------------
+
+async def test_restore_on_startup_ticks_run_after_reconciling_dead_session(executor, db):
+    """restore_on_startup should tick the run after marking a stale job interrupted."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-startup-1", "T-1", "/repo", "running", "DESIGN_DISPATCHED", now, now),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("job-startup-1", "run-startup-1", None, "claude", "DESIGN_DISPATCHED", "running", "/t.md", "/wt", "run-startup-1-design", now),
+    )
+
+    executor.get_session_status = AsyncMock(return_value={"status": "dead"})
+    state_machine = AsyncMock()
+    state_machine.tick = AsyncMock()
+    executor.set_state_machine(state_machine)
+
+    await executor.restore_on_startup()
+
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-startup-1",))
+    assert job["status"] == "interrupted"
+    assert job["ended_at"] is not None
+    state_machine.tick.assert_called_once_with("run-startup-1")

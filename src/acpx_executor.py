@@ -444,6 +444,7 @@ class AcpxExecutor:
             "SELECT * FROM jobs WHERE status IN ('starting','running')"
         )
         now = datetime.now(timezone.utc).isoformat()
+        reconciled_run_ids = set()
         for job in jobs:
             j = dict(job)
             if j.get("session_name"):
@@ -458,6 +459,11 @@ class AcpxExecutor:
                 if status and status.get("status") == "running":
                     continue  # Still running, leave it
             await self.jobs.update_status(j["id"], "interrupted", ended_at=now)
+            reconciled_run_ids.add(j["run_id"])
+
+        if self._state_machine:
+            for run_id in reconciled_run_ids:
+                await self._state_machine.tick(run_id)
 
     # ------------------------------------------------------------------
     # Process management (private)
