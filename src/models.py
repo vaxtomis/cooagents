@@ -30,6 +30,12 @@ class CreateRunRequest(BaseModel):
     preferences: dict | None = None
     notify_channel: str | None = None
     notify_to: str | None = None
+    repo_url: str | None = None
+
+
+class EnsureRepoRequest(BaseModel):
+    repo_path: str
+    repo_url: str | None = None
 
 
 class ApproveRequest(BaseModel):
