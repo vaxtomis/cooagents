@@ -312,6 +312,7 @@ flowchart LR
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| `POST` | `/repos/ensure` | 确保仓库存在（clone / init） |
 | `GET` | `/repos` | 列出仓库或按仓库查询 run |
 | `GET` | `/repos/merge-queue` | 合并队列状态 |
 
@@ -321,7 +322,7 @@ flowchart LR
 # 创建任务
 curl -X POST http://127.0.0.1:8321/api/v1/runs \
   -H "Content-Type: application/json" \
-  -d '{"ticket": "PROJ-42", "repo_path": "/path/to/repo"}'
+  -d '{"ticket": "PROJ-42", "repo_path": "/path/to/repo", "repo_url": "git@github.com:user/project.git"}'
 
 # 提交需求
 curl -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/submit-requirement \
@@ -533,7 +534,7 @@ pytest tests/test_e2e.py -v
 pytest tests/test_acpx_executor.py -v
 ```
 
-测试覆盖（123 个测试）：
+测试覆盖（133 个测试）：
 
 | 模块 | 测试数 | 说明 |
 |------|--------|------|
@@ -543,8 +544,9 @@ pytest tests/test_acpx_executor.py -v
 | `test_host_manager.py` | 8 | 选择、负载、健康检查 |
 | `test_artifact_manager.py` | 7 | 注册、版本、Jinja2 渲染 |
 | `test_merge_manager.py` | 7 | 队列、优先级、冲突 |
-| `test_api.py` | 7 | HTTP 端点集成测试 |
+| `test_api.py` | 12 | HTTP 端点集成测试 |
 | `test_skill_deployer.py` | 6 | Skill 部署、覆盖、SSH 降级 |
+| `test_ensure_repo.py` | 5 | ensure_repo init/clone/exists |
 | `test_git_utils.py` | 6 | worktree、冲突检测 |
 | `test_webhook_notifier.py` | 6 | 订阅、过滤、投递 |
 | `test_config.py` | 5 | 配置加载、默认值 |
@@ -594,7 +596,7 @@ cooagents/
 │   ├── git_utils.py           # Git 操作工具
 │   └── exceptions.py          # 自定义异常
 ├── templates/                 # Jinja2 任务模板
-├── tests/                     # 测试套件（123 tests）
+├── tests/                     # 测试套件（133 tests）
 ├── scripts/
 │   └── bootstrap.sh           # 初始化脚本
 ├── requirements.txt
