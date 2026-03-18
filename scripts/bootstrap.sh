@@ -3,24 +3,52 @@ set -euo pipefail
 
 echo "=== cooagents bootstrap ==="
 
-# Check Python version
+# ---------- 1. Check Python ≥ 3.11 ----------
 python3 --version 2>/dev/null || { echo "ERROR: python3 not found"; exit 1; }
-PYVER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-echo "Python version: $PYVER"
+PYVER=$(python3 -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}')")
+PYOK=$(python3 -c "import sys; print(int(sys.version_info >= (3, 11)))")
+if [ "$PYOK" != "1" ]; then
+  echo "ERROR: Python ≥ 3.11 required, got $PYVER"
+  exit 1
+fi
+echo "Python $PYVER  ✓"
 
-# Check git
-git --version || { echo "ERROR: git not found"; exit 1; }
+# ---------- 2. Check git ----------
+git --version >/dev/null 2>&1 || { echo "ERROR: git not found"; exit 1; }
+echo "git  ✓"
 
-# Install dependencies
+# ---------- 3. Check node / npm ----------
+node --version >/dev/null 2>&1 || { echo "ERROR: node not found (required for acpx)"; exit 1; }
+echo "node $(node --version)  ✓"
+
+# ---------- 4. Check / install acpx ----------
+if acpx --version >/dev/null 2>&1; then
+  echo "acpx  ✓"
+else
+  echo "Installing acpx..."
+  npm install -g acpx@latest
+  acpx --version >/dev/null 2>&1 || { echo "ERROR: acpx install failed"; exit 1; }
+  echo "acpx  ✓"
+fi
+
+# ---------- 5. Install Python dependencies (venv) ----------
 echo "Installing dependencies..."
-pip install -r requirements.txt
+if python3 -m venv .venv 2>/dev/null; then
+  # shellcheck disable=SC1091
+  source .venv/bin/activate 2>/dev/null || source .venv/Scripts/activate 2>/dev/null
+  pip install -r requirements.txt
+  echo "venv + deps  ✓"
+else
+  echo "WARN: venv creation failed, falling back to global pip"
+  pip install -r requirements.txt
+  echo "deps (global)  ✓"
+fi
 
-# Create runtime directories
-echo "Creating runtime directories..."
+# ---------- 6. Create runtime directories ----------
 mkdir -p .coop/runs .coop/jobs
+echo "runtime dirs  ✓"
 
-# Initialize database
-echo "Initializing database..."
+# ---------- 7. Initialize database ----------
 python3 -c "
 import sqlite3, pathlib
 db_path = '.coop/state.db'
@@ -35,6 +63,7 @@ conn.executescript(pathlib.Path('db/schema.sql').read_text())
 conn.close()
 print('  Database initialized.')
 "
+echo "database  ✓"
 
 echo ""
 echo "=== Bootstrap complete ==="
