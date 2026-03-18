@@ -59,9 +59,18 @@ class OpenclawTarget(BaseModel):
     key: str | None = None           # SSH only
 
 
+class OpenclawHooksConfig(BaseModel):
+    enabled: bool = False
+    url: str = "http://127.0.0.1:18789/hooks/agent"
+    token: str = ""
+    default_channel: str = "last"
+    default_to: str = ""
+
+
 class OpenclawConfig(BaseModel):
     deploy_skills: bool = True
     targets: list[OpenclawTarget] = []
+    hooks: OpenclawHooksConfig = OpenclawHooksConfig()
 
 
 class Settings(BaseModel):

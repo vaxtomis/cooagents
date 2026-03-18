@@ -257,3 +257,127 @@ async def test_tick_design_running_multi_turn_accept(sm, mocks, db, tmp_path):
     run = await sm.tick(rid)
     assert run["current_stage"] == "DESIGN_REVIEW"
     executor.close_session.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: job failure transitions run to FAILED
+# ---------------------------------------------------------------------------
+
+async def test_tick_design_running_job_failed(sm, db, tmp_path):
+    """When design job fails, run should transition to FAILED."""
+    run = await sm.create_run("T-FAIL", str(tmp_path))
+    rid = run["run_id"]
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,turn_count,started_at,ended_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-fail1", rid, "local", "claude", "DESIGN_RUNNING", "failed", "/t.md", str(tmp_path), "run-fail-design", 1, now, now)
+    )
+    await db.execute(
+        "UPDATE runs SET current_stage='DESIGN_RUNNING' WHERE id=?", (rid,),
+    )
+
+    run = await sm.tick(rid)
+    assert run["status"] == "failed"
+    assert run["current_stage"] == "FAILED"
+    assert run["failed_at_stage"] == "DESIGN_RUNNING"
+
+
+async def test_tick_dev_running_job_timeout(sm, db, tmp_path):
+    """When dev job times out, run should transition to FAILED."""
+    run = await sm.create_run("T-TOUT", str(tmp_path))
+    rid = run["run_id"]
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,turn_count,started_at,ended_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-tout1", rid, "local", "codex", "DEV_RUNNING", "timeout", "/t.md", str(tmp_path), "run-tout-dev", 1, now, now)
+    )
+    await db.execute(
+        "UPDATE runs SET current_stage='DEV_RUNNING' WHERE id=?", (rid,),
+    )
+
+    run = await sm.tick(rid)
+    assert run["status"] == "failed"
+    assert run["current_stage"] == "FAILED"
+    assert run["failed_at_stage"] == "DEV_RUNNING"
+
+
+async def test_retry_after_job_failure(sm, db, tmp_path):
+    """After FAILED, retry should restore to failed_at_stage."""
+    run = await sm.create_run("T-RETRY", str(tmp_path))
+    rid = run["run_id"]
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,turn_count,started_at,ended_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-rf1", rid, "local", "claude", "DESIGN_RUNNING", "failed", "/t.md", str(tmp_path), "run-rf-design", 1, now, now)
+    )
+    await db.execute(
+        "UPDATE runs SET current_stage='DESIGN_RUNNING' WHERE id=?", (rid,),
+    )
+
+    # Tick to FAILED
+    run = await sm.tick(rid)
+    assert run["status"] == "failed"
+
+    # Retry should restore to DESIGN_RUNNING
+    run = await sm.retry(rid, "user1")
+    assert run["status"] == "running"
+    assert run["current_stage"] == "DESIGN_RUNNING"
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: MERGE_CONFLICT exit via resolve_conflict
+# ---------------------------------------------------------------------------
+
+async def test_resolve_conflict(sm, db, tmp_path):
+    """resolve_conflict should re-queue from MERGE_CONFLICT to MERGE_QUEUED."""
+    run = await sm.create_run("T-MC", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute(
+        "UPDATE runs SET current_stage='MERGE_CONFLICT' WHERE id=?", (rid,),
+    )
+
+    run = await sm.resolve_conflict(rid, "user1")
+    assert run["current_stage"] == "MERGE_QUEUED"
+
+
+async def test_resolve_conflict_wrong_stage(sm, db, tmp_path):
+    """resolve_conflict should fail if not in MERGE_CONFLICT."""
+    run = await sm.create_run("T-MC2", str(tmp_path))
+    with pytest.raises(ConflictError):
+        await sm.resolve_conflict(run["run_id"], "user1")
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: MERGING → MERGED records step
+# ---------------------------------------------------------------------------
+
+async def test_merging_to_merged_records_step(sm, mocks, db, tmp_path):
+    """MERGING → MERGED should create a step record and stage.changed event."""
+    _, _, _, merge_mgr = mocks
+    merge_mgr.get_status = AsyncMock(return_value="merged")
+
+    run = await sm.create_run("T-MRG", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute(
+        "UPDATE runs SET current_stage='MERGING' WHERE id=?", (rid,),
+    )
+
+    run = await sm.tick(rid)
+    assert run["current_stage"] == "MERGED"
+    assert run["status"] == "completed"
+
+    # Verify step was recorded
+    step = await db.fetchone(
+        "SELECT * FROM steps WHERE run_id=? AND to_stage='MERGED'", (rid,),
+    )
+    assert step is not None
+    assert step["from_stage"] == "MERGING"

@@ -29,14 +29,14 @@ flowchart LR
 
 ## 核心特性
 
-- **15 阶段状态机** — 从需求收集到代码合并，每个阶段可观测、可控制
+- **16 阶段状态机** — 从需求收集到代码合并，每个阶段可观测、可控制
 - **多轮评估循环** — RUNNING 阶段自动评估产物质量，不达标则向 Agent 发送修订指令（设计最多 3 轮，开发最多 5 轮）
 - **acpx Session 管理** — 基于 acpx CLI 的持久化会话，支持多轮交互、断点恢复、超时控制
 - **三级审批 Gate** — 需求 / 设计 / 开发各设独立审批节点，支持驳回重做
 - **产物版本管理** — 需求文档、设计文档、ADR、测试报告等产物自动扫描、哈希校验、版本追踪
 - **多主机 Agent 池** — 支持本地 + SSH 远程主机，按负载自动选择，独立健康检查
 - **优先级合并队列** — FIFO + 优先级排序，冲突检测，自动 rebase
-- **Webhook 事件通知** — HMAC 签名、事件过滤、失败重试，21 种事件类型
+- **Webhook 事件通知** — HMAC 签名、事件过滤、失败重试，24 种事件类型
 - **Jinja2 模板引擎** — 灵活的任务指令模板，支持条件逻辑和循环
 
 ## 架构概览
@@ -133,10 +133,26 @@ acpx:
   permission_mode: approve-all
   default_format: json
   ttl: 600                   # Session 空闲超时
+  json_strict: true           # 严格 JSON 输出
+  model: null                 # 留空使用 agent 默认模型
+  allowed_tools_design: null  # 设计阶段工具白名单（逗号分隔）
+  allowed_tools_dev: null     # 开发阶段工具白名单
 
 turns:
   design_max_turns: 3        # 设计阶段最大轮次
   dev_max_turns: 5           # 开发阶段最大轮次
+
+openclaw:
+  deploy_skills: true          # 启动时是否同步 Skill
+  targets:
+    - type: local
+      skills_dir: "~/.openclaw/skills"
+  hooks:
+    enabled: false             # 是否推送事件到 OpenClaw
+    url: "http://127.0.0.1:18789/hooks/agent"
+    token: ""
+    default_channel: "last"
+    default_to: ""
 ```
 
 ### Agent 主机配置 (`config/agents.yaml`)
@@ -187,9 +203,16 @@ flowchart LR
     VRV -->|approve| MQ["MERGE_QUEUED"]:::auto
     VRV -->|reject| VQ
 
-    MQ --> MG["MERGING"]:::auto --> MD(["MERGED"])
+    MQ --> MG["MERGING"]:::auto
+    MG --> MD(["MERGED"])
+    MG --> MC{"MERGE_CONFLICT 🚦"}
+    MC -->|resolve| MQ
+
+    DR -->|"job failed/timeout"| FL(["FAILED"]):::fail
+    VR -->|"job failed/timeout"| FL
 
     classDef auto fill:#e8f5e9,stroke:#4caf50
+    classDef fail fill:#ffebee,stroke:#e53935
 ```
 
 - **🚦 审批 Gate** — 需要调用 `approve` 或 `reject` 端点通过
@@ -212,7 +235,9 @@ flowchart LR
 | `DEV_REVIEW` | `approve` / `reject` | 人工审批代码 |
 | `MERGE_QUEUED` | 自动 | 进入合并队列 |
 | `MERGING` | 自动 | 执行合并 |
+| `MERGE_CONFLICT` | `resolve-conflict` | 合并冲突，等待人工解决后重新入队 |
 | `MERGED` | 自动 | 完成 |
+| `FAILED` | 自动 | Job 失败/超时/中断时进入，可通过 `retry` 恢复 |
 
 ### 多轮评估机制
 
@@ -242,6 +267,7 @@ flowchart LR
 | `POST` | `/runs/{id}/reject` | 驳回（`gate` + `reason`） |
 | `POST` | `/runs/{id}/retry` | 重试失败任务 |
 | `POST` | `/runs/{id}/recover` | 恢复中断任务（`action`: resume/redo/manual） |
+| `POST` | `/runs/{id}/resolve-conflict` | 合并冲突解决后重新入队（`by`） |
 | `DELETE` | `/runs/{id}` | 取消任务 |
 
 ### 产物 (`/api/v1/runs/{id}/artifacts`)
@@ -257,11 +283,11 @@ flowchart LR
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/jobs` | 列出 Agent 任务 |
-| `GET` | `/jobs/{jid}/output` | Agent 输出内容 |
-| `GET` | `/conflicts` | 合并冲突详情 |
-| `POST` | `/merge` | 入队合并（支持 `priority`） |
-| `POST` | `/merge-skip` | 跳过合并 |
+| `GET` | `/runs/{id}/jobs` | 列出 Agent 任务 |
+| `GET` | `/runs/{id}/jobs/{jid}/output` | Agent 输出内容 |
+| `GET` | `/runs/{id}/conflicts` | 合并冲突详情 |
+| `POST` | `/runs/{id}/merge` | 入队合并（支持 `priority`） |
+| `POST` | `/runs/{id}/merge-skip` | 跳过合并 |
 
 ### Agent 主机 (`/api/v1/agent-hosts`)
 
@@ -402,11 +428,11 @@ erDiagram
 
 ### cooagents-workflow Skill
 
-项目内置了面向 OpenClaw 的 Skill（`skills/cooagents-workflow/`），使 OpenClaw Agent 自动扮演**项目经理**角色，通过 `exec` + `curl` 编排 cooagents 15 阶段工作流。
+项目内置了面向 OpenClaw 的 Skill（`skills/cooagents-workflow/`），使 OpenClaw Agent 自动扮演**项目经理**角色，通过 `exec` + `curl` 编排 cooagents 16 阶段工作流。
 
 ```
 skills/cooagents-workflow/
-├── SKILL.md                    # 核心决策逻辑（~114 行，注入 Agent prompt）
+├── SKILL.md                    # 核心决策逻辑（~150 行，注入 Agent prompt）
 └── references/
     ├── api-playbook.md         # 8 个 curl 操作场景（按需 Read）
     ├── error-handling.md       # 自动错误恢复策略
@@ -462,9 +488,9 @@ curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
 |------|------|
 | 阶段 | `stage.changed` |
 | Gate | `gate.waiting` `gate.approved` `gate.rejected` |
-| Job | `job.completed` `job.failed` `job.interrupted` `job.timeout` |
-| Run | `run.completed` `run.cancelled` `run.retried` |
-| 合并 | `merge.completed` `merge.conflict` |
+| Job | `job.completed` `job.failed` `job.interrupted` `job.timeout` `job.error` |
+| Run | `run.completed` `run.cancelled` `run.retried` `run.failed` |
+| 合并 | `merge.completed` `merge.conflict` `merge.conflict_resolved` |
 | 主机 | `host.online` `host.offline` |
 | 轮次 | `turn.started` `turn.completed` |
 | Session | `session.created` `session.closed` |
@@ -507,12 +533,13 @@ pytest tests/test_e2e.py -v
 pytest tests/test_acpx_executor.py -v
 ```
 
-测试覆盖（103 个测试）：
+测试覆盖（123 个测试）：
 
 | 模块 | 测试数 | 说明 |
 |------|--------|------|
 | `test_acpx_executor.py` | 24 | 命令构建、session 管理、exit code |
-| `test_state_machine.py` | 16 | 状态转换、Gate、多轮评估 |
+| `test_state_machine.py` | 22 | 状态转换、Gate、多轮评估 |
+| `test_openclaw_hooks.py` | 14 | OpenClaw hooks 事件推送 |
 | `test_host_manager.py` | 8 | 选择、负载、健康检查 |
 | `test_artifact_manager.py` | 7 | 注册、版本、Jinja2 渲染 |
 | `test_merge_manager.py` | 7 | 队列、优先级、冲突 |
@@ -552,7 +579,7 @@ cooagents/
 │   └── webhooks.py            # Webhook 端点
 ├── src/                       # 核心模块
 │   ├── app.py                 # FastAPI 应用入口
-│   ├── state_machine.py       # 15 阶段状态机
+│   ├── state_machine.py       # 16 阶段状态机
 │   ├── acpx_executor.py       # acpx session 执行器（唯一执行器）
 │   ├── artifact_manager.py    # 产物版本管理
 │   ├── host_manager.py        # 多主机管理
@@ -567,7 +594,7 @@ cooagents/
 │   ├── git_utils.py           # Git 操作工具
 │   └── exceptions.py          # 自定义异常
 ├── templates/                 # Jinja2 任务模板
-├── tests/                     # 测试套件（103 tests）
+├── tests/                     # 测试套件（123 tests）
 ├── scripts/
 │   └── bootstrap.sh           # 初始化脚本
 ├── requirements.txt

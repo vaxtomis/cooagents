@@ -26,7 +26,10 @@ async def lifespan(app: FastAPI):
     artifacts = ArtifactManager(db)
     hosts = HostManager(db)
     jobs = JobManager(db)
-    webhooks = WebhookNotifier(db)
+    webhooks = WebhookNotifier(
+        db,
+        openclaw_hooks=settings.openclaw.hooks if settings.openclaw.hooks.enabled else None,
+    )
     merger = MergeManager(db, webhooks)
 
     executor = AcpxExecutor(db, jobs, hosts, artifacts, webhooks, config=settings, coop_dir=".coop")

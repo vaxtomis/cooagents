@@ -85,6 +85,8 @@ class StateMachine:
         repo_path: str,
         description: str | None = None,
         preferences: dict | None = None,
+        notify_channel: str | None = None,
+        notify_to: str | None = None,
     ) -> dict:
         """Create a new workflow run and advance it to REQ_COLLECTING.
 
@@ -103,8 +105,10 @@ class StateMachine:
 
         await self.db.execute(
             "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-            "description,preferences_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-            (run_id, ticket, repo_path, "running", "INIT", description, prefs, now, now),
+            "description,preferences_json,notify_channel,notify_to,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (run_id, ticket, repo_path, "running", "INIT", description, prefs,
+             notify_channel, notify_to, now, now),
         )
         await self._update_stage(run_id, "INIT", "REQ_COLLECTING")
         run = await self._get_run(run_id)
@@ -207,6 +211,28 @@ class StateMachine:
         await self._emit(run_id, "gate.rejected", {"gate": gate, "by": by, "reason": reason})
         target = REJECT_TARGETS[gate]
         await self._update_stage(run_id, run["current_stage"], target)
+        return await self._get_run(run_id)
+
+    async def resolve_conflict(self, run_id: str, by: str) -> dict:
+        """Re-queue a merge after the user has resolved conflicts externally.
+
+        Raises
+        ------
+        ConflictError
+            If the run is not in MERGE_CONFLICT.
+        """
+        run = await self._get_run(run_id)
+        if run["current_stage"] != "MERGE_CONFLICT":
+            raise ConflictError(
+                "Can only resolve conflict in MERGE_CONFLICT stage",
+                run["current_stage"],
+            )
+
+        # Remove the old merge queue entry so enqueue can create a fresh one
+        if self.merge:
+            await self.merge.remove(run_id)
+        await self._emit(run_id, "merge.conflict_resolved", {"by": by})
+        await self._update_stage(run_id, "MERGE_CONFLICT", "MERGE_QUEUED")
         return await self._get_run(run_id)
 
     async def retry(self, run_id: str, by: str, note: str | None = None) -> dict:
@@ -329,7 +355,12 @@ class StateMachine:
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
             (run["id"],),
         )
-        if not job or job["status"] != "completed":
+        if not job:
+            return
+        if job["status"] in ("failed", "timeout", "interrupted"):
+            await self._transition_to_failed(run, job)
+            return
+        if job["status"] != "completed":
             return
 
         turn = job.get("turn_count") or 1
@@ -415,7 +446,12 @@ class StateMachine:
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
             (run["id"],),
         )
-        if not job or job["status"] != "completed":
+        if not job:
+            return
+        if job["status"] in ("failed", "timeout", "interrupted"):
+            await self._transition_to_failed(run, job)
+            return
+        if job["status"] != "completed":
             return
 
         turn = job.get("turn_count") or 1
@@ -458,15 +494,38 @@ class StateMachine:
         if self.merge:
             status = await self.merge.get_status(run["id"])
             if status == "merged":
+                await self._update_stage(run["id"], "MERGING", "MERGED")
                 now = datetime.now(timezone.utc).isoformat()
                 await self.db.execute(
-                    "UPDATE runs SET status='completed', current_stage='MERGED', "
-                    "updated_at=? WHERE id=?",
+                    "UPDATE runs SET status='completed', updated_at=? WHERE id=?",
                     (now, run["id"]),
                 )
                 await self._emit(run["id"], "run.completed", {})
             elif status == "conflict":
                 await self._update_stage(run["id"], "MERGING", "MERGE_CONFLICT")
+
+    async def _transition_to_failed(self, run: dict, job: dict) -> None:
+        """Transition a run to FAILED status when its job has a terminal failure."""
+        run_id = run["id"]
+        from_stage = run["current_stage"]
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE runs SET status='failed', current_stage='FAILED', "
+            "failed_at_stage=?, updated_at=? WHERE id=?",
+            (from_stage, now, run_id),
+        )
+        await self.db.execute(
+            "INSERT INTO steps(run_id,from_stage,to_stage,triggered_by,created_at) "
+            "VALUES(?,?,?,?,?)",
+            (run_id, from_stage, "FAILED", "system", now),
+        )
+        await self._emit(run_id, "stage.changed", {"from": from_stage, "to": "FAILED"})
+        await self._emit(run_id, "run.failed", {
+            "failed_at_stage": from_stage,
+            "job_id": job["id"],
+            "job_status": job["status"],
+        })
+        await self._snapshot(run_id)
 
     # ------------------------------------------------------------------
     # Evaluators
@@ -534,6 +593,14 @@ class StateMachine:
             (run_id, from_stage, to_stage, "system", now),
         )
         await self._emit(run_id, "stage.changed", {"from": from_stage, "to": to_stage, **extra})
+
+        # Emit gate.waiting when entering a review/conflict stage
+        _GATE_FOR_STAGE = {"REQ_REVIEW": "req", "DESIGN_REVIEW": "design",
+                           "DEV_REVIEW": "dev", "MERGE_CONFLICT": "merge"}
+        gate = _GATE_FOR_STAGE.get(to_stage)
+        if gate:
+            await self._emit(run_id, "gate.waiting", {"gate": gate, "stage": to_stage})
+
         await self._snapshot(run_id)
 
     async def _emit(self, run_id: str, event_type: str, payload: dict | None = None) -> None:

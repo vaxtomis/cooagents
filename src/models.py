@@ -28,6 +28,8 @@ class CreateRunRequest(BaseModel):
     repo_path: str
     description: str | None = None
     preferences: dict | None = None
+    notify_channel: str | None = None
+    notify_to: str | None = None
 
 
 class ApproveRequest(BaseModel):
@@ -53,6 +55,10 @@ class RecoverRequest(BaseModel):
 
 class SubmitRequirementRequest(BaseModel):
     content: str
+
+
+class ResolveConflictRequest(BaseModel):
+    by: str
 
 
 class CreateWebhookRequest(BaseModel):

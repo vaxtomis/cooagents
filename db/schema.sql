@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS runs (
   dev_worktree    TEXT,
   dev_branch      TEXT,
   preferences_json TEXT,
+  notify_channel  TEXT,
+  notify_to       TEXT,
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );

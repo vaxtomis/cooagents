@@ -491,12 +491,14 @@ class AcpxExecutor:
 
             if status == "completed":
                 await self._emit_event(run_id, "job.completed", {"job_id": job_id})
-                if self._state_machine:
-                    await self._state_machine.tick(run_id)
             elif status == "interrupted":
                 await self._emit_event(run_id, "job.interrupted", {"job_id": job_id, "reason": "signal"})
             else:
                 await self._emit_event(run_id, "job.failed", {"job_id": job_id, "exit_code": rc})
+
+            # Always tick so the state machine can react to any terminal job status
+            if self._state_machine:
+                await self._state_machine.tick(run_id)
 
         except asyncio.CancelledError:
             now = datetime.now(timezone.utc).isoformat()

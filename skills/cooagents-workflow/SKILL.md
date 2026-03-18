@@ -112,3 +112,39 @@ metadata:
 - **幂等重试**：网络错误时可重试 tick，状态机保证幂等
 - **错误上报**：FAILED 阶段参考 error-handling.md 处理，必要时告知用户
 - **审计留痕**：approve/reject 请求中的 `by` 字段必须填写真实用户标识
+
+## G. Webhook 事件消息（隔离会话）
+
+你会通过 hooks 收到格式如下的事件通知：
+
+```
+[cooagents:{event_type}] {ticket} {stage}
+run_id: {run_id}
+ticket: {ticket}
+stage: {current_stage}
+```
+
+收到后按上方决策树（§B）中对应阶段的动作执行。
+
+注意：你在隔离会话中运行，处理完即结束。你的回复会通过 deliver 机制自动投递到用户的消息渠道。
+
+对于审批类事件（`gate.waiting`）：
+1. exec `curl GET /api/v1/runs/{run_id}/artifacts` 获取产物内容
+2. 使用 `references/feishu-interaction.md` 中的模板格式化审批请求
+3. 回复审批模板（会自动投递到用户）
+4. 你不需要等待用户回复 — 用户的回复会由主会话 Agent 处理
+
+对于通知类事件（`run.completed`、`merge.conflict` 等）：
+1. 格式化通知消息
+2. 回复通知（会自动投递到用户）
+
+## H. 审批回复处理（主会话）
+
+当用户在对话中回复审批相关内容时（如"通过"、"驳回：原因..."），参考聊天记录中的审批请求消息，识别对应的 ticket 和 gate，然后执行审批操作。
+
+示例场景：
+- 聊天记录中有 "📋 任务 PROJ-42 等待审批 (design)"
+- 用户回复 "通过"
+- 你应执行：
+  1. exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/approve -H "Content-Type: application/json" -d '{"gate":"design","by":"用户标识"}'`
+  2. exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`

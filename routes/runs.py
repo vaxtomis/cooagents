@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from src.models import (
     CreateRunRequest, ApproveRequest, RejectRequest, RetryRequest,
-    RecoverRequest, SubmitRequirementRequest,
+    RecoverRequest, SubmitRequirementRequest, ResolveConflictRequest,
 )
 from src.exceptions import NotFoundError, ConflictError
 
@@ -11,7 +11,10 @@ router = APIRouter(tags=["runs"])
 @router.post("/runs", status_code=201)
 async def create_run(req: CreateRunRequest, request: Request):
     sm = request.app.state.sm
-    result = await sm.create_run(req.ticket, req.repo_path, req.description, req.preferences)
+    result = await sm.create_run(
+        req.ticket, req.repo_path, req.description, req.preferences,
+        notify_channel=req.notify_channel, notify_to=req.notify_to,
+    )
     return result
 
 
@@ -87,6 +90,12 @@ async def recover_run(run_id: str, req: RecoverRequest, request: Request):
 async def submit_requirement(run_id: str, req: SubmitRequirementRequest, request: Request):
     sm = request.app.state.sm
     return await sm.submit_requirement(run_id, req.content)
+
+
+@router.post("/runs/{run_id}/resolve-conflict")
+async def resolve_conflict(run_id: str, req: ResolveConflictRequest, request: Request):
+    sm = request.app.state.sm
+    return await sm.resolve_conflict(run_id, req.by)
 
 
 @router.delete("/runs/{run_id}")
