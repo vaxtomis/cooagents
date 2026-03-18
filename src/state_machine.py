@@ -316,6 +316,11 @@ class StateMachine:
         """Try to dispatch the design agent job if a host is available."""
         host = await self.hosts.select_host("claude")
         if not host:
+            await self._emit(run["id"], "host.unavailable", {
+                "stage": "DESIGN_QUEUED",
+                "agent_type": "claude",
+                "ticket": run["ticket"],
+            })
             return
 
         branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "design")
@@ -405,6 +410,11 @@ class StateMachine:
         """Try to dispatch the dev agent job if a host is available."""
         host = await self.hosts.select_host("codex")
         if not host:
+            await self._emit(run["id"], "host.unavailable", {
+                "stage": "DEV_QUEUED",
+                "agent_type": "codex",
+                "ticket": run["ticket"],
+            })
             return
 
         branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "dev")

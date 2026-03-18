@@ -6,13 +6,14 @@ logger = logging.getLogger(__name__)
 
 
 class Scheduler:
-    def __init__(self, db, host_manager, job_manager, agent_executor, webhook_notifier, config):
+    def __init__(self, db, host_manager, job_manager, agent_executor, webhook_notifier, config, state_machine=None):
         self.db = db
         self.host_manager = host_manager
         self.jobs = job_manager
         self.executor = agent_executor
         self.webhooks = webhook_notifier
         self.config = config
+        self.sm = state_machine
         self._tasks = []
 
     async def start(self):
@@ -38,6 +39,7 @@ class Scheduler:
                         await self.webhooks.notify("host.offline", {"host_id": host["id"]})
                     elif old_status == "offline" and is_online:
                         await self.webhooks.notify("host.online", {"host_id": host["id"]})
+                        await self._tick_queued_runs()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -105,3 +107,16 @@ class Scheduler:
                 raise
             except Exception as e:
                 logger.error(f"Reminder loop error: {e}")
+
+    async def _tick_queued_runs(self):
+        """Tick all runs stuck in QUEUED stages so they can pick up newly available hosts."""
+        if not self.sm:
+            return
+        queued = await self.db.fetchall(
+            "SELECT id FROM runs WHERE status='running' AND current_stage IN ('DESIGN_QUEUED','DEV_QUEUED')"
+        )
+        for run in queued:
+            try:
+                await self.sm.tick(run["id"])
+            except Exception as e:
+                logger.error(f"Auto-tick queued run {run['id']} failed: {e}")

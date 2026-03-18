@@ -15,6 +15,14 @@ async def list_hosts(request: Request):
 async def create_host(req: CreateAgentHostRequest, request: Request):
     hm = request.app.state.hosts
     await hm.register(req.id, req.host, req.agent_type, req.max_concurrent, req.ssh_key, req.labels)
+    # Auto-tick runs waiting in QUEUED stages for a host
+    sm = request.app.state.sm
+    db = request.app.state.db
+    queued = await db.fetchall(
+        "SELECT id FROM runs WHERE status='running' AND current_stage IN ('DESIGN_QUEUED','DEV_QUEUED')"
+    )
+    for run in queued:
+        await sm.tick(run["id"])
     hosts = await hm.list_all()
     return next((h for h in hosts if h["id"] == req.id), {})
 

@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
 
     # Background scheduler
     from src.scheduler import Scheduler
-    scheduler = Scheduler(db, hosts, jobs, executor, webhooks, settings)
+    scheduler = Scheduler(db, hosts, jobs, executor, webhooks, settings, state_machine=sm)
     await scheduler.start()
 
     app.state.db = db

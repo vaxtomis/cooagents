@@ -220,7 +220,7 @@ def test_openclaw_events_completeness():
     expected = {
         "gate.waiting", "job.completed", "job.failed", "job.timeout",
         "job.interrupted", "merge.conflict", "merge.completed",
-        "run.completed", "run.cancelled", "host.online",
+        "run.completed", "run.cancelled", "host.online", "host.unavailable",
     }
     assert OPENCLAW_EVENTS == expected
 
@@ -278,3 +278,33 @@ async def test_no_gate_waiting_for_auto_stages(sm, db, tmp_path):
         "SELECT * FROM events WHERE run_id=? AND event_type='gate.waiting'", (run_id,)
     )
     assert len(rows) == 0
+
+
+# ---------------------------------------------------------------------------
+# host.unavailable emission
+# ---------------------------------------------------------------------------
+
+async def test_host_unavailable_emitted_on_design_queued_no_hosts(sm, db, tmp_path):
+    """Ticking DESIGN_QUEUED with no hosts should emit host.unavailable."""
+    run = await sm.create_run("T-HU", str(tmp_path))
+    run_id = run["id"]
+
+    await sm.submit_requirement(run_id, "req content")
+    await sm.approve(run_id, "req", "tester")
+    # Simulate no available hosts
+    sm.hosts.select_host = AsyncMock(return_value=None)
+    # Now at DESIGN_QUEUED with no hosts registered
+    await sm.tick(run_id)
+
+    rows = await db.fetchall(
+        "SELECT * FROM events WHERE run_id=? AND event_type='host.unavailable'", (run_id,)
+    )
+    assert len(rows) >= 1
+    import json
+    payload = json.loads(rows[0]["payload_json"])
+    assert payload["stage"] == "DESIGN_QUEUED"
+    assert payload["agent_type"] == "claude"
+
+    # Run should still be in DESIGN_QUEUED (not advanced)
+    updated = await db.fetchone("SELECT current_stage FROM runs WHERE id=?", (run_id,))
+    assert updated["current_stage"] == "DESIGN_QUEUED"
