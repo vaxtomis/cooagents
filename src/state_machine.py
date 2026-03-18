@@ -644,12 +644,13 @@ class StateMachine:
                 host = dict(host)
 
         status = await self.executor.get_session_status(run["id"], job["agent_type"], host=host)
-        if status and status.get("status") == "running":
+        session_state = status.get("status") if status else None
+        if session_state in {"running", "alive"}:
             return job
 
         now = datetime.now(timezone.utc).isoformat()
         await self.jobs.update_status(job["id"], "interrupted", ended_at=now)
-        reason = status.get("status") if status else "missing"
+        reason = session_state or "missing"
         await self._emit(run["id"], "job.interrupted", {"job_id": job["id"], "reason": reason})
         updated = await self.db.fetchone("SELECT * FROM jobs WHERE id=?", (job["id"],))
         return dict(updated) if updated else {**job, "status": "interrupted", "ended_at": now}
