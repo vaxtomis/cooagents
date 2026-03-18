@@ -1,5 +1,7 @@
+import asyncio
 import pytest
 import time
+from pathlib import Path
 from httpx import AsyncClient, ASGITransport
 from src.database import Database
 from src.artifact_manager import ArtifactManager
@@ -13,11 +15,39 @@ from src.scheduler import Scheduler
 from src.config import load_settings
 
 
+async def _make_test_repo(path: Path) -> None:
+    proc = await asyncio.create_subprocess_exec(
+        "git", "init", str(path),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    await proc.communicate()
+    for cmd in [
+        ["git", "config", "user.email", "test@test.com"],
+        ["git", "config", "user.name", "Test"],
+        ["git", "checkout", "-b", "main"],
+    ]:
+        p = await asyncio.create_subprocess_exec(
+            *cmd, cwd=str(path),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await p.communicate()
+    (path / "README.md").write_text("# test\n")
+    for cmd in [
+        ["git", "add", "README.md"],
+        ["git", "commit", "-m", "init"],
+    ]:
+        p = await asyncio.create_subprocess_exec(
+            *cmd, cwd=str(path),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await p.communicate()
+
+
 @pytest.fixture
 async def client(tmp_path):
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
-    from src.exceptions import NotFoundError, ConflictError
+    from src.exceptions import NotFoundError, ConflictError, BadRequestError
 
     # Build a fresh app for testing
     test_app = FastAPI(title="cooagents-test")
@@ -54,6 +84,10 @@ async def client(tmp_path):
     async def conflict_handler(request, exc):
         return JSONResponse(status_code=409, content={"error": "conflict", "message": str(exc), "current_stage": exc.current_stage})
 
+    @test_app.exception_handler(BadRequestError)
+    async def bad_request_handler(request, exc):
+        return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(exc)})
+
     @test_app.get("/health")
     async def health(request: Request):
         active_runs = await db.fetchone("SELECT COUNT(*) as c FROM runs WHERE status='running'")
@@ -85,21 +119,29 @@ async def client(tmp_path):
     await db.close()
 
 
+@pytest.fixture
+async def test_repo(tmp_path):
+    repo = tmp_path / "test-repo"
+    repo.mkdir()
+    await _make_test_repo(repo)
+    return str(repo)
+
+
 async def test_health(client):
     resp = await client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
 
-async def test_create_run(client):
-    resp = await client.post("/api/v1/runs", json={"ticket": "T-1", "repo_path": "/tmp/repo"})
+async def test_create_run(client, test_repo):
+    resp = await client.post("/api/v1/runs", json={"ticket": "T-1", "repo_path": test_repo})
     assert resp.status_code == 201
     data = resp.json()
     assert data["current_stage"] == "REQ_COLLECTING"
 
 
-async def test_list_runs(client):
-    await client.post("/api/v1/runs", json={"ticket": "T-list", "repo_path": "/tmp/repo"})
+async def test_list_runs(client, test_repo):
+    await client.post("/api/v1/runs", json={"ticket": "T-list", "repo_path": test_repo})
     resp = await client.get("/api/v1/runs")
     assert resp.status_code == 200
     assert len(resp.json()) >= 1
@@ -110,8 +152,8 @@ async def test_get_run_not_found(client):
     assert resp.status_code == 404
 
 
-async def test_approve_wrong_stage(client):
-    resp = await client.post("/api/v1/runs", json={"ticket": "T-ws", "repo_path": "/tmp/repo"})
+async def test_approve_wrong_stage(client, test_repo):
+    resp = await client.post("/api/v1/runs", json={"ticket": "T-ws", "repo_path": test_repo})
     run_id = resp.json().get("run_id") or resp.json().get("id")
     resp = await client.post(f"/api/v1/runs/{run_id}/approve", json={"gate": "req", "by": "user"})
     assert resp.status_code == 409
@@ -125,3 +167,57 @@ async def test_list_agent_hosts(client):
 async def test_list_webhooks(client):
     resp = await client.get("/api/v1/webhooks")
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Repo ensure endpoint tests
+# ---------------------------------------------------------------------------
+
+async def test_ensure_repo_existing(client, tmp_path):
+    repo = tmp_path / "ensure-existing"
+    repo.mkdir()
+    await _make_test_repo(repo)
+    resp = await client.post("/api/v1/repos/ensure", json={"repo_path": str(repo)})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "exists"
+
+
+async def test_ensure_repo_init(client, tmp_path):
+    repo = tmp_path / "ensure-init"
+    resp = await client.post("/api/v1/repos/ensure", json={"repo_path": str(repo)})
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "initialized"
+    assert (repo / ".git").is_dir()
+
+
+async def test_ensure_repo_not_git(client, tmp_path):
+    plain = tmp_path / "ensure-plain"
+    plain.mkdir()
+    resp = await client.post("/api/v1/repos/ensure", json={"repo_path": str(plain)})
+    assert resp.status_code == 400
+
+
+async def test_create_run_invalid_repo(client, tmp_path):
+    resp = await client.post("/api/v1/runs", json={
+        "ticket": "T-bad-repo",
+        "repo_path": str(tmp_path / "nonexistent"),
+    })
+    assert resp.status_code == 400
+
+
+async def test_create_run_with_repo_url(client, tmp_path):
+    repo = tmp_path / "url-repo"
+    repo.mkdir()
+    await _make_test_repo(repo)
+    resp = await client.post("/api/v1/runs", json={
+        "ticket": "T-url",
+        "repo_path": str(repo),
+        "repo_url": "git@github.com:user/project.git",
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["current_stage"] == "REQ_COLLECTING"
+    # Verify repo_url is persisted in DB
+    run_id = data.get("run_id") or data.get("id")
+    resp2 = await client.get(f"/api/v1/runs/{run_id}")
+    assert resp2.json().get("repo_url") == "git@github.com:user/project.git"

@@ -1,7 +1,20 @@
 from fastapi import APIRouter, Request
-from src.models import MergeRequest
+from fastapi.responses import JSONResponse
+from src.models import MergeRequest, EnsureRepoRequest
+from src.exceptions import BadRequestError
 
 router = APIRouter(tags=["repos"])
+
+
+@router.post("/repos/ensure")
+async def ensure_repo(req: EnsureRepoRequest, request: Request):
+    from src.git_utils import ensure_repo as _ensure_repo
+    try:
+        result = await _ensure_repo(req.repo_path, req.repo_url)
+    except ValueError as e:
+        raise BadRequestError(str(e))
+    status_code = 200 if result == "exists" else 201
+    return JSONResponse(status_code=status_code, content={"status": result})
 
 
 @router.get("/runs/{run_id}/jobs")
