@@ -18,12 +18,13 @@ from src.webhook_notifier import WebhookNotifier
 from src.merge_manager import MergeManager
 from src.state_machine import StateMachine
 from src.config import load_settings
-from src.exceptions import NotFoundError, ConflictError
+from src.exceptions import NotFoundError, ConflictError, BadRequestError
 
 
 @pytest.fixture
 async def setup(tmp_path):
     """Set up a full test app with a real DB and mocked agent dispatch."""
+    (tmp_path / ".git").mkdir(exist_ok=True)
     test_app = FastAPI(title="cooagents-e2e")
 
     settings = load_settings()
@@ -73,6 +74,10 @@ async def setup(tmp_path):
     @test_app.exception_handler(ConflictError)
     async def conflict_handler(request, exc):
         return JSONResponse(status_code=409, content={"error": "conflict", "message": str(exc), "current_stage": exc.current_stage})
+
+    @test_app.exception_handler(BadRequestError)
+    async def bad_request_handler(request, exc):
+        return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(exc)})
 
     @test_app.get("/health")
     async def health(request: Request):

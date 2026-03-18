@@ -39,6 +39,7 @@ def mocks():
 
 @pytest.fixture
 async def sm(db, mocks, tmp_path):
+    (tmp_path / ".git").mkdir(exist_ok=True)
     webhook, executor, host_mgr, merge_mgr = mocks
     am = ArtifactManager(db)
     jm = JobManager(db)
@@ -70,8 +71,8 @@ async def sm(db, mocks, tmp_path):
 # create_run
 # ---------------------------------------------------------------------------
 
-async def test_create_run(sm):
-    run = await sm.create_run("T-1", "/repo")
+async def test_create_run(sm, tmp_path):
+    run = await sm.create_run("T-1", str(tmp_path))
     assert run["current_stage"] == "REQ_COLLECTING"
     assert run["status"] == "running"
 

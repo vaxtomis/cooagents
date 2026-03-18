@@ -23,7 +23,8 @@ async def db(tmp_path):
 
 
 @pytest.fixture
-async def sm(db):
+async def sm(db, tmp_path):
+    (tmp_path / ".git").mkdir(exist_ok=True)
     am = ArtifactManager(db)
     am.render_task = AsyncMock(return_value="task-path")
     webhook = AsyncMock()
@@ -100,10 +101,10 @@ def test_settings_has_openclaw_hooks():
 # Task 3: State Machine — notify fields on create_run
 # ---------------------------------------------------------------------------
 
-async def test_create_run_stores_notify_fields(sm, db):
+async def test_create_run_stores_notify_fields(sm, db, tmp_path):
     """create_run should persist notify_channel and notify_to."""
     run = await sm.create_run(
-        "T-1", "/repo",
+        "T-1", str(tmp_path),
         notify_channel="feishu", notify_to="ou_abc123",
     )
     row = await db.fetchone("SELECT notify_channel, notify_to FROM runs WHERE id=?", (run["id"],))
@@ -111,9 +112,9 @@ async def test_create_run_stores_notify_fields(sm, db):
     assert row["notify_to"] == "ou_abc123"
 
 
-async def test_create_run_notify_fields_optional(sm, db):
+async def test_create_run_notify_fields_optional(sm, db, tmp_path):
     """create_run without notify fields should store NULL."""
-    run = await sm.create_run("T-2", "/repo")
+    run = await sm.create_run("T-2", str(tmp_path))
     row = await db.fetchone("SELECT notify_channel, notify_to FROM runs WHERE id=?", (run["id"],))
     assert row["notify_channel"] is None
     assert row["notify_to"] is None
@@ -228,16 +229,12 @@ def test_openclaw_events_completeness():
 # gate.waiting emission
 # ---------------------------------------------------------------------------
 
-async def test_gate_waiting_emitted_on_review_stage(sm, db):
+async def test_gate_waiting_emitted_on_review_stage(sm, db, tmp_path):
     """Entering a *_REVIEW stage should emit gate.waiting event."""
-    run = await sm.create_run("T-GW", "/repo")
+    run = await sm.create_run("T-GW", str(tmp_path))
     run_id = run["id"]
 
     # Submit requirement to advance to REQ_REVIEW
-    import os
-    from pathlib import Path
-    req_dir = Path("/repo") / "docs" / "req"
-    req_dir.mkdir(parents=True, exist_ok=True)
     await sm.submit_requirement(run_id, "test requirement")
 
     # Check that gate.waiting was emitted for req gate
@@ -251,16 +248,12 @@ async def test_gate_waiting_emitted_on_review_stage(sm, db):
     assert payload["stage"] == "REQ_REVIEW"
 
 
-async def test_gate_waiting_emitted_on_approve_to_next_review(sm, db):
+async def test_gate_waiting_emitted_on_approve_to_next_review(sm, db, tmp_path):
     """Approving req gate → DESIGN flow → eventually DESIGN_REVIEW should emit gate.waiting."""
-    run = await sm.create_run("T-GW2", "/repo")
+    run = await sm.create_run("T-GW2", str(tmp_path))
     run_id = run["id"]
 
     # Advance to REQ_REVIEW
-    import os
-    from pathlib import Path
-    req_dir = Path("/repo") / "docs" / "req"
-    req_dir.mkdir(parents=True, exist_ok=True)
     await sm.submit_requirement(run_id, "req content")
 
     # Approve req → should go to DESIGN_QUEUED (no gate.waiting for DESIGN_QUEUED)
@@ -275,9 +268,9 @@ async def test_gate_waiting_emitted_on_approve_to_next_review(sm, db):
     assert len(rows) == 1  # only for REQ_REVIEW
 
 
-async def test_no_gate_waiting_for_auto_stages(sm, db):
+async def test_no_gate_waiting_for_auto_stages(sm, db, tmp_path):
     """Auto stages (INIT, *_QUEUED, *_DISPATCHED, etc.) should NOT emit gate.waiting."""
-    run = await sm.create_run("T-NGW", "/repo")
+    run = await sm.create_run("T-NGW", str(tmp_path))
     run_id = run["id"]
 
     # create_run goes INIT → REQ_COLLECTING, neither should emit gate.waiting
