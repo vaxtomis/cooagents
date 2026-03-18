@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS runs (
   id              TEXT PRIMARY KEY,
   ticket          TEXT NOT NULL,
   repo_path       TEXT NOT NULL,
+  repo_url        TEXT,
   status          TEXT DEFAULT 'running' CHECK(status IN ('running','completed','failed','cancelled')),
   current_stage   TEXT NOT NULL DEFAULT 'INIT',
   description     TEXT,

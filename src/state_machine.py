@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.exceptions import ConflictError, NotFoundError
+from src.exceptions import BadRequestError, ConflictError, NotFoundError
 
 GATE_STAGES = {"req": "REQ_REVIEW", "design": "DESIGN_REVIEW", "dev": "DEV_REVIEW"}
 REJECT_TARGETS = {"req": "REQ_COLLECTING", "design": "DESIGN_QUEUED", "dev": "DEV_QUEUED"}
@@ -87,12 +87,21 @@ class StateMachine:
         preferences: dict | None = None,
         notify_channel: str | None = None,
         notify_to: str | None = None,
+        repo_url: str | None = None,
     ) -> dict:
         """Create a new workflow run and advance it to REQ_COLLECTING.
 
         Returns the run dict (possibly with a ``warning`` key if a duplicate
         active run already exists for the same ticket).
         """
+        # Validate repo_path is an existing git repo
+        repo_p = Path(repo_path)
+        if not repo_p.exists() or not (repo_p / ".git").is_dir():
+            raise BadRequestError(
+                f"repo_path does not exist or is not a git repository: {repo_path}. "
+                "Call POST /repos/ensure first."
+            )
+
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
         prefs = json.dumps(preferences) if preferences else None
@@ -104,10 +113,10 @@ class StateMachine:
         warning = f"Active run already exists for ticket {ticket}" if existing else None
 
         await self.db.execute(
-            "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
+            "INSERT INTO runs(id,ticket,repo_path,repo_url,status,current_stage,"
             "description,preferences_json,notify_channel,notify_to,created_at,updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-            (run_id, ticket, repo_path, "running", "INIT", description, prefs,
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (run_id, ticket, repo_path, repo_url, "running", "INIT", description, prefs,
              notify_channel, notify_to, now, now),
         )
         await self._update_stage(run_id, "INIT", "REQ_COLLECTING")
