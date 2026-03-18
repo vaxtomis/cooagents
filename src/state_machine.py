@@ -360,7 +360,12 @@ class StateMachine:
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
             (run["id"],),
         )
-        if job and job["status"] == "running":
+        if not job:
+            return
+        if job["status"] in ("failed", "timeout", "interrupted"):
+            await self._transition_to_failed(run, job)
+            return
+        if job["status"] == "running":
             await self._update_stage(run["id"], "DESIGN_DISPATCHED", "DESIGN_RUNNING")
 
     async def _tick_design_running(self, run: dict) -> None:
@@ -456,7 +461,12 @@ class StateMachine:
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
             (run["id"],),
         )
-        if job and job["status"] == "running":
+        if not job:
+            return
+        if job["status"] in ("failed", "timeout", "interrupted"):
+            await self._transition_to_failed(run, job)
+            return
+        if job["status"] == "running":
             await self._update_stage(run["id"], "DEV_DISPATCHED", "DEV_RUNNING")
 
     async def _tick_dev_running(self, run: dict) -> None:

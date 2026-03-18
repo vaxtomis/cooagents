@@ -382,3 +382,51 @@ async def test_merging_to_merged_records_step(sm, mocks, db, tmp_path):
     )
     assert step is not None
     assert step["from_stage"] == "MERGING"
+
+
+# ------------------------------------------------------------------
+# DISPATCHED → FAILED on job failure (GitHub issue #1)
+# ------------------------------------------------------------------
+
+async def test_design_dispatched_transitions_to_failed_on_job_failure(sm, db, mocks, tmp_path):
+    """DESIGN_DISPATCHED should transition to FAILED when the job fails."""
+    from datetime import datetime, timezone
+    run = await sm.create_run("T-DF", str(tmp_path))
+    rid = run["id"]
+
+    # Fast-forward to DESIGN_DISPATCHED and insert a failed job
+    await db.execute(
+        "UPDATE runs SET current_stage='DESIGN_DISPATCHED' WHERE id=?", (rid,),
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,started_at) VALUES(?,?,?,?,?,?,?)",
+        ("job-desfail", rid, "local", "claude", "DESIGN_DISPATCHED", "failed", now),
+    )
+
+    # Tick should transition to FAILED
+    result = await sm.tick(rid)
+    assert result["current_stage"] == "FAILED"
+    assert result["status"] == "failed"
+
+
+async def test_dev_dispatched_transitions_to_failed_on_job_failure(sm, db, mocks, tmp_path):
+    """DEV_DISPATCHED should transition to FAILED when the job fails."""
+    run = await sm.create_run("T-DDF", str(tmp_path))
+    rid = run["id"]
+
+    # Fast-forward to DEV_DISPATCHED
+    await db.execute(
+        "UPDATE runs SET current_stage='DEV_DISPATCHED' WHERE id=?", (rid,),
+    )
+    # Insert a failed job
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,started_at) VALUES(?,?,?,?,?,?,?)",
+        ("job-devfail", rid, "local", "codex", "DEV_DISPATCHED", "failed", now),
+    )
+
+    result = await sm.tick(rid)
+    assert result["current_stage"] == "FAILED"
+    assert result["status"] == "failed"
