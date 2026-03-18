@@ -11,7 +11,7 @@ from src.acpx_executor import AcpxExecutor
 from src.webhook_notifier import WebhookNotifier
 from src.merge_manager import MergeManager
 from src.state_machine import StateMachine
-from src.exceptions import NotFoundError, ConflictError
+from src.exceptions import NotFoundError, ConflictError, BadRequestError
 from src.skill_deployer import deploy_skills
 
 
@@ -75,6 +75,11 @@ async def not_found_handler(request, exc):
 @app.exception_handler(ConflictError)
 async def conflict_handler(request, exc):
     return JSONResponse(status_code=409, content={"error": "conflict", "message": str(exc), "current_stage": exc.current_stage})
+
+
+@app.exception_handler(BadRequestError)
+async def bad_request_handler(request, exc):
+    return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(exc)})
 
 
 @app.get("/health")

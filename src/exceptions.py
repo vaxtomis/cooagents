@@ -8,3 +8,7 @@ class ConflictError(Exception):
     def __init__(self, message: str, current_stage: str = None):
         super().__init__(message)
         self.current_stage = current_stage
+
+
+class BadRequestError(Exception):
+    """Raised when request input is invalid (400)."""
