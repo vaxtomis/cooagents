@@ -60,11 +60,11 @@ def test_build_prompt_cmd(executor):
     cmd = executor._build_acpx_prompt_cmd("claude", "run-abc-design", "/wt", 1800, "/task.md")
     assert cmd == [
         "acpx", "--cwd", "/wt",
-        "claude",
-        "-s", "run-abc-design",
         "--format", "json",
         "--approve-all",
         "--timeout", "1800",
+        "claude",
+        "-s", "run-abc-design",
         "--file", "/task.md",
     ]
 
@@ -73,11 +73,11 @@ def test_build_prompt_cmd_codex(executor):
     cmd = executor._build_acpx_prompt_cmd("codex", "run-abc-dev", "/wt", 3600)
     assert cmd == [
         "acpx", "--cwd", "/wt",
-        "codex",
-        "-s", "run-abc-dev",
         "--format", "json",
         "--approve-all",
         "--timeout", "3600",
+        "codex",
+        "-s", "run-abc-dev",
     ]
 
 
@@ -86,25 +86,33 @@ def test_build_prompt_cmd_codex(executor):
 # ------------------------------------------------------------------
 
 def test_build_prompt_cmd_with_config(executor_with_config):
-    """With config, prompt cmd includes --ttl, --json-strict, --model, --allowed-tools."""
+    """With config, prompt cmd includes --ttl, --json-strict, --model, --allowed-tools before agent."""
     cmd = executor_with_config._build_acpx_prompt_cmd("claude", "run-abc-design", "/wt", 1800, "/task.md")
-    assert "--ttl" in cmd
+    agent_idx = cmd.index("claude")
+    # All global options must appear before the agent subcommand
+    assert cmd.index("--ttl") < agent_idx
     assert cmd[cmd.index("--ttl") + 1] == "600"
-    assert "--json-strict" in cmd
-    assert "--model" in cmd
+    assert cmd.index("--json-strict") < agent_idx
+    assert cmd.index("--model") < agent_idx
     assert cmd[cmd.index("--model") + 1] == "claude-sonnet-4-20250514"
-    assert "--allowed-tools" in cmd
+    assert cmd.index("--allowed-tools") < agent_idx
     assert cmd[cmd.index("--allowed-tools") + 1] == "fs/read_text_file"
-    assert "--file" in cmd
+    assert cmd.index("--format") < agent_idx
+    assert cmd.index("--approve-all") < agent_idx
+    assert cmd.index("--timeout") < agent_idx
+    # Subcommand options must appear after the agent
+    assert cmd.index("-s") > agent_idx
+    assert cmd.index("--file") > agent_idx
 
 
 def test_build_prompt_cmd_codex_no_allowed_tools(executor_with_config):
     """Codex (dev) with allowed_tools_dev=None should not include --allowed-tools."""
     cmd = executor_with_config._build_acpx_prompt_cmd("codex", "run-abc-dev", "/wt", 3600)
+    agent_idx = cmd.index("codex")
     assert "--allowed-tools" not in cmd
-    assert "--ttl" in cmd
-    assert "--json-strict" in cmd
-    assert "--model" in cmd
+    assert cmd.index("--ttl") < agent_idx
+    assert cmd.index("--json-strict") < agent_idx
+    assert cmd.index("--model") < agent_idx
 
 
 # ------------------------------------------------------------------
@@ -113,24 +121,33 @@ def test_build_prompt_cmd_codex_no_allowed_tools(executor_with_config):
 
 def test_build_exec_cmd(executor):
     cmd = executor._build_acpx_exec_cmd("claude", "/wt", 60, prompt="summarize")
-    assert cmd[:4] == ["acpx", "--cwd", "/wt", "claude"]
-    assert "--cwd" in cmd
-    assert "--approve-all" in cmd
+    agent_idx = cmd.index("claude")
+    # Global options before agent
+    assert cmd.index("--cwd") < agent_idx
+    assert cmd.index("--approve-all") < agent_idx
+    assert cmd.index("--format") < agent_idx
+    assert cmd.index("--timeout") < agent_idx
+    # exec subcommand and prompt after agent
+    assert cmd.index("exec") > agent_idx
     assert "summarize" in cmd
+    assert cmd.index("summarize") > agent_idx
     assert "--file" not in cmd
 
 
 def test_build_exec_cmd_with_file(executor):
     cmd = executor._build_acpx_exec_cmd("codex", "/wt", 120, task_file="/prompt.md")
-    assert cmd[:4] == ["acpx", "--cwd", "/wt", "codex"]
-    assert "--file" in cmd
+    agent_idx = cmd.index("codex")
+    assert cmd.index("--cwd") < agent_idx
+    assert cmd.index("exec") > agent_idx
+    assert cmd.index("--file") > agent_idx
     assert cmd[cmd.index("--file") + 1] == "/prompt.md"
 
 
 def test_build_exec_cmd_with_config(executor_with_config):
     cmd = executor_with_config._build_acpx_exec_cmd("claude", "/wt", 60, prompt="check")
-    assert "--json-strict" in cmd
-    assert "--model" in cmd
+    agent_idx = cmd.index("claude")
+    assert cmd.index("--json-strict") < agent_idx
+    assert cmd.index("--model") < agent_idx
     # exec mode should NOT include --ttl (no session to keep alive)
     assert "--ttl" not in cmd
 
@@ -152,21 +169,24 @@ def test_build_close_cmd(executor):
 
 def test_build_status_cmd(executor):
     cmd = executor._build_acpx_status_cmd("claude", "run-abc-design", "/wt")
-    assert cmd == ["acpx", "--cwd", "/wt", "claude", "status", "-s", "run-abc-design", "--format", "json"]
+    assert cmd == ["acpx", "--cwd", "/wt", "--format", "json", "claude", "status", "-s", "run-abc-design"]
 
 
 def test_build_show_cmd(executor):
     cmd = executor._build_acpx_show_cmd("claude", "run-abc-design", "/wt")
-    assert "sessions" in cmd
-    assert "show" in cmd
-    assert "--format" in cmd
-    assert "json" in cmd[cmd.index("--format") + 1]
+    agent_idx = cmd.index("claude")
+    assert cmd.index("--format") < agent_idx
+    assert cmd[cmd.index("--format") + 1] == "json"
+    assert cmd.index("sessions") > agent_idx
+    assert cmd.index("show") > agent_idx
 
 
 def test_build_history_cmd(executor):
     cmd = executor._build_acpx_history_cmd("codex", "run-abc-dev", "/wt", limit=50)
-    assert "sessions" in cmd
-    assert "history" in cmd
+    agent_idx = cmd.index("codex")
+    assert cmd.index("--format") < agent_idx
+    assert cmd.index("sessions") > agent_idx
+    assert cmd.index("history") > agent_idx
     assert "--limit" in cmd
     assert cmd[cmd.index("--limit") + 1] == "50"
 
