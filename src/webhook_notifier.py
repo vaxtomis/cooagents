@@ -2,6 +2,7 @@ import json
 import hmac
 import hashlib
 import asyncio
+import uuid
 from datetime import datetime, timezone
 
 
@@ -67,7 +68,28 @@ class WebhookNotifier:
             await self._deliver_to_openclaw(event_type, payload)
 
     async def _deliver_to_openclaw(self, event_type, payload):
-        """POST event to OpenClaw /hooks/agent endpoint."""
+        """POST event to OpenClaw /hooks/agent endpoint with retry."""
+        run_id = payload.get("run_id")
+        idem_key = self._make_openclaw_idempotency_key(run_id, event_type)
+        failure = None
+
+        for delay in [0, 5, 30]:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            success, failure = await self._deliver_to_openclaw_once(event_type, payload, idem_key)
+            if success:
+                return
+
+        await self._record_openclaw_delivery_failure(run_id, event_type, failure or {})
+
+    def _make_openclaw_idempotency_key(self, run_id, event_type):
+        key = f"cooagents:{run_id or 'system'}:{event_type}:{uuid.uuid4().hex}"
+        if len(key) > 256:
+            key = key[:256]
+        return key
+
+    async def _deliver_to_openclaw_once(self, event_type, payload, idem_key):
+        """POST a single attempt to OpenClaw /hooks/agent endpoint."""
         cfg = self._openclaw_hooks
         run_id = payload.get("run_id")
 
@@ -93,12 +115,6 @@ class WebhookNotifier:
             f"stage: {stage}"
         )
 
-        # Idempotency key: cooagents:{run_id}:{event_type}:{timestamp_s}
-        ts = int(datetime.now(timezone.utc).timestamp())
-        idem_key = f"cooagents:{run_id or 'system'}:{event_type}:{ts}"
-        if len(idem_key) > 256:
-            idem_key = idem_key[:256]
-
         body = json.dumps({
             "message": message,
             "name": "cooagents",
@@ -123,20 +139,23 @@ class WebhookNotifier:
                     resp_body = resp.text
                 except Exception:
                     pass
-                now = datetime.now(timezone.utc).isoformat()
-                await self.db.execute(
-                    "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-                    (run_id or "system", "openclaw.hooks.delivery_failed",
-                     json.dumps({"event_type": event_type, "status_code": resp.status_code,
-                                 "response": resp_body[:500]}), now)
-                )
+                return False, {
+                    "event_type": event_type,
+                    "status_code": resp.status_code,
+                    "response": resp_body[:500],
+                }
+            return True, None
         except Exception as exc:
-            now = datetime.now(timezone.utc).isoformat()
-            await self.db.execute(
-                "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-                (run_id or "system", "openclaw.hooks.delivery_failed",
-                 json.dumps({"event_type": event_type, "error": str(exc)[:200]}), now)
-            )
+            return False, {"event_type": event_type, "error": str(exc)[:200]}
+
+    async def _record_openclaw_delivery_failure(self, run_id, event_type, failure):
+        now = datetime.now(timezone.utc).isoformat()
+        payload = {"event_type": event_type}
+        payload.update(failure or {})
+        await self.db.execute(
+            "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+            (run_id or "system", "openclaw.hooks.delivery_failed", json.dumps(payload), now)
+        )
 
     async def _deliver_with_retry(self, webhook, event_type, payload):
         delays = [0, 5, 30]

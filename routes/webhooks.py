@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Request
 from src.models import CreateWebhookRequest
 from src.exceptions import NotFoundError
@@ -30,6 +32,23 @@ async def delete_webhook(webhook_id: int, request: Request):
 async def get_deliveries(webhook_id: int, request: Request):
     db = request.app.state.db
     rows = await db.fetchall(
-        "SELECT * FROM events WHERE event_type='webhook.delivery_failed' ORDER BY created_at DESC LIMIT 50"
+        "SELECT * FROM events "
+        "WHERE event_type IN ('webhook.delivery_failed','openclaw.hooks.delivery_failed') "
+        "ORDER BY created_at DESC LIMIT 200"
     )
-    return [dict(r) for r in rows]
+    deliveries = []
+    for row in rows:
+        record = dict(row)
+        if record["event_type"] == "openclaw.hooks.delivery_failed":
+            deliveries.append(record)
+            continue
+
+        try:
+            payload = json.loads(record.get("payload_json") or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+
+        if payload.get("webhook_id") == webhook_id:
+            deliveries.append(record)
+
+    return deliveries[:50]

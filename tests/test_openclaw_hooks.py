@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.database import Database
 from src.config import OpenclawHooksConfig, Settings
@@ -209,6 +209,80 @@ async def test_openclaw_uses_global_defaults_when_run_has_no_notify(wn_with_hook
 
     assert captured["body"]["channel"] == "feishu"
     assert captured["body"]["to"] == "ou_default"
+
+
+async def test_openclaw_delivery_retries_before_succeeding(wn_with_hooks, db):
+    """OpenClaw delivery should retry transient failures before logging failure."""
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
+        "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("r3", "PROJ-100", "/repo", "running", "REQ_REVIEW",
+         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+    )
+
+    attempts = {"count": 0}
+
+    async def mock_post(url, content, headers):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise RuntimeError("temporary network failure")
+        resp = MagicMock()
+        resp.status_code = 200
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.post = mock_post
+    wn_with_hooks._client = mock_client
+
+    with patch("src.webhook_notifier.asyncio.sleep", new=AsyncMock()):
+        await wn_with_hooks.notify("gate.waiting", {"run_id": "r3"})
+
+    rows = await db.fetchall(
+        "SELECT * FROM events WHERE event_type='openclaw.hooks.delivery_failed'"
+    )
+    assert attempts["count"] == 3
+    assert rows == []
+
+
+async def test_openclaw_idempotency_key_changes_even_with_same_second(wn_with_hooks, db):
+    """OpenClaw idempotencyKey should stay unique for repeated events in the same second."""
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
+        "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("r4", "PROJ-101", "/repo", "running", "REQ_REVIEW",
+         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+    )
+
+    captured = []
+
+    async def mock_post(url, content, headers):
+        captured.append(json.loads(content))
+        resp = MagicMock()
+        resp.status_code = 200
+        return resp
+
+    class FixedMoment:
+        def isoformat(self):
+            return "2026-03-18T01:02:03+00:00"
+
+        def timestamp(self):
+            return 1_774_333_323
+
+    class FixedDateTime:
+        @classmethod
+        def now(cls, tz=None):
+            return FixedMoment()
+
+    mock_client = AsyncMock()
+    mock_client.post = mock_post
+    wn_with_hooks._client = mock_client
+
+    with patch("src.webhook_notifier.datetime", FixedDateTime):
+        await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r4"})
+        await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r4"})
+
+    assert len(captured) == 2
+    assert captured[0]["idempotencyKey"] != captured[1]["idempotencyKey"]
 
 
 # ---------------------------------------------------------------------------

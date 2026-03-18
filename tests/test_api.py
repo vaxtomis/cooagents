@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 import time
 from pathlib import Path
@@ -167,6 +168,37 @@ async def test_list_agent_hosts(client):
 async def test_list_webhooks(client):
     resp = await client.get("/api/v1/webhooks")
     assert resp.status_code == 200
+
+
+async def test_webhook_deliveries_include_openclaw_and_filter_webhook_id(client):
+    app = client._transport.app
+    db = app.state.db
+    wid = await app.state.webhooks.register("http://example.com/hook")
+
+    await db.execute(
+        "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+        ("system", "webhook.delivery_failed",
+         json.dumps({"webhook_id": wid, "event_type": "gate.waiting"}), "2026-03-18T00:00:01Z"),
+    )
+    await db.execute(
+        "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+        ("system", "webhook.delivery_failed",
+         json.dumps({"webhook_id": wid + 1, "event_type": "run.completed"}), "2026-03-18T00:00:02Z"),
+    )
+    await db.execute(
+        "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+        ("system", "openclaw.hooks.delivery_failed",
+         json.dumps({"event_type": "job.failed", "status_code": 502}), "2026-03-18T00:00:03Z"),
+    )
+
+    resp = await client.get(f"/api/v1/webhooks/{wid}/deliveries")
+    assert resp.status_code == 200
+    data = resp.json()
+    event_types = [row["event_type"] for row in data]
+
+    assert "openclaw.hooks.delivery_failed" in event_types
+    assert event_types.count("webhook.delivery_failed") == 1
+    assert json.loads(data[-1]["payload_json"])["webhook_id"] == wid
 
 
 # ---------------------------------------------------------------------------
