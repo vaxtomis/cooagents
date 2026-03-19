@@ -382,3 +382,111 @@ async def test_restore_on_startup_ticks_run_after_reconciling_dead_session(execu
     assert job["status"] == "interrupted"
     assert job["ended_at"] is not None
     state_machine.tick.assert_called_once_with("run-startup-1")
+
+
+async def test_restore_on_startup_prefers_end_turn_events_over_interrupted(executor, db, tmp_path):
+    """restore_on_startup should keep completed work completed when events already contain end_turn."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    events_path = tmp_path / ".coop" / "jobs" / "job-startup-endturn" / "events.jsonl"
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.write_text('{"result":{"stopReason":"end_turn"}}\n', encoding="utf-8")
+
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-startup-endturn", "T-2", "/repo", "running", "DESIGN_RUNNING", now, now),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,events_file,started_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "job-startup-endturn",
+            "run-startup-endturn",
+            None,
+            "claude",
+            "DESIGN_RUNNING",
+            "running",
+            "/t.md",
+            "/wt",
+            "run-startup-endturn-design",
+            str(events_path),
+            now,
+        ),
+    )
+
+    executor.get_session_status = AsyncMock(return_value={"status": "dead"})
+    state_machine = AsyncMock()
+    state_machine.tick = AsyncMock()
+    executor.set_state_machine(state_machine)
+
+    await executor.restore_on_startup()
+
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-startup-endturn",))
+    assert job["status"] == "completed"
+    assert job["ended_at"] is not None
+    state_machine.tick.assert_called_once_with("run-startup-endturn")
+
+
+class _FakeStdout:
+    def __init__(self, lines):
+        self._lines = iter(lines)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._lines)
+        except StopIteration:
+            raise StopAsyncIteration
+
+
+class _FakeProcess:
+    def __init__(self, lines, returncode):
+        self.stdout = _FakeStdout(lines)
+        self.returncode = returncode
+
+    async def wait(self):
+        return self.returncode
+
+
+async def test_watch_prefers_end_turn_events_over_interrupted_exit_code(executor, db):
+    """_watch should mark the job completed when end_turn was already observed."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-watch-endturn", "T-3", "/repo", "running", "DESIGN_RUNNING", now, now),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            "job-watch-endturn",
+            "run-watch-endturn",
+            "local",
+            "claude",
+            "DESIGN_RUNNING",
+            "running",
+            "/t.md",
+            "/wt",
+            "run-watch-endturn-design",
+            now,
+        ),
+    )
+
+    state_machine = AsyncMock()
+    state_machine.tick = AsyncMock()
+    executor.set_state_machine(state_machine)
+
+    process = _FakeProcess([b'{"result":{"stopReason":"end_turn"}}\n'], 130)
+    await executor._watch("job-watch-endturn", process, "run-watch-endturn", "local", "run-watch-endturn-design")
+
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-watch-endturn",))
+    events = await db.fetchall("SELECT event_type FROM events WHERE run_id=? ORDER BY id", ("run-watch-endturn",))
+    event_types = [row["event_type"] for row in events]
+
+    assert job["status"] == "completed"
+    assert job["events_file"] is not None
+    assert "job.completed" in event_types
+    assert "job.interrupted" not in event_types
+    state_machine.tick.assert_called_once_with("run-watch-endturn")

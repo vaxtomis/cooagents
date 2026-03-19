@@ -639,6 +639,44 @@ class StateMachine:
         shutil.copyfile(source, target)
         return target.relative_to(Path(worktree)).as_posix()
 
+    def _resolve_job_events_path(self, job: dict) -> Path:
+        events_path = Path(job["events_file"]) if job.get("events_file") else Path(self.coop_dir) / "jobs" / job["id"] / "events.jsonl"
+        if not events_path.is_absolute():
+            project_relative = self.project_root / events_path
+            events_path = project_relative if project_relative.exists() else Path(self.coop_dir) / events_path
+        return events_path
+
+    def _json_contains_stop_reason(self, value, stop_reason: str) -> bool:
+        if isinstance(value, dict):
+            if value.get("stopReason") == stop_reason:
+                return True
+            return any(self._json_contains_stop_reason(child, stop_reason) for child in value.values())
+        if isinstance(value, list):
+            return any(self._json_contains_stop_reason(child, stop_reason) for child in value)
+        return False
+
+    def _job_has_stop_reason(self, job: dict, stop_reason: str) -> bool:
+        events_path = self._resolve_job_events_path(job)
+        if not events_path.exists():
+            return False
+
+        try:
+            with events_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if self._json_contains_stop_reason(payload, stop_reason):
+                        return True
+        except OSError:
+            return False
+
+        return False
+
     async def _reconcile_job_session(self, run: dict, job: dict) -> dict:
         if job["status"] != "running" or not hasattr(self.executor, "get_session_status"):
             return job
@@ -653,6 +691,12 @@ class StateMachine:
         session_state = status.get("status") if status else None
         if session_state in {"running", "alive"}:
             return job
+
+        if self._job_has_stop_reason(job, "end_turn"):
+            now = datetime.now(timezone.utc).isoformat()
+            await self.jobs.update_status(job["id"], "completed", ended_at=now)
+            updated = await self.db.fetchone("SELECT * FROM jobs WHERE id=?", (job["id"],))
+            return dict(updated) if updated else {**job, "status": "completed", "ended_at": now}
 
         now = datetime.now(timezone.utc).isoformat()
         await self.jobs.update_status(job["id"], "interrupted", ended_at=now)

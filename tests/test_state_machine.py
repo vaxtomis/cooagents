@@ -511,6 +511,65 @@ async def test_design_dispatched_reconciles_dead_running_session_to_failed(sm, d
     assert job["ended_at"] is not None
 
 
+async def test_design_running_prefers_end_turn_events_over_dead_session(sm, db, mocks, tmp_path):
+    """DESIGN_RUNNING should treat end_turn as completed even if ACP status later reports dead."""
+    _, executor, _, _ = mocks
+    executor.get_session_status = AsyncMock(
+        return_value={"status": "dead", "summary": "queue owner unavailable", "signal": "SIGTERM"}
+    )
+    executor.close_session = AsyncMock()
+
+    run = await sm.create_run("T-DES-ENDTURN", str(tmp_path))
+    rid = run["id"]
+    await sm.submit_requirement(rid, "# Req")
+    await sm.approve(rid, "req", "user1")
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    events_path = tmp_path / "jobs" / "job-des-endturn" / "events.jsonl"
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.write_text('{"id":2,"result":{"stopReason":"end_turn"}}\n', encoding="utf-8")
+
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,turn_count,events_file,started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "job-des-endturn",
+            rid,
+            "local",
+            "claude",
+            "DESIGN_RUNNING",
+            "running",
+            "/t.md",
+            str(tmp_path),
+            "run-des-endturn-design",
+            1,
+            str(events_path),
+            now,
+        ),
+    )
+    await db.execute(
+        "UPDATE runs SET current_stage='DESIGN_RUNNING', design_worktree=? WHERE id=?",
+        (str(tmp_path), rid),
+    )
+
+    design_dir = tmp_path / "docs" / "design"
+    design_dir.mkdir(parents=True, exist_ok=True)
+    (design_dir / "DES-T-DES-ENDTURN.md").write_text("# Design", encoding="utf-8")
+    (design_dir / "ADR-T-DES-ENDTURN-001.md").write_text("# ADR", encoding="utf-8")
+
+    result = await sm.tick(rid)
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-des-endturn",))
+    events = await db.fetchall("SELECT event_type FROM events WHERE run_id=? ORDER BY id", (rid,))
+    event_types = [row["event_type"] for row in events]
+
+    assert result["current_stage"] == "DESIGN_REVIEW"
+    assert result["status"] == "running"
+    assert job["status"] == "completed"
+    assert "job.interrupted" not in event_types
+    executor.close_session.assert_called_once()
+
+
 async def test_design_dispatched_keeps_alive_session_running(sm, db, mocks, tmp_path):
     """DESIGN_DISPATCHED should treat ACP status=alive as healthy and advance to DESIGN_RUNNING."""
     _, executor, _, _ = mocks

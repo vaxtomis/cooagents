@@ -73,6 +73,47 @@ class AcpxExecutor:
             path = self.project_root / path
         return path
 
+    def _json_contains_stop_reason(self, value, stop_reason):
+        if isinstance(value, dict):
+            if value.get("stopReason") == stop_reason:
+                return True
+            return any(self._json_contains_stop_reason(child, stop_reason) for child in value.values())
+        if isinstance(value, list):
+            return any(self._json_contains_stop_reason(child, stop_reason) for child in value)
+        return False
+
+    def _events_file_has_stop_reason(self, events_file, stop_reason):
+        events_path = self._resolve_project_path(events_file)
+        if not events_path.exists():
+            return False
+
+        try:
+            with events_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if self._json_contains_stop_reason(payload, stop_reason):
+                        return True
+        except OSError:
+            return False
+
+        return False
+
+    def _job_events_file(self, job):
+        if job.get("events_file"):
+            return job["events_file"]
+        return str(Path(self.coop_dir) / "jobs" / job["id"] / "events.jsonl")
+
+    def _finalize_terminal_status(self, status, events_file):
+        if status != "completed" and self._events_file_has_stop_reason(events_file, "end_turn"):
+            return "completed"
+        return status
+
     # ------------------------------------------------------------------
     # Command builders
     # ------------------------------------------------------------------
@@ -458,7 +499,8 @@ class AcpxExecutor:
                 status = await self.get_session_status(j["run_id"], j["agent_type"], host=host)
                 if status and status.get("status") == "running":
                     continue  # Still running, leave it
-            await self.jobs.update_status(j["id"], "interrupted", ended_at=now)
+            restored_status = self._finalize_terminal_status("interrupted", self._job_events_file(j))
+            await self.jobs.update_status(j["id"], restored_status, ended_at=now)
             reconciled_run_ids.add(j["run_id"])
 
         if self._state_machine:
@@ -505,7 +547,7 @@ class AcpxExecutor:
             await process.wait()
             rc = process.returncode
             now = datetime.now(timezone.utc).isoformat()
-            status = self._map_exit_code(rc)
+            status = self._finalize_terminal_status(self._map_exit_code(rc), events_file)
 
             await self.jobs.update_status(job_id, status, ended_at=now)
             await self.db.execute(
