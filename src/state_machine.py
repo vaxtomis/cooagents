@@ -261,7 +261,13 @@ class StateMachine:
         if run["status"] != "failed":
             raise ConflictError("Can only retry failed runs", run["current_stage"])
 
-        restore_stage = run.get("failed_at_stage") or "INIT"
+        failed_stage = run.get("failed_at_stage") or "INIT"
+        restore_stage = {
+            "DESIGN_DISPATCHED": "DESIGN_QUEUED",
+            "DESIGN_RUNNING": "DESIGN_QUEUED",
+            "DEV_DISPATCHED": "DEV_QUEUED",
+            "DEV_RUNNING": "DEV_QUEUED",
+        }.get(failed_stage, failed_stage)
         now = datetime.now(timezone.utc).isoformat()
         await self.db.execute(
             "UPDATE runs SET status='running', current_stage=?, updated_at=? WHERE id=?",

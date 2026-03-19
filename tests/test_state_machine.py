@@ -340,7 +340,7 @@ async def test_dev_queued_copies_design_into_dev_worktree(sm, db, tmp_path):
 
 
 async def test_retry_after_job_failure(sm, db, tmp_path):
-    """After FAILED, retry should restore to failed_at_stage."""
+    """After a running design job fails, retry should re-queue design work."""
     run = await sm.create_run("T-RETRY", str(tmp_path))
     rid = run["run_id"]
 
@@ -359,10 +359,33 @@ async def test_retry_after_job_failure(sm, db, tmp_path):
     run = await sm.tick(rid)
     assert run["status"] == "failed"
 
-    # Retry should restore to DESIGN_RUNNING
+    # Retry should restore to DESIGN_QUEUED so a fresh job is dispatched
     run = await sm.retry(rid, "user1")
     assert run["status"] == "running"
-    assert run["current_stage"] == "DESIGN_RUNNING"
+    assert run["current_stage"] == "DESIGN_QUEUED"
+
+
+@pytest.mark.parametrize(
+    ("failed_stage", "expected_stage"),
+    [
+        ("DESIGN_DISPATCHED", "DESIGN_QUEUED"),
+        ("DEV_RUNNING", "DEV_QUEUED"),
+        ("DEV_DISPATCHED", "DEV_QUEUED"),
+    ],
+)
+async def test_retry_requeues_dispatched_or_running_agent_stages(sm, db, tmp_path, failed_stage, expected_stage):
+    """Retry should map agent-owned stages back to their queue stage."""
+    run = await sm.create_run(f"T-RETRY-{failed_stage}", str(tmp_path))
+    rid = run["run_id"]
+
+    await db.execute(
+        "UPDATE runs SET status='failed', current_stage='FAILED', failed_at_stage=? WHERE id=?",
+        (failed_stage, rid),
+    )
+
+    run = await sm.retry(rid, "user1")
+    assert run["status"] == "running"
+    assert run["current_stage"] == expected_stage
 
 
 # ---------------------------------------------------------------------------
