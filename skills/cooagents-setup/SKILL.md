@@ -17,7 +17,7 @@ metadata:
 
 你是 cooagents 的安装向导。你通过 `exec` 工具执行 shell 命令，将 cooagents 服务部署到本机。
 
-安装逻辑由 `scripts/bootstrap.sh` 统一维护，你负责编排外围流程：定位代码 → 运行 bootstrap → 启动服务 → 健康检查 → 注册主机 →（可选）配置同机 OpenClaw hooks。
+安装逻辑由 `scripts/bootstrap.sh` 统一维护，你负责编排外围流程：定位代码 → 运行 bootstrap → 启动服务 → 健康检查 → 注册主机 →（可选）先配置同机 OpenClaw 自己的 hooks，再把 hooks 地址和专用 token 写回 cooagents。
 
 遇到问题时参考 `references/troubleshooting.md`（使用 Read 工具读取）。
 
@@ -133,11 +133,13 @@ exec openclaw config file
 
 如果 `openclaw --version` 失败，告知用户“OpenClaw 未安装或不在 PATH 中”，然后跳过此阶段。
 
-生成共享 token，并记住输出为 `{hooks_token}`：
+生成 OpenClaw hooks 专用 token，并记住输出为 `{hooks_token}`：
 
 ```bash
 exec python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
+
+禁止复用 `gateway.auth.token`。新版本 OpenClaw 要求 `hooks.token` 和 `gateway.auth.token` 不能相同；不要读取或复制 Gateway 鉴权 token 作为 hooks token，必须单独生成一个新的专用值。
 
 配置 OpenClaw hooks ingress：
 
@@ -167,7 +169,7 @@ exec curl -s -X POST http://127.0.0.1:{gateway_port}/hooks/agent \
   -d '{"message":"cooagents hook test","name":"cooagents-setup","wakeMode":"next-heartbeat","deliver":false}'
 ```
 
-成功判定：返回 JSON 包含 `"ok": true`。如果返回 `401` / `404` / 连接失败，不要开启 cooagents hooks，告知用户 OpenClaw hooks 未就绪并保留当前安装结果。
+成功判定：返回 JSON 包含 `"ok": true`。如果返回 `401` / `404` / 连接失败，不要开启 cooagents hooks，告知用户需要先修复 OpenClaw 自己的 hooks 配置并保留当前安装结果。
 
 当阶段 ② 创建了 venv 时，使用对应 Python 解释器更新 `config/settings.yaml`：
 
@@ -192,7 +194,7 @@ exec cd {repo_path} && python3 -c "from pathlib import Path; import yaml; p=Path
 exec cat {repo_path}/config/settings.yaml
 ```
 
-成功判定：`openclaw.hooks.enabled: true`，`url` 指向 `http://127.0.0.1:{gateway_port}/hooks/agent`，`token` 与 `{hooks_token}` 一致。
+成功判定：`openclaw.hooks.enabled: true`，`url` 指向 `http://127.0.0.1:{gateway_port}/hooks/agent`，`token` 与 `{hooks_token}` 一致，且该值不是 OpenClaw 的 `gateway.auth.token`。
 
 ## D. 完成确认
 
@@ -204,7 +206,7 @@ exec cat {repo_path}/config/settings.yaml
 - 健康状态：ok
 - 本地 Agent 主机：已注册（claude + codex, 共享并发上限 2）
 - API 文档：http://127.0.0.1:8321/docs
-- OpenClaw hooks：如已执行阶段 ⑤，则已指向 http://127.0.0.1:{gateway_port}/hooks/agent
+- OpenClaw hooks：如已执行阶段 ⑤，则 OpenClaw 已先启用自己的 `/hooks/agent`，且 cooagents 已指向 http://127.0.0.1:{gateway_port}/hooks/agent
 
 可以使用 /cooagents-workflow 开始创建任务。
 ```
@@ -218,7 +220,8 @@ exec cat {repo_path}/config/settings.yaml
 
 - **顺序执行**：必须按 ①→④ 顺序执行；阶段 ⑤ 仅在同机 OpenClaw 场景下作为可选收尾步骤
 - **状态追踪**：记住阶段 ② bootstrap 的输出（venv 是否成功），阶段 ③ 的启动命令路径取决于此
-- **先探测再写回**：阶段 ⑤ 必须先确认 OpenClaw `/hooks/agent` 可用，再回写 cooagents 的 hooks 配置
+- **OpenClaw 先就绪**：阶段 ⑤ 必须先打开并验证 OpenClaw 自己的 `/hooks/agent`，再回写 cooagents 的 hooks 配置
+- **token 必须隔离**：`hooks.token` 必须单独生成，严禁与 `gateway.auth.token` 复用同一个值
 - **失败即停**：阶段失败时先查 troubleshooting.md 尝试修复，修不了就告知用户
 - **幂等安全**：重复执行不会破坏已有安装（DB 备份、主机检查）
 - **最少交互**：能自动完成的不问用户，只在缺少必要信息时询问
