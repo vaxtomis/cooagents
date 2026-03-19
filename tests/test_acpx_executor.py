@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.database import Database
@@ -65,7 +67,7 @@ def test_build_prompt_cmd(executor):
         "--timeout", "1800",
         "claude",
         "-s", "run-abc-design",
-        "--file", "/task.md",
+        "--file", os.path.abspath("/task.md"),
     ]
 
 
@@ -159,7 +161,7 @@ def test_build_exec_cmd_with_file(executor):
     assert cmd.index("--cwd") < agent_idx
     assert cmd.index("exec") > agent_idx
     assert cmd.index("--file") > agent_idx
-    assert cmd[cmd.index("--file") + 1] == "/prompt.md"
+    assert cmd[cmd.index("--file") + 1] == os.path.abspath("/prompt.md")
 
 
 def test_build_exec_cmd_resolves_relative_task_file_to_absolute(executor, tmp_path, monkeypatch):

@@ -1,6 +1,9 @@
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone, timedelta
+
+from src.event_limits import can_emit_event
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +61,7 @@ class Scheduler:
                     "SELECT * FROM jobs WHERE status='starting' AND started_at < ?", (cutoff,)
                 )
                 for job in stale_starting:
-                    j = dict(job)
-                    await self.jobs.update_status(j["id"], "failed", ended_at=now.isoformat())
-                    await self.webhooks.notify("job.timeout", {"job_id": j["id"], "run_id": j["run_id"]})
+                    await self._handle_starting_job_timeout(dict(job), now)
 
                 # Check running job timeouts
                 running_jobs = await self.db.fetchall(
@@ -75,8 +76,7 @@ class Scheduler:
                     else:
                         timeout = self.config.timeouts.dev_execution
                     if (now - started).total_seconds() > timeout:
-                        await self.executor.cancel_session(j["run_id"], j["agent_type"])
-                        await self.webhooks.notify("job.timeout", {"job_id": j["id"], "run_id": j["run_id"]})
+                        await self._handle_job_timeout(j, now)
 
                 await self._tick_runnable_runs()
 
@@ -99,11 +99,11 @@ class Scheduler:
                 )
                 for run in review_runs:
                     r = dict(run)
-                    await self.webhooks.notify("review.reminder", {
+                    await self._notify_limited(r["id"], "review.reminder", {
                         "run_id": r["id"],
                         "ticket": r["ticket"],
                         "stage": r["current_stage"],
-                    })
+                    }, limit_keys=("stage",))
 
             except asyncio.CancelledError:
                 raise
@@ -124,3 +124,43 @@ class Scheduler:
                 await self.sm.tick(run["id"])
             except Exception as e:
                 logger.error(f"Auto-tick run {run['id']} failed: {e}")
+
+    async def _notify_limited(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict,
+        limit_keys: tuple[str, ...] = (),
+        max_count: int = 3,
+    ) -> None:
+        match_fields = {key: payload.get(key) for key in limit_keys if key in payload}
+        if not await can_emit_event(self.db, run_id, event_type, match_fields, max_count=max_count):
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+            (run_id, event_type, json.dumps(payload), now),
+        )
+        await self.webhooks.notify(event_type, payload)
+
+    async def _handle_starting_job_timeout(self, job: dict, now: datetime) -> None:
+        await self.jobs.update_status(job["id"], "timeout", ended_at=now.isoformat())
+        await self._notify_limited(
+            job["run_id"],
+            "job.timeout",
+            {"run_id": job["run_id"], "job_id": job["id"]},
+            limit_keys=("job_id",),
+        )
+        if self.sm:
+            await self.sm.tick(job["run_id"])
+
+    async def _handle_job_timeout(self, job: dict, now: datetime) -> None:
+        await self.executor.cancel_session(job["run_id"], job["agent_type"], final_status="timeout")
+        await self._notify_limited(
+            job["run_id"],
+            "job.timeout",
+            {"run_id": job["run_id"], "job_id": job["id"]},
+            limit_keys=("job_id",),
+        )
+        if self.sm:
+            await self.sm.tick(job["run_id"])

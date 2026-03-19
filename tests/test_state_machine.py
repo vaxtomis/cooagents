@@ -127,6 +127,29 @@ async def test_design_queued_no_host(sm, mocks, tmp_path):
     assert run["current_stage"] == "DESIGN_QUEUED"
 
 
+async def test_design_queued_no_host_caps_host_unavailable_to_three(sm, mocks, db, tmp_path):
+    webhook, _, host_mgr, _ = mocks
+    host_mgr.select_host = AsyncMock(return_value=None)
+    run = await sm.create_run("T-HOST-CAP", str(tmp_path))
+    await sm.submit_requirement(run["run_id"], "# Req")
+    await sm.approve(run["run_id"], "req", "user1")
+
+    for _ in range(4):
+        run = await sm.tick(run["run_id"])
+
+    events = await db.fetchall(
+        "SELECT * FROM events WHERE run_id=? AND event_type='host.unavailable'",
+        (run["run_id"],),
+    )
+    assert run["current_stage"] == "DESIGN_QUEUED"
+    assert len(events) == 3
+    host_unavailable_calls = [
+        call for call in webhook.notify.await_args_list
+        if call.args and call.args[0] == "host.unavailable"
+    ]
+    assert len(host_unavailable_calls) == 3
+
+
 async def test_design_queued_copies_requirement_into_design_worktree(sm, tmp_path):
     run = await sm.create_run("T-REQCOPY", str(tmp_path))
     await sm.submit_requirement(run["run_id"], "# Requirement content")
@@ -217,6 +240,7 @@ async def test_tick_design_running_multi_turn_revise(sm, mocks, db, tmp_path):
     _, executor, _, _ = mocks
     executor.send_followup = AsyncMock()
     executor.close_session = AsyncMock()
+    sm._design_max_turns = 2
 
     run = await sm.create_run("T-MT", str(tmp_path))
     rid = run["run_id"]
@@ -239,6 +263,106 @@ async def test_tick_design_running_multi_turn_revise(sm, mocks, db, tmp_path):
     run = await sm.tick(rid)
     assert run["current_stage"] == "DESIGN_RUNNING"  # stays in RUNNING
     executor.send_followup.assert_called_once()
+
+
+async def test_design_execution_timeout_uses_configured_value(db, mocks, tmp_path):
+    webhook, executor, host_mgr, merge_mgr = mocks
+    executor.start_session = AsyncMock(return_value="job-123")
+    am = ArtifactManager(db)
+    jm = JobManager(db)
+    am.render_task = AsyncMock(return_value="task-path")
+    (tmp_path / ".git").mkdir(exist_ok=True)
+
+    class FakeConfig:
+        class timeouts:
+            design_execution = 222
+            dev_execution = 333
+        class turns:
+            design_max_turns = 2
+            dev_max_turns = 1
+
+    async def _fake_ensure_worktree(repo_path, ticket, phase):
+        branch = f"feat/{ticket}-{phase}"
+        wt = str(tmp_path / f".worktrees/{ticket}-{phase}")
+        return branch, wt
+
+    machine = StateMachine(
+        db,
+        am,
+        host_mgr,
+        executor,
+        webhook,
+        merge_mgr,
+        str(tmp_path),
+        ensure_worktree_fn=_fake_ensure_worktree,
+        config=FakeConfig(),
+        job_manager=jm,
+    )
+
+    run = await machine.create_run("T-CONFIG-TIMEOUT", str(tmp_path))
+    await machine.submit_requirement(run["run_id"], "# Req")
+    await machine.approve(run["run_id"], "req", "user1")
+    await machine.tick(run["run_id"])
+
+    assert executor.start_session.await_args.args[-1] == 222
+
+
+async def test_design_followup_uses_configured_timeout(db, mocks, tmp_path):
+    webhook, executor, host_mgr, merge_mgr = mocks
+    executor.send_followup = AsyncMock()
+    executor.close_session = AsyncMock()
+    am = ArtifactManager(db)
+    jm = JobManager(db)
+    am.render_task = AsyncMock(return_value="task-path")
+    (tmp_path / ".git").mkdir(exist_ok=True)
+
+    class FakeConfig:
+        class timeouts:
+            design_execution = 444
+            dev_execution = 555
+        class turns:
+            design_max_turns = 2
+            dev_max_turns = 1
+
+    async def _fake_ensure_worktree(repo_path, ticket, phase):
+        branch = f"feat/{ticket}-{phase}"
+        wt = str(tmp_path / f".worktrees/{ticket}-{phase}")
+        return branch, wt
+
+    machine = StateMachine(
+        db,
+        am,
+        host_mgr,
+        executor,
+        webhook,
+        merge_mgr,
+        str(tmp_path),
+        ensure_worktree_fn=_fake_ensure_worktree,
+        config=FakeConfig(),
+        job_manager=jm,
+    )
+
+    run = await machine.create_run("T-CONFIG-FOLLOWUP", str(tmp_path))
+    rid = run["run_id"]
+    await machine.submit_requirement(rid, "# Req")
+    await machine.approve(rid, "req", "user1")
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,turn_count,started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-config-followup", rid, "local", "claude", "DESIGN_DISPATCHED", "completed", "/t.md", str(tmp_path), "run-config-followup-design", 1, now)
+    )
+    await db.execute(
+        "UPDATE runs SET current_stage='DESIGN_RUNNING', design_worktree=? WHERE id=?",
+        (str(tmp_path), rid),
+    )
+
+    run = await machine.tick(rid)
+
+    assert run["current_stage"] == "DESIGN_RUNNING"
+    assert executor.send_followup.await_args.args[-1] == 444
 
 async def test_tick_design_running_multi_turn_accept(sm, mocks, db, tmp_path):
     """Design running: evaluator returns accept -> advance to DESIGN_REVIEW."""

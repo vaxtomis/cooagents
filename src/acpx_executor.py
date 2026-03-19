@@ -302,7 +302,7 @@ class AcpxExecutor:
         task = asyncio.create_task(self._watch(job["id"], process, run_id, host_id, session_name))
         self._tasks[job["id"]] = task
 
-    async def cancel_session(self, run_id, agent_type) -> None:
+    async def cancel_session(self, run_id, agent_type, final_status="cancelled") -> None:
         """Cooperatively cancel the current prompt on the session."""
         job = await self.db.fetchone(
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
@@ -322,7 +322,7 @@ class AcpxExecutor:
             task.cancel()
 
         now = datetime.now(timezone.utc).isoformat()
-        await self.jobs.update_status(job["id"], "cancelled", ended_at=now)
+        await self.jobs.update_status(job["id"], final_status, ended_at=now)
 
     async def close_session(self, run_id, agent_type) -> None:
         """Close the session and release resources."""
@@ -568,7 +568,13 @@ class AcpxExecutor:
 
         except asyncio.CancelledError:
             now = datetime.now(timezone.utc).isoformat()
-            await self.jobs.update_status(job_id, "cancelled", ended_at=now)
+            job = await self.db.fetchone("SELECT status, ended_at FROM jobs WHERE id=?", (job_id,))
+            current_status = job["status"] if job else None
+            if current_status in {"timeout", "cancelled", "failed", "completed", "interrupted"}:
+                if job and not job.get("ended_at"):
+                    await self.jobs.update_status(job_id, current_status, ended_at=now)
+            else:
+                await self.jobs.update_status(job_id, "cancelled", ended_at=now)
         except Exception as e:
             now = datetime.now(timezone.utc).isoformat()
             await self.jobs.update_status(job_id, "failed", ended_at=now)

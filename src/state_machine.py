@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.event_limits import can_emit_event
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 
 GATE_STAGES = {"req": "REQ_REVIEW", "design": "DESIGN_REVIEW", "dev": "DEV_REVIEW"}
@@ -79,6 +80,15 @@ class StateMachine:
         if config:
             self._design_max_turns = getattr(getattr(config, 'turns', None), 'design_max_turns', 1)
             self._dev_max_turns = getattr(getattr(config, 'turns', None), 'dev_max_turns', 1)
+
+    def _execution_timeout(self, phase: str) -> int:
+        defaults = {"design": 1800, "dev": 3600}
+        timeout_cfg = getattr(self._config, "timeouts", None) if self._config else None
+        if not timeout_cfg:
+            return defaults[phase]
+        if phase == "design":
+            return getattr(timeout_cfg, "design_execution", defaults[phase])
+        return getattr(timeout_cfg, "dev_execution", defaults[phase])
 
     # ------------------------------------------------------------------
     # Public API
@@ -327,11 +337,11 @@ class StateMachine:
         """Try to dispatch the design agent job if a host is available."""
         host = await self.hosts.select_host("claude")
         if not host:
-            await self._emit(run["id"], "host.unavailable", {
+            await self._emit_limited(run["id"], "host.unavailable", {
                 "stage": "DESIGN_QUEUED",
                 "agent_type": "claude",
                 "ticket": run["ticket"],
-            })
+            }, limit_keys=("stage",))
             return
 
         branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "design")
@@ -365,10 +375,11 @@ class StateMachine:
             task_path,
         )
 
+        timeout_sec = self._execution_timeout("design")
         if hasattr(self.executor, 'start_session'):
-            await self.executor.start_session(run["id"], host, "claude", task_path, wt, 1800)
+            await self.executor.start_session(run["id"], host, "claude", task_path, wt, timeout_sec)
         else:
-            await self.executor.dispatch(run["id"], host, "claude", task_path, wt, 1800)
+            await self.executor.dispatch(run["id"], host, "claude", task_path, wt, timeout_sec)
         await self._update_stage(run["id"], "DESIGN_QUEUED", "DESIGN_DISPATCHED")
 
     async def _tick_design_dispatched(self, run: dict) -> None:
@@ -428,17 +439,19 @@ class StateMachine:
                 if self.jobs:
                     await self.jobs.increment_turn(job["id"])
                     await self.jobs.record_turn(job["id"], turn, revision_path, verdict, detail)
-                await self.executor.send_followup(run["id"], "claude", revision_path, wt, 1800)
+                await self.executor.send_followup(
+                    run["id"], "claude", revision_path, wt, self._execution_timeout("design")
+                )
 
     async def _tick_dev_queued(self, run: dict) -> None:
         """Try to dispatch the dev agent job if a host is available."""
         host = await self.hosts.select_host("codex")
         if not host:
-            await self._emit(run["id"], "host.unavailable", {
+            await self._emit_limited(run["id"], "host.unavailable", {
                 "stage": "DEV_QUEUED",
                 "agent_type": "codex",
                 "ticket": run["ticket"],
-            })
+            }, limit_keys=("stage",))
             return
 
         branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "dev")
@@ -476,10 +489,11 @@ class StateMachine:
             task_path,
         )
 
+        timeout_sec = self._execution_timeout("dev")
         if hasattr(self.executor, 'start_session'):
-            await self.executor.start_session(run["id"], host, "codex", task_path, wt, 3600)
+            await self.executor.start_session(run["id"], host, "codex", task_path, wt, timeout_sec)
         else:
-            await self.executor.dispatch(run["id"], host, "codex", task_path, wt, 3600)
+            await self.executor.dispatch(run["id"], host, "codex", task_path, wt, timeout_sec)
         await self._update_stage(run["id"], "DEV_QUEUED", "DEV_DISPATCHED")
 
     async def _tick_dev_dispatched(self, run: dict) -> None:
@@ -539,7 +553,9 @@ class StateMachine:
                 if self.jobs:
                     await self.jobs.increment_turn(job["id"])
                     await self.jobs.record_turn(job["id"], turn, revision_path, verdict, detail)
-                await self.executor.send_followup(run["id"], "codex", revision_path, wt, 3600)
+                await self.executor.send_followup(
+                    run["id"], "codex", revision_path, wt, self._execution_timeout("dev")
+                )
 
     async def _tick_merge_queued(self, run: dict) -> None:
         """Enqueue merge and advance to MERGING."""
@@ -743,6 +759,20 @@ class StateMachine:
         )
         if self.webhooks:
             await self.webhooks.notify(event_type, {"run_id": run_id, **(payload or {})})
+
+    async def _emit_limited(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict | None = None,
+        limit_keys: tuple[str, ...] = (),
+        max_count: int = 3,
+    ) -> None:
+        payload = payload or {}
+        match_fields = {key: payload.get(key) for key in limit_keys if key in payload}
+        if not await can_emit_event(self.db, run_id, event_type, match_fields, max_count=max_count):
+            return
+        await self._emit(run_id, event_type, payload)
 
     async def _snapshot(self, run_id: str) -> None:
         """Write a JSON snapshot of the current run state to disk."""
