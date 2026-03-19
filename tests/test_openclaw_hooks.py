@@ -211,6 +211,34 @@ async def test_openclaw_uses_global_defaults_when_run_has_no_notify(wn_with_hook
     assert captured["body"]["to"] == "ou_default"
 
 
+async def test_openclaw_prefers_event_stage_over_run_current_stage(wn_with_hooks, db):
+    """Timeout-like events should display the stage carried by the event payload."""
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("r-stage", "PROJ-STAGE", "/repo", "running", "DESIGN_DISPATCHED", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+    )
+
+    captured = {}
+
+    async def mock_post(url, content, headers):
+        captured["body"] = json.loads(content)
+        resp = MagicMock()
+        resp.status_code = 200
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.post = mock_post
+    wn_with_hooks._client = mock_client
+
+    await wn_with_hooks._deliver_to_openclaw(
+        "job.timeout",
+        {"run_id": "r-stage", "job_id": "job-1", "stage": "DESIGN_QUEUED"},
+    )
+
+    assert "DESIGN_QUEUED" in captured["body"]["message"]
+    assert "DESIGN_DISPATCHED" not in captured["body"]["message"]
+
+
 async def test_openclaw_delivery_retries_before_succeeding(wn_with_hooks, db):
     """OpenClaw delivery should retry transient failures before logging failure."""
     await db.execute(

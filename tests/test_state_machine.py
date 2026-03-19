@@ -619,8 +619,8 @@ async def test_design_dispatched_reconciles_dead_running_session_to_failed(sm, d
     rid = run["id"]
     await db.execute("UPDATE runs SET current_stage='DESIGN_DISPATCHED' WHERE id=?", (rid,))
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
+    from datetime import datetime, timedelta, timezone
+    now = (datetime.now(timezone.utc) - timedelta(seconds=45)).isoformat()
     await db.execute(
         "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,session_name,worktree,started_at) VALUES(?,?,?,?,?,?,?,?,?)",
         ("job-des-dead", rid, "local", "claude", "DESIGN_DISPATCHED", "running", "run-des-dead-design", str(tmp_path), now),
@@ -633,6 +633,34 @@ async def test_design_dispatched_reconciles_dead_running_session_to_failed(sm, d
     assert result["status"] == "failed"
     assert job["status"] == "interrupted"
     assert job["ended_at"] is not None
+
+
+async def test_design_dispatched_keeps_fresh_dead_session_pending_during_grace(sm, db, mocks, tmp_path):
+    """DESIGN_DISPATCHED should wait briefly before treating a fresh dead session as interrupted."""
+    _, executor, _, _ = mocks
+    executor.get_session_status = AsyncMock(return_value={"status": "dead", "summary": "queue owner unavailable"})
+
+    run = await sm.create_run("T-DES-GRACE", str(tmp_path))
+    rid = run["id"]
+    await db.execute("UPDATE runs SET current_stage='DESIGN_DISPATCHED' WHERE id=?", (rid,))
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,session_name,worktree,started_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("job-des-grace", rid, "local", "claude", "DESIGN_DISPATCHED", "running", "run-des-grace-design", str(tmp_path), now),
+    )
+
+    result = await sm.tick(rid)
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-des-grace",))
+    events = await db.fetchall("SELECT event_type FROM events WHERE run_id=? ORDER BY id", (rid,))
+    event_types = [row["event_type"] for row in events]
+
+    assert result["current_stage"] == "DESIGN_DISPATCHED"
+    assert result["status"] == "running"
+    assert job["status"] == "running"
+    assert job["ended_at"] is None
+    assert "job.interrupted" not in event_types
 
 
 async def test_design_running_prefers_end_turn_events_over_dead_session(sm, db, mocks, tmp_path):

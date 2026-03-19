@@ -148,7 +148,7 @@ class Scheduler:
         await self._notify_limited(
             job["run_id"],
             "job.timeout",
-            {"run_id": job["run_id"], "job_id": job["id"]},
+            {"run_id": job["run_id"], "job_id": job["id"], "stage": job.get("stage", "")},
             limit_keys=("job_id",),
         )
         if self.sm:
@@ -159,7 +159,7 @@ class Scheduler:
         await self._notify_limited(
             job["run_id"],
             "job.timeout",
-            {"run_id": job["run_id"], "job_id": job["id"]},
+            {"run_id": job["run_id"], "job_id": job["id"], "stage": job.get("stage", "")},
             limit_keys=("job_id",),
         )
         if self.sm:

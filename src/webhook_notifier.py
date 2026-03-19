@@ -94,16 +94,16 @@ class WebhookNotifier:
         run_id = payload.get("run_id")
 
         # Look up run for ticket, stage, and per-run notify config
-        ticket = ""
-        stage = ""
+        ticket = payload.get("ticket", "")
+        stage = payload.get("stage", "")
         channel = cfg.default_channel
         to = cfg.default_to
 
         if run_id:
             run = await self.db.fetchone("SELECT * FROM runs WHERE id=?", (run_id,))
             if run:
-                ticket = run.get("ticket", "")
-                stage = run.get("current_stage", "")
+                ticket = ticket or run.get("ticket", "")
+                stage = stage or run.get("current_stage", "")
                 channel = run.get("notify_channel") or cfg.default_channel
                 to = run.get("notify_to") or cfg.default_to
 

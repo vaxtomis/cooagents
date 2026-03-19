@@ -247,6 +247,10 @@ class AcpxExecutor:
 
         run = await self.db.fetchone("SELECT * FROM runs WHERE id=?", (run_id,))
         stage = run["current_stage"] if run else "UNKNOWN"
+        stage = {
+            "DESIGN_QUEUED": "DESIGN_DISPATCHED",
+            "DEV_QUEUED": "DEV_DISPATCHED",
+        }.get(stage, stage)
         phase = "design" if "DESIGN" in stage else "dev"
         session_name = self._make_session_name(run_id, phase, revision)
 

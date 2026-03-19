@@ -1,6 +1,7 @@
 import pytest
 from src.database import Database
 from src.host_manager import HostManager
+from src.job_manager import JobManager
 
 @pytest.fixture
 async def db(tmp_path):
@@ -13,16 +14,28 @@ async def db(tmp_path):
 async def hm(db):
     return HostManager(db)
 
+
+@pytest.fixture
+async def jobs(db):
+    return JobManager(db)
+
 async def test_register_host(hm):
     await hm.register("h1", "local", "both", max_concurrent=2)
     hosts = await hm.list_all()
     assert len(hosts) == 1
     assert hosts[0]["id"] == "h1"
 
-async def test_select_host_least_loaded(hm):
+async def test_select_host_least_loaded(hm, db, jobs):
     await hm.register("h1", "local", "both", max_concurrent=3)
     await hm.register("h2", "local", "both", max_concurrent=3)
-    await hm.increment_load("h1")
+    now = "2026-03-20T00:00:00+00:00"
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-loaded-h1", "T-H1", "/repo", "running", "DESIGN_RUNNING", now, now),
+    )
+    await jobs.create_job("run-loaded-h1", "h1", "claude", "DESIGN_RUNNING", "/task.md", "/wt", "abc123", 1800)
+    job = await db.fetchone("SELECT id FROM jobs WHERE run_id=?", ("run-loaded-h1",))
+    await jobs.update_status(job["id"], "running")
     host = await hm.select_host("claude")
     assert host["id"] == "h2"
 
@@ -37,9 +50,16 @@ async def test_select_host_filters_agent_type(hm):
     host = await hm.select_host("claude")
     assert host is None
 
-async def test_select_host_respects_max(hm):
+async def test_select_host_respects_max(hm, db, jobs):
     await hm.register("h1", "local", "both", max_concurrent=1)
-    await hm.increment_load("h1")
+    now = "2026-03-20T00:00:00+00:00"
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-maxed-h1", "T-MAX", "/repo", "running", "DESIGN_RUNNING", now, now),
+    )
+    await jobs.create_job("run-maxed-h1", "h1", "claude", "DESIGN_RUNNING", "/task.md", "/wt", "abc123", 1800)
+    job = await db.fetchone("SELECT id FROM jobs WHERE run_id=?", ("run-maxed-h1",))
+    await jobs.update_status(job["id"], "running")
     host = await hm.select_host("claude")
     assert host is None
 
@@ -53,10 +73,26 @@ async def test_increment_decrement(hm):
     await hm.register("h1", "local", "both")
     await hm.increment_load("h1")
     hosts = await hm.list_all()
-    assert hosts[0]["current_load"] == 1
+    assert hosts[0]["current_load"] == 0
     await hm.decrement_load("h1")
     hosts = await hm.list_all()
     assert hosts[0]["current_load"] == 0
+
+
+async def test_select_host_uses_real_jobs_only(hm, db, jobs):
+    await hm.register("h1", "local", "both", max_concurrent=1)
+
+    now = "2026-03-20T00:00:00+00:00"
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-real-load", "T-LOAD", "/repo", "running", "DESIGN_RUNNING", now, now),
+    )
+    await jobs.create_job("run-real-load", "h1", "claude", "DESIGN_RUNNING", "/task.md", "/wt", "abc123", 1800)
+    job = await db.fetchone("SELECT id FROM jobs WHERE run_id=?", ("run-real-load",))
+    await jobs.update_status(job["id"], "running")
+
+    host = await hm.select_host("claude")
+    assert host is None
 
 async def test_load_from_config(hm):
     config = [

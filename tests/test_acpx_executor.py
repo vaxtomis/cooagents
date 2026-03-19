@@ -332,6 +332,41 @@ async def test_close_session_routes_ssh(executor, db):
         assert mock_route.call_args[0][0] == "ssh-host-2"
 
 
+@pytest.mark.parametrize(
+    ("current_stage", "agent_type", "expected_stage", "session_name"),
+    [
+        ("DESIGN_QUEUED", "claude", "DESIGN_DISPATCHED", "run-stage-design"),
+        ("DEV_QUEUED", "codex", "DEV_DISPATCHED", "run-stage-dev"),
+    ],
+)
+async def test_start_session_records_dispatched_stage_for_queued_runs(
+    executor, db, current_stage, agent_type, expected_stage, session_name
+):
+    """Newly created jobs should be recorded at dispatched stage, not remain on queued stage."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-stage", "T-STAGE", "/repo", "running", current_stage, now, now),
+    )
+
+    host = {"id": "local", "host": "local"}
+    executor._run_cmd = AsyncMock(return_value=("", "", 0))
+    executor._start_local = AsyncMock(return_value=MagicMock())
+    executor._emit_event = AsyncMock()
+    executor._watch = AsyncMock(return_value=None)
+
+    with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
+        job_id = await executor.start_session("run-stage", host, agent_type, "/task.md", "/wt", 120)
+
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", (job_id,))
+
+    assert job["stage"] == expected_stage
+    assert job["status"] == "running"
+    assert job["session_name"] == session_name
+
+
 # ------------------------------------------------------------------
 # Resource cleanup
 # ------------------------------------------------------------------

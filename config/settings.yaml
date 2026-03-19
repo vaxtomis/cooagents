@@ -7,6 +7,7 @@ database:
 
 timeouts:
   dispatch_startup: 300
+  dispatch_reconcile_grace: 30
   design_execution: 1800
   dev_execution: 3600
   review_reminder: 86400

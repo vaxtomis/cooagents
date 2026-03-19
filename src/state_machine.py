@@ -90,6 +90,12 @@ class StateMachine:
             return getattr(timeout_cfg, "design_execution", defaults[phase])
         return getattr(timeout_cfg, "dev_execution", defaults[phase])
 
+    def _dispatch_reconcile_grace(self) -> int:
+        timeout_cfg = getattr(self._config, "timeouts", None) if self._config else None
+        if not timeout_cfg:
+            return 30
+        return getattr(timeout_cfg, "dispatch_reconcile_grace", 30)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -391,6 +397,8 @@ class StateMachine:
         if not job:
             return
         job = await self._reconcile_job_session(run, dict(job))
+        if job.get("_reconcile_pending"):
+            return
         if job["status"] in ("failed", "timeout", "interrupted"):
             await self._transition_to_failed(run, job)
             return
@@ -505,6 +513,8 @@ class StateMachine:
         if not job:
             return
         job = await self._reconcile_job_session(run, dict(job))
+        if job.get("_reconcile_pending"):
+            return
         if job["status"] in ("failed", "timeout", "interrupted"):
             await self._transition_to_failed(run, job)
             return
@@ -693,6 +703,19 @@ class StateMachine:
 
         return False
 
+    def _job_is_within_dispatch_grace(self, run: dict, job: dict) -> bool:
+        if run.get("current_stage") not in {"DESIGN_DISPATCHED", "DEV_DISPATCHED"}:
+            return False
+        started_at = job.get("started_at")
+        if not started_at:
+            return False
+        try:
+            started = datetime.fromisoformat(started_at)
+        except ValueError:
+            return False
+        age = (datetime.now(timezone.utc) - started).total_seconds()
+        return age < self._dispatch_reconcile_grace()
+
     async def _reconcile_job_session(self, run: dict, job: dict) -> dict:
         if job["status"] != "running" or not hasattr(self.executor, "get_session_status"):
             return job
@@ -707,6 +730,9 @@ class StateMachine:
         session_state = status.get("status") if status else None
         if session_state in {"running", "alive"}:
             return job
+
+        if self._job_is_within_dispatch_grace(run, job):
+            return {**job, "_reconcile_pending": True}
 
         if self._job_has_stop_reason(job, "end_turn"):
             now = datetime.now(timezone.utc).isoformat()

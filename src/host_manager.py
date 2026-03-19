@@ -72,24 +72,14 @@ class HostManager:
         return candidates[0]
 
     async def increment_load(self, host_id):
-        # Track load by inserting a placeholder running job.
-        # SQLite FK enforcement is off by default so run_id does not need a
-        # real entry in the runs table.
-        now = datetime.now(timezone.utc).isoformat()
-        import uuid
-        await self.db.execute(
-            "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,started_at) VALUES(?,?,?,?,?,?,?)",
-            (f"load-{uuid.uuid4().hex[:8]}", f"load-{uuid.uuid4().hex[:8]}", host_id, "claude", "LOAD_TEST", "running", now)
-        )
+        # Load is derived from real jobs in the jobs table.
+        # Keep this method as a no-op for backward compatibility with callers.
+        return None
 
     async def decrement_load(self, host_id):
-        # Mark one running placeholder job as completed
-        job = await self.db.fetchone(
-            "SELECT id FROM jobs WHERE host_id=? AND status='running' LIMIT 1",
-            (host_id,)
-        )
-        if job:
-            await self.db.execute("UPDATE jobs SET status='completed' WHERE id=?", (job["id"],))
+        # Load is derived from real jobs in the jobs table.
+        # Keep this method as a no-op for backward compatibility with callers.
+        return None
 
     async def set_status(self, host_id, status):
         now = datetime.now(timezone.utc).isoformat()
