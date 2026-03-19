@@ -43,15 +43,15 @@ metadata:
 │                     │          │ 自动推进到 REQ_COLLECTING，Agent 几乎    │
 │                     │          │ 不会观察到此阶段）                       │
 │ REQ_COLLECTING      │ 自动     │ curl POST submit-requirement → tick     │
-│ REQ_REVIEW          │ 人工     │ 回复审批模板 → 等待用户消息             │
+│ REQ_REVIEW          │ 人工     │ 发送需求文档云文件 → 回复审批模板 → 等待用户消息 │
 │ DESIGN_QUEUED       │ 自动     │ curl POST tick（等待主机分配）          │
 │ DESIGN_DISPATCHED   │ 自动     │ 等待（session 已启动）                  │
 │ DESIGN_RUNNING      │ 自动     │ 等待完成（webhook 通知）                │
-│ DESIGN_REVIEW       │ 人工     │ 回复设计产物摘要 → 等待用户消息         │
+│ DESIGN_REVIEW       │ 人工     │ 发送设计文档云文件 → 回复审批模板 → 等待用户消息 │
 │ DEV_QUEUED          │ 自动     │ curl POST tick（等待主机分配）          │
 │ DEV_DISPATCHED      │ 自动     │ 等待（session 已启动）                  │
 │ DEV_RUNNING         │ 自动     │ 等待完成（webhook 通知）                │
-│ DEV_REVIEW          │ 人工     │ 回复代码/测试报告摘要 → 等待用户消息    │
+│ DEV_REVIEW          │ 人工     │ 发送 TEST-REPORT 云文件 → 回复审批模板 → 等待用户消息 │
 │ MERGE_QUEUED        │ 自动     │ 等待合并                                │
 │ MERGING             │ 自动     │ 等待完成                                │
 │ MERGED              │ 自动     │ 回复完成通知                            │
@@ -64,16 +64,18 @@ metadata:
 当阶段为 `*_REVIEW` 或 `MERGE_CONFLICT` 时：
 
 1. exec `curl GET /runs/{run_id}/artifacts` 获取产物列表
-2. exec `curl GET /runs/{run_id}/artifacts/{artifact_id}/content` 获取关键内容
-3. 使用 `references/feishu-interaction.md` 中的模板格式化回复文本
-4. **等待用户下一条消息 — 不得自主决策**
-5. 解析用户回复：
+2. 若阶段为 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW`，先按 `references/feishu-interaction.md` 中的“审批云文件发送规则”选择对应产物并获取完整正文
+3. 使用飞书技能把正文上传为云文件并发送给用户
+4. 云文件发送成功后，再使用 `references/feishu-interaction.md` 中的审批模板发送审批说明
+5. `MERGE_CONFLICT` 不发送云文件，只发送冲突通知
+6. **等待用户下一条消息 — 不得自主决策**
+7. 解析用户回复：
    - 肯定回复（"通过"、"可以"、"approve"）：
-     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/approve -H "Content-Type: application/json" -d '{"gate":"req","by":"用户标识"}'`
+     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/approve -H "Content-Type: application/json" -d '{"gate":"当前 gate","by":"用户标识"}'`
      然后 exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
    - 否定回复（含具体原因）：
-     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/reject -H "Content-Type: application/json" -d '{"gate":"req","by":"用户标识","reason":"用户原文"}'`
-6. 回复操作结果
+     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/reject -H "Content-Type: application/json" -d '{"gate":"当前 gate","by":"用户标识","reason":"用户原文"}'`
+8. 回复操作结果
 
 `by` 字段：使用消息发送方的用户名或 ID，用于审计追踪。
 
@@ -86,7 +88,7 @@ metadata:
 
 | 事件                  | 处理动作                                    |
 |-----------------------|---------------------------------------------|
-| `stage.changed` → `*_REVIEW` / `MERGE_CONFLICT` | 触发人工交互流程               |
+| `stage.changed` → `*_REVIEW` / `MERGE_CONFLICT` | 触发人工交互流程；`*_REVIEW` 需先发送云文件 |
 | `stage.changed` → 其他阶段 | 可选通知                               |
 | `job.completed`       | curl POST tick                              |
 | `job.failed` / `job.timeout` | 参见 error-handling.md              |
@@ -110,6 +112,7 @@ metadata:
 
 - **最小干预**：能自动推进的阶段不打扰用户
 - **审批必须等待**：`*_REVIEW` 和 `MERGE_CONFLICT` 阶段必须等用户明确回复后再操作
+- **云文件优先**：进入 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW` 后，必须先通过飞书技能发送完整正文云文件，再发送审批文本
 - **幂等重试**：网络错误时可重试 tick，状态机保证幂等
 - **错误上报**：FAILED 阶段参考 error-handling.md 处理，必要时告知用户
 - **审计留痕**：approve/reject 请求中的 `by` 字段必须填写真实用户标识
@@ -131,9 +134,15 @@ stage: {current_stage}
 
 对于审批类事件（`gate.waiting`）：
 1. exec `curl GET /api/v1/runs/{run_id}/artifacts` 获取产物内容
-2. 使用 `references/feishu-interaction.md` 中的模板格式化审批请求
-3. 回复审批模板（会自动投递到用户）
-4. 你不需要等待用户回复 — 用户的回复会由主会话 Agent 处理
+2. 按 gate 选择产物：
+   - `req` → 最新 `kind=req`
+   - `design` → 最新 `kind=design`
+   - `dev` → 最新 `kind=test-report`
+3. exec `curl GET /api/v1/runs/{run_id}/artifacts/{artifact_id}/content` 获取完整正文
+4. 将正文写入临时 Markdown 文件，并通过飞书技能上传为云文件发送给用户
+5. 云文件发送成功后，使用 `references/feishu-interaction.md` 中的模板发送审批请求
+6. 如果云文件发送失败，必须先回复失败告警，再附审批说明，不能静默跳过云文件
+7. 你不需要等待用户回复 — 用户的回复会由主会话 Agent 处理
 
 对于通知类事件（`run.completed`、`merge.conflict` 等）：
 1. 格式化通知消息
