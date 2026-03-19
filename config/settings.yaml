@@ -29,8 +29,8 @@ acpx:
   allowed_tools_dev: null          # 开发阶段工具白名单
 
 turns:
-  design_max_turns: 3
-  dev_max_turns: 5
+  design_max_turns: 1
+  dev_max_turns: 1
 
 openclaw:
   deploy_skills: true

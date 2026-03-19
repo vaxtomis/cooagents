@@ -74,11 +74,11 @@ class StateMachine:
         self._ensure_worktree = ensure_worktree_fn
         self._config = config
         self.jobs = job_manager
-        self._design_max_turns = 3
-        self._dev_max_turns = 5
+        self._design_max_turns = 1
+        self._dev_max_turns = 1
         if config:
-            self._design_max_turns = getattr(getattr(config, 'turns', None), 'design_max_turns', 3)
-            self._dev_max_turns = getattr(getattr(config, 'turns', None), 'dev_max_turns', 5)
+            self._design_max_turns = getattr(getattr(config, 'turns', None), 'design_max_turns', 1)
+            self._dev_max_turns = getattr(getattr(config, 'turns', None), 'dev_max_turns', 1)
 
     # ------------------------------------------------------------------
     # Public API

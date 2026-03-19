@@ -46,8 +46,8 @@ class AcpxConfig(BaseModel):
 
 
 class TurnsConfig(BaseModel):
-    design_max_turns: int = 3
-    dev_max_turns: int = 5
+    design_max_turns: int = 1
+    dev_max_turns: int = 1
 
 
 class OpenclawTarget(BaseModel):
