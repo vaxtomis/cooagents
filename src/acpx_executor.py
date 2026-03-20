@@ -1,8 +1,11 @@
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 
 # acpx exit code -> JobStatus mapping
@@ -42,6 +45,12 @@ class AcpxExecutor:
             return
         if hasattr(self._state_machine, "tick"):
             await self._state_machine.tick(run_id)
+
+    async def _notify_job_status_changed_safely(self, run_id, job_id, status):
+        try:
+            await self._notify_job_status_changed(run_id, job_id, status)
+        except Exception as exc:
+            logger.error(f"Job status callback failed for {run_id}/{job_id} -> {status}: {exc}")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -301,15 +310,21 @@ class AcpxExecutor:
         # Send initial prompt
         prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, task_file)
 
+        try:
+            if host["host"] == "local":
+                process = await self._start_local(prompt_cmd, worktree, job_id)
+            else:
+                process = await self._start_ssh(host, prompt_cmd, job_id)
+        except Exception:
+            now = datetime.now(timezone.utc).isoformat()
+            await self.jobs.update_status(job_id, "failed", ended_at=now)
+            await self._notify_job_status_changed_safely(run_id, job_id, "failed")
+            raise
+
         await self.jobs.mark_running(job_id)
-        await self._notify_job_status_changed(run_id, job_id, "running")
         await self.hosts.increment_load(host["id"])
         await self._emit_event(run_id, "session.created", {"session_name": session_name, "agent_type": agent_type})
-
-        if host["host"] == "local":
-            process = await self._start_local(prompt_cmd, worktree, job_id)
-        else:
-            process = await self._start_ssh(host, prompt_cmd, job_id)
+        await self._notify_job_status_changed_safely(run_id, job_id, "running")
 
         task = asyncio.create_task(self._watch(job_id, process, run_id, host["id"], session_name))
         self._tasks[job_id] = task
@@ -541,7 +556,7 @@ class AcpxExecutor:
                     continue  # Still running, leave it
             restored_status = self._finalize_terminal_status("interrupted", self._job_events_file(j))
             await self.jobs.update_status(j["id"], restored_status, ended_at=now)
-            await self._notify_job_status_changed(j["run_id"], j["id"], restored_status)
+            await self._notify_job_status_changed_safely(j["run_id"], j["id"], restored_status)
 
     # ------------------------------------------------------------------
     # Process management (private)
@@ -598,7 +613,7 @@ class AcpxExecutor:
             else:
                 await self._emit_event(run_id, "job.failed", {"job_id": job_id, "exit_code": rc})
 
-            await self._notify_job_status_changed(run_id, job_id, status)
+            await self._notify_job_status_changed_safely(run_id, job_id, status)
 
         except asyncio.CancelledError:
             now = datetime.now(timezone.utc).isoformat()

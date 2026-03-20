@@ -410,6 +410,36 @@ async def test_start_session_notifies_state_machine_when_job_enters_running(
     assert job["status"] == "running"
 
 
+async def test_start_session_does_not_emit_running_before_process_starts(executor, db):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-running-start-fail", "T-RUN-FAIL", "/repo", "running", "DESIGN_QUEUED", now, now),
+    )
+
+    host = {"id": "local", "host": "local"}
+    executor._run_cmd = AsyncMock(return_value=("", "", 0))
+    executor._start_local = AsyncMock(side_effect=RuntimeError("spawn failed"))
+    executor._emit_event = AsyncMock()
+    state_machine = AsyncMock()
+    executor.set_state_machine(state_machine)
+
+    with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
+        with pytest.raises(RuntimeError, match="spawn failed"):
+            await executor.start_session("run-running-start-fail", host, "claude", "/task.md", "/wt", 120)
+
+    job = await db.fetchone("SELECT * FROM jobs ORDER BY started_at DESC LIMIT 1")
+    state_machine.on_job_status_changed.assert_awaited_once_with(
+        "run-running-start-fail",
+        job["id"],
+        "failed",
+    )
+    assert job["status"] == "failed"
+    assert job["ended_at"] is not None
+
+
 async def test_start_session_times_out_stuck_ensure(executor, db):
     from datetime import datetime, timezone
 

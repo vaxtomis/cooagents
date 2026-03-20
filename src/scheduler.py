@@ -52,8 +52,11 @@ class Scheduler:
         while True:
             try:
                 await asyncio.sleep(30)
-                now = datetime.now(timezone.utc)
+            except asyncio.CancelledError:
+                raise
+            now = datetime.now(timezone.utc)
 
+            try:
                 # Check dispatch startup timeout
                 dispatch_timeout = self.config.timeouts.dispatch_startup
                 cutoff = (now - timedelta(seconds=dispatch_timeout)).isoformat()
@@ -61,7 +64,10 @@ class Scheduler:
                     "SELECT * FROM jobs WHERE status='starting' AND started_at < ?", (cutoff,)
                 )
                 for job in stale_starting:
-                    await self._handle_starting_job_timeout(dict(job), now)
+                    try:
+                        await self._handle_starting_job_timeout(dict(job), now)
+                    except Exception as e:
+                        logger.error(f"Starting job timeout handling failed for {job.get('id')}: {e}")
 
                 # Check running job timeouts
                 running_jobs = await self.db.fetchall(
@@ -79,14 +85,21 @@ class Scheduler:
                     baseline = j.get("running_started_at") or j["started_at"]
                     started = datetime.fromisoformat(baseline)
                     if (now - started).total_seconds() > timeout:
-                        await self._handle_job_timeout(j, now)
-
-                await self._tick_runnable_runs()
-
+                        try:
+                            await self._handle_job_timeout(j, now)
+                        except Exception as e:
+                            logger.error(f"Running job timeout handling failed for {j.get('id')}: {e}")
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 logger.error(f"Timeout enforcement error: {e}")
+
+            try:
+                await self._tick_runnable_runs()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Auto-tick reconciliation error: {e}")
 
     async def _reminder_loop(self):
         while True:

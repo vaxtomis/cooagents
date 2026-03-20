@@ -370,3 +370,46 @@ async def test_handle_job_timeout_routes_progression_through_job_status_callback
 
     sm.on_job_status_changed.assert_awaited_once_with("run-timeout-callback", "job-timeout-callback", "timeout")
     sm.tick.assert_not_called()
+
+
+async def test_timeout_enforcement_continues_to_auto_tick_after_timeout_handler_error():
+    db = AsyncMock()
+    hm = AsyncMock()
+    jm = AsyncMock()
+    ae = AsyncMock()
+    wh = AsyncMock()
+    wh.notify = AsyncMock()
+    sm = AsyncMock()
+    sm.tick = AsyncMock()
+
+    class FakeConfig:
+        class health_check:
+            interval = 60
+            ssh_timeout = 5
+        class timeouts:
+            dispatch_startup = 300
+            design_execution = 1800
+            dev_execution = 3600
+            review_reminder = 86400
+
+    db.fetchall = AsyncMock(side_effect=[
+        [],
+        [{"id": "job-timeout", "run_id": "run-1", "stage": "DESIGN_RUNNING", "status": "running", "started_at": "2026-03-20T00:00:00+00:00"}],
+    ])
+    sched = Scheduler(db, hm, jm, ae, wh, FakeConfig(), state_machine=sm)
+    sched._handle_job_timeout = AsyncMock(side_effect=RuntimeError("boom"))
+    sched._tick_runnable_runs = AsyncMock()
+
+    sleep_mock = AsyncMock(side_effect=[None, asyncio.CancelledError()])
+    with patch("src.scheduler.asyncio.sleep", sleep_mock), patch("src.scheduler.datetime") as dt_mock:
+        dt_mock.now.return_value = datetime.fromisoformat("2026-03-20T01:00:00+00:00")
+        dt_mock.fromisoformat.side_effect = datetime.fromisoformat
+        dt_mock.side_effect = datetime
+        dt_mock.timezone = timezone
+        dt_mock.timedelta = timedelta
+        try:
+            await sched._timeout_enforcement_loop()
+        except asyncio.CancelledError:
+            pass
+
+    sched._tick_runnable_runs.assert_awaited_once()
