@@ -82,6 +82,7 @@ class StateMachine:
             self._design_max_turns = getattr(getattr(config, 'turns', None), 'design_max_turns', 1)
             self._dev_max_turns = getattr(getattr(config, 'turns', None), 'dev_max_turns', 1)
         self._dispatch_locks = {}
+        self._progression_locks = {}
 
     def _execution_timeout(self, phase: str) -> int:
         defaults = {"design": 1800, "dev": 3600}
@@ -176,6 +177,43 @@ class StateMachine:
         if handler:
             await handler(run)
         return await self._get_run(run_id)
+
+    async def on_job_status_changed(self, run_id: str, job_id: str, status: str) -> dict:
+        """Consume a job lifecycle update and advance run stages when applicable."""
+        lock = self._progression_locks.setdefault(run_id, asyncio.Lock())
+        async with lock:
+            run = await self._get_run(run_id)
+            if run["status"] != "running":
+                return run
+
+            job = await self.db.fetchone("SELECT * FROM jobs WHERE id=? AND run_id=?", (job_id, run_id))
+            if not job:
+                return run
+            job = dict(job)
+
+            latest_job = await self.db.fetchone(
+                "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC, id DESC LIMIT 1",
+                (run_id,),
+            )
+            if latest_job and latest_job["id"] != job_id:
+                return run
+
+            current_stage = run["current_stage"]
+            job_stage = job.get("stage", "")
+
+            if status == "running":
+                if not self._stage_matches_running_event(current_stage, job_stage):
+                    return run
+                await self._advance_dispatched_run_on_running_event(run, job)
+            elif status == "completed":
+                if not self._stage_matches_completed_event(current_stage, job_stage):
+                    return run
+                await self.tick(run_id)
+            elif status in {"failed", "timeout", "interrupted"}:
+                if not self._stage_matches_terminal_failure_event(current_stage, job_stage):
+                    return run
+                await self.tick(run_id)
+            return await self._get_run(run_id)
 
     async def approve(
         self,
@@ -341,6 +379,50 @@ class StateMachine:
     async def _tick_review(self, run: dict) -> None:
         """No-op: waits for :meth:`approve` or :meth:`reject`."""
 
+    async def _advance_dispatched_run_on_running_event(self, run: dict, job: dict) -> None:
+        queued_to_dispatched = {
+            "DESIGN_QUEUED": "DESIGN_DISPATCHED",
+            "DEV_QUEUED": "DEV_DISPATCHED",
+        }
+        dispatched_to_running = {
+            "DESIGN_DISPATCHED": "DESIGN_RUNNING",
+            "DEV_DISPATCHED": "DEV_RUNNING",
+        }
+
+        current_stage = run["current_stage"]
+        job_stage = job.get("stage")
+
+        expected_dispatched = queued_to_dispatched.get(current_stage)
+        if expected_dispatched and expected_dispatched == job_stage:
+            await self._update_stage(run["id"], current_stage, expected_dispatched)
+            run = await self._get_run(run["id"])
+            current_stage = run["current_stage"]
+
+        target_stage = dispatched_to_running.get(current_stage)
+        if target_stage and job_stage == current_stage:
+            await self._update_stage(run["id"], current_stage, target_stage)
+
+    def _stage_matches_running_event(self, current_stage: str, job_stage: str) -> bool:
+        allowed = {
+            "DESIGN_QUEUED": "DESIGN_DISPATCHED",
+            "DESIGN_DISPATCHED": "DESIGN_DISPATCHED",
+            "DEV_QUEUED": "DEV_DISPATCHED",
+            "DEV_DISPATCHED": "DEV_DISPATCHED",
+        }
+        return allowed.get(current_stage) == job_stage
+
+    def _stage_matches_completed_event(self, current_stage: str, job_stage: str) -> bool:
+        return current_stage == job_stage and current_stage in {"DESIGN_RUNNING", "DEV_RUNNING"}
+
+    def _stage_matches_terminal_failure_event(self, current_stage: str, job_stage: str) -> bool:
+        allowed = {
+            "DESIGN_DISPATCHED": {"DESIGN_DISPATCHED", "DESIGN_RUNNING"},
+            "DESIGN_RUNNING": {"DESIGN_DISPATCHED", "DESIGN_RUNNING"},
+            "DEV_DISPATCHED": {"DEV_DISPATCHED", "DEV_RUNNING"},
+            "DEV_RUNNING": {"DEV_DISPATCHED", "DEV_RUNNING"},
+        }
+        return job_stage in allowed.get(current_stage, set())
+
     async def _tick_design_queued(self, run: dict) -> None:
         """Try to dispatch the design agent job if a host is available."""
         lock = self._dispatch_locks.setdefault(run["id"], asyncio.Lock())
@@ -410,7 +492,9 @@ class StateMachine:
                         limit_keys=("job_id",),
                     )
                 return
-            await self._update_stage(run["id"], "DESIGN_QUEUED", "DESIGN_DISPATCHED")
+            current = await self._get_run(run["id"])
+            if current["current_stage"] == "DESIGN_QUEUED":
+                await self._update_stage(run["id"], "DESIGN_QUEUED", "DESIGN_DISPATCHED")
 
     async def _tick_design_dispatched(self, run: dict) -> None:
         """Advance to DESIGN_RUNNING once the agent job reports as running."""
@@ -548,7 +632,9 @@ class StateMachine:
                         limit_keys=("job_id",),
                     )
                 return
-            await self._update_stage(run["id"], "DEV_QUEUED", "DEV_DISPATCHED")
+            current = await self._get_run(run["id"])
+            if current["current_stage"] == "DEV_QUEUED":
+                await self._update_stage(run["id"], "DEV_QUEUED", "DEV_DISPATCHED")
 
     async def _tick_dev_dispatched(self, run: dict) -> None:
         """Advance to DEV_RUNNING once the dev job reports as running."""

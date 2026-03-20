@@ -205,6 +205,279 @@ async def test_design_queued_keeps_stage_when_start_session_times_out(sm, mocks,
     assert run["status"] == "running"
 
 
+@pytest.mark.parametrize(
+    "start_stage,job_stage,agent_type,expected_stage",
+    [
+        ("DESIGN_DISPATCHED", "DESIGN_DISPATCHED", "claude", "DESIGN_RUNNING"),
+        ("DEV_DISPATCHED", "DEV_DISPATCHED", "codex", "DEV_RUNNING"),
+    ],
+)
+async def test_on_job_status_changed_advances_dispatched_run_to_running(
+    sm, db, tmp_path, start_stage, job_stage, agent_type, expected_stage
+):
+    from datetime import datetime, timezone
+
+    run = await sm.create_run(f"T-{start_stage}", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute("UPDATE runs SET current_stage=? WHERE id=?", (start_stage, rid))
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at,running_started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-running-event", rid, "local", agent_type, job_stage, "running", "/t.md", str(tmp_path), "run-running-event", now, now),
+    )
+
+    result = await sm.on_job_status_changed(rid, "job-running-event", "running")
+
+    assert result["status"] == "running"
+    assert result["current_stage"] == expected_stage
+
+
+@pytest.mark.parametrize(
+    "start_stage,agent_type,status",
+    [
+        ("DESIGN_DISPATCHED", "claude", "failed"),
+        ("DESIGN_DISPATCHED", "claude", "timeout"),
+        ("DESIGN_DISPATCHED", "claude", "interrupted"),
+        ("DEV_RUNNING", "codex", "failed"),
+        ("DEV_RUNNING", "codex", "timeout"),
+        ("DEV_RUNNING", "codex", "interrupted"),
+    ],
+)
+async def test_on_job_status_changed_transitions_terminal_failures_to_failed(
+    sm, db, tmp_path, start_stage, agent_type, status
+):
+    from datetime import datetime, timezone
+
+    run = await sm.create_run(f"T-{start_stage}-{status}", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute("UPDATE runs SET current_stage=? WHERE id=?", (start_stage, rid))
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at,ended_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-terminal-event", rid, "local", agent_type, start_stage, status, "/t.md", str(tmp_path), "run-terminal-event", now, now),
+    )
+
+    result = await sm.on_job_status_changed(rid, "job-terminal-event", status)
+
+    assert result["status"] == "failed"
+    assert result["current_stage"] == "FAILED"
+    assert result["failed_at_stage"] == start_stage
+
+
+async def test_on_job_status_changed_completed_advances_design_running_to_review(sm, db, mocks, tmp_path):
+    _, executor, _, _ = mocks
+    executor.close_session = AsyncMock()
+
+    run = await sm.create_run("T-DES-COMPLETE", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute(
+        "UPDATE runs SET current_stage='DESIGN_RUNNING', design_worktree=? WHERE id=?",
+        (str(tmp_path), rid),
+    )
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,turn_count,started_at,ended_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-design-complete", rid, "local", "claude", "DESIGN_RUNNING", "completed", "/t.md", str(tmp_path), "run-design-complete", 1, now, now),
+    )
+
+    design_dir = tmp_path / "docs" / "design"
+    design_dir.mkdir(parents=True, exist_ok=True)
+    (design_dir / "DES-T-DES-COMPLETE.md").write_text("# Design", encoding="utf-8")
+    (design_dir / "ADR-T-DES-COMPLETE-001.md").write_text("# ADR", encoding="utf-8")
+
+    result = await sm.on_job_status_changed(rid, "job-design-complete", "completed")
+
+    assert result["status"] == "running"
+    assert result["current_stage"] == "DESIGN_REVIEW"
+    executor.close_session.assert_called_once()
+
+
+async def test_on_job_status_changed_completed_advances_dev_running_to_review(sm, db, mocks, tmp_path):
+    _, executor, _, _ = mocks
+    executor.close_session = AsyncMock()
+
+    run = await sm.create_run("T-DEV-COMPLETE", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute(
+        "UPDATE runs SET current_stage='DEV_RUNNING', dev_worktree=? WHERE id=?",
+        (str(tmp_path), rid),
+    )
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,turn_count,started_at,ended_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-dev-complete", rid, "local", "codex", "DEV_RUNNING", "completed", "/t.md", str(tmp_path), "run-dev-complete", 1, now, now),
+    )
+
+    report_dir = tmp_path / "docs" / "test-report"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / "TEST-REPORT-T-DEV-COMPLETE.md").write_text("# Tests", encoding="utf-8")
+
+    await sm.artifacts.register(rid, "test-report", str(report_dir / "TEST-REPORT-T-DEV-COMPLETE.md"), "DEV_RUNNING")
+    result = await sm.on_job_status_changed(rid, "job-dev-complete", "completed")
+
+    assert result["status"] == "running"
+    assert result["current_stage"] == "DEV_REVIEW"
+    executor.close_session.assert_called_once()
+
+
+async def test_on_job_status_changed_duplicate_running_event_ignores_inactive_job(sm, db, tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    run = await sm.create_run("T-DUP-INACTIVE", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute("UPDATE runs SET current_stage='DESIGN_DISPATCHED' WHERE id=?", (rid,))
+
+    first_started = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+    second_started = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at,running_started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-old-running", rid, "local", "claude", "DESIGN_DISPATCHED", "running", "/t.md", str(tmp_path), "run-old-running", first_started, first_started),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("job-newer-active", rid, "local", "claude", "DESIGN_DISPATCHED", "starting", "/t.md", str(tmp_path), "run-newer-active", second_started),
+    )
+
+    result = await sm.on_job_status_changed(rid, "job-old-running", "running")
+
+    assert result["status"] == "running"
+    assert result["current_stage"] == "DESIGN_DISPATCHED"
+
+
+async def test_on_job_status_changed_duplicate_running_events_are_idempotent(sm, db, tmp_path):
+    from datetime import datetime, timezone
+
+    run = await sm.create_run("T-DUP-RUNNING", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute("UPDATE runs SET current_stage='DESIGN_DISPATCHED' WHERE id=?", (rid,))
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at,running_started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-dup-running", rid, "local", "claude", "DESIGN_DISPATCHED", "running", "/t.md", str(tmp_path), "run-dup-running", now, now),
+    )
+
+    original_update_stage = sm._update_stage
+
+    async def delayed_update_stage(*args, **kwargs):
+        await asyncio.sleep(0)
+        await original_update_stage(*args, **kwargs)
+
+    with patch.object(sm, "_update_stage", side_effect=delayed_update_stage):
+        await asyncio.gather(
+            sm.on_job_status_changed(rid, "job-dup-running", "running"),
+            sm.on_job_status_changed(rid, "job-dup-running", "running"),
+        )
+
+    steps = await db.fetchall(
+        "SELECT * FROM steps WHERE run_id=? AND from_stage='DESIGN_DISPATCHED' AND to_stage='DESIGN_RUNNING'",
+        (rid,),
+    )
+    result = await sm._get_run(rid)
+    assert result["current_stage"] == "DESIGN_RUNNING"
+    assert len(steps) == 1
+
+
+async def test_on_job_status_changed_duplicate_completed_events_are_idempotent(sm, db, mocks, tmp_path):
+    _, executor, _, _ = mocks
+    executor.close_session = AsyncMock()
+
+    run = await sm.create_run("T-DUP-COMPLETE", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute(
+        "UPDATE runs SET current_stage='DESIGN_RUNNING', design_worktree=? WHERE id=?",
+        (str(tmp_path), rid),
+    )
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,turn_count,started_at,ended_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-dup-complete", rid, "local", "claude", "DESIGN_RUNNING", "completed", "/t.md", str(tmp_path), "run-dup-complete", 1, now, now),
+    )
+
+    design_dir = tmp_path / "docs" / "design"
+    design_dir.mkdir(parents=True, exist_ok=True)
+    (design_dir / "DES-T-DUP-COMPLETE.md").write_text("# Design", encoding="utf-8")
+    (design_dir / "ADR-T-DUP-COMPLETE-001.md").write_text("# ADR", encoding="utf-8")
+
+    original_update_stage = sm._update_stage
+
+    async def delayed_update_stage(*args, **kwargs):
+        await asyncio.sleep(0)
+        await original_update_stage(*args, **kwargs)
+
+    with patch.object(sm, "_update_stage", side_effect=delayed_update_stage):
+        await asyncio.gather(
+            sm.on_job_status_changed(rid, "job-dup-complete", "completed"),
+            sm.on_job_status_changed(rid, "job-dup-complete", "completed"),
+        )
+
+    steps = await db.fetchall(
+        "SELECT * FROM steps WHERE run_id=? AND from_stage='DESIGN_RUNNING' AND to_stage='DESIGN_REVIEW'",
+        (rid,),
+    )
+    result = await sm._get_run(rid)
+    assert result["current_stage"] == "DESIGN_REVIEW"
+    assert len(steps) == 1
+    executor.close_session.assert_called_once()
+
+
+async def test_on_job_status_changed_duplicate_failed_events_are_idempotent(sm, db, tmp_path):
+    from datetime import datetime, timezone
+
+    run = await sm.create_run("T-DUP-FAILED", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute("UPDATE runs SET current_stage='DESIGN_DISPATCHED' WHERE id=?", (rid,))
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at,ended_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("job-dup-failed", rid, "local", "claude", "DESIGN_DISPATCHED", "failed", "/t.md", str(tmp_path), "run-dup-failed", now, now),
+    )
+
+    original_transition_to_failed = sm._transition_to_failed
+
+    async def delayed_transition_to_failed(*args, **kwargs):
+        await asyncio.sleep(0)
+        await original_transition_to_failed(*args, **kwargs)
+
+    with patch.object(sm, "_transition_to_failed", side_effect=delayed_transition_to_failed):
+        await asyncio.gather(
+            sm.on_job_status_changed(rid, "job-dup-failed", "failed"),
+            sm.on_job_status_changed(rid, "job-dup-failed", "failed"),
+        )
+
+    failed_steps = await db.fetchall(
+        "SELECT * FROM steps WHERE run_id=? AND from_stage='DESIGN_DISPATCHED' AND to_stage='FAILED'",
+        (rid,),
+    )
+    failed_events = await db.fetchall(
+        "SELECT * FROM events WHERE run_id=? AND event_type='run.failed'",
+        (rid,),
+    )
+    result = await sm._get_run(rid)
+    assert result["status"] == "failed"
+    assert result["current_stage"] == "FAILED"
+    assert len(failed_steps) == 1
+    assert len(failed_events) == 1
+
+
 # ---------------------------------------------------------------------------
 # tick: review stages are idempotent
 # ---------------------------------------------------------------------------

@@ -312,3 +312,61 @@ async def test_handle_job_timeout_skips_notification_after_stage_advances(db, tm
     )
     assert timeout_events == []
     assert wh.notify.await_count == 0
+
+
+async def test_handle_job_timeout_routes_progression_through_job_status_callback(db, tmp_path):
+    hm = AsyncMock()
+    ae = AsyncMock()
+    wh = AsyncMock()
+    wh.notify = AsyncMock()
+    jm = JobManager(db)
+    sm = AsyncMock()
+    sm.on_job_status_changed = AsyncMock()
+
+    class FakeConfig:
+        class health_check:
+            interval = 60
+            ssh_timeout = 5
+        class timeouts:
+            dispatch_startup = 300
+            design_execution = 1800
+            dev_execution = 3600
+            review_reminder = 86400
+
+    sched = Scheduler(db, hm, jm, ae, wh, FakeConfig(), state_machine=sm)
+    now = "2026-03-20T00:00:00+00:00"
+    await db.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("local", "local", "both", 4, "active", now, now),
+    )
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-timeout-callback", "T-CB", str(tmp_path), "running", "DESIGN_RUNNING", now, now),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            "job-timeout-callback",
+            "run-timeout-callback",
+            "local",
+            "claude",
+            "DESIGN_RUNNING",
+            "running",
+            "/t.md",
+            str(tmp_path),
+            "run-timeout-callback-design",
+            now,
+        ),
+    )
+
+    async def _mark_timeout(run_id, agent_type, final_status="cancelled"):
+        await jm.update_status("job-timeout-callback", final_status, ended_at=now)
+
+    ae.cancel_session = AsyncMock(side_effect=_mark_timeout)
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-timeout-callback",))
+
+    await sched._handle_job_timeout(job, datetime.fromisoformat(now))
+
+    sm.on_job_status_changed.assert_awaited_once_with("run-timeout-callback", "job-timeout-callback", "timeout")
+    sm.tick.assert_not_called()

@@ -34,6 +34,15 @@ class AcpxExecutor:
     def set_state_machine(self, sm):
         self._state_machine = sm
 
+    async def _notify_job_status_changed(self, run_id, job_id, status):
+        if not self._state_machine:
+            return
+        if hasattr(self._state_machine, "on_job_status_changed"):
+            await self._state_machine.on_job_status_changed(run_id, job_id, status)
+            return
+        if hasattr(self._state_machine, "tick"):
+            await self._state_machine.tick(run_id)
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -293,6 +302,7 @@ class AcpxExecutor:
         prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, task_file)
 
         await self.jobs.mark_running(job_id)
+        await self._notify_job_status_changed(run_id, job_id, "running")
         await self.hosts.increment_load(host["id"])
         await self._emit_event(run_id, "session.created", {"session_name": session_name, "agent_type": agent_type})
 
@@ -512,7 +522,6 @@ class AcpxExecutor:
             "SELECT * FROM jobs WHERE status IN ('starting','running')"
         )
         now = datetime.now(timezone.utc).isoformat()
-        reconciled_run_ids = set()
         for job in jobs:
             j = dict(job)
             run = await self.db.fetchone("SELECT id FROM runs WHERE id=?", (j["run_id"],))
@@ -532,11 +541,7 @@ class AcpxExecutor:
                     continue  # Still running, leave it
             restored_status = self._finalize_terminal_status("interrupted", self._job_events_file(j))
             await self.jobs.update_status(j["id"], restored_status, ended_at=now)
-            reconciled_run_ids.add(j["run_id"])
-
-        if self._state_machine:
-            for run_id in reconciled_run_ids:
-                await self._state_machine.tick(run_id)
+            await self._notify_job_status_changed(j["run_id"], j["id"], restored_status)
 
     # ------------------------------------------------------------------
     # Process management (private)
@@ -593,9 +598,7 @@ class AcpxExecutor:
             else:
                 await self._emit_event(run_id, "job.failed", {"job_id": job_id, "exit_code": rc})
 
-            # Always tick so the state machine can react to any terminal job status
-            if self._state_machine:
-                await self._state_machine.tick(run_id)
+            await self._notify_job_status_changed(run_id, job_id, status)
 
         except asyncio.CancelledError:
             now = datetime.now(timezone.utc).isoformat()

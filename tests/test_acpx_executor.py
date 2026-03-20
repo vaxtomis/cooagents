@@ -374,6 +374,42 @@ async def test_start_session_records_dispatched_stage_for_queued_runs(
     assert job["running_started_at"] is not None
 
 
+@pytest.mark.parametrize(
+    "current_stage,agent_type,expected_stage",
+    [
+        ("DESIGN_QUEUED", "claude", "DESIGN_DISPATCHED"),
+        ("DEV_QUEUED", "codex", "DEV_DISPATCHED"),
+    ],
+)
+async def test_start_session_notifies_state_machine_when_job_enters_running(
+    executor, db, current_stage, agent_type, expected_stage
+):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-running-event", "T-RUNNING", "/repo", "running", current_stage, now, now),
+    )
+
+    host = {"id": "local", "host": "local"}
+    executor._run_cmd = AsyncMock(return_value=("", "", 0))
+    executor._start_local = AsyncMock(return_value=MagicMock())
+    executor._emit_event = AsyncMock()
+    executor._watch = AsyncMock(return_value=None)
+    state_machine = AsyncMock()
+    executor.set_state_machine(state_machine)
+
+    with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
+        job_id = await executor.start_session("run-running-event", host, agent_type, "/task.md", "/wt", 120)
+
+    state_machine.on_job_status_changed.assert_awaited_once_with("run-running-event", job_id, "running")
+
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert job["stage"] == expected_stage
+    assert job["status"] == "running"
+
+
 async def test_start_session_times_out_stuck_ensure(executor, db):
     from datetime import datetime, timezone
 
@@ -452,7 +488,7 @@ async def test_restore_on_startup_ticks_run_after_reconciling_dead_session(execu
 
     executor.get_session_status = AsyncMock(return_value={"status": "dead"})
     state_machine = AsyncMock()
-    state_machine.tick = AsyncMock()
+    state_machine.on_job_status_changed = AsyncMock()
     executor.set_state_machine(state_machine)
 
     await executor.restore_on_startup()
@@ -460,7 +496,11 @@ async def test_restore_on_startup_ticks_run_after_reconciling_dead_session(execu
     job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-startup-1",))
     assert job["status"] == "interrupted"
     assert job["ended_at"] is not None
-    state_machine.tick.assert_called_once_with("run-startup-1")
+    state_machine.on_job_status_changed.assert_awaited_once_with(
+        "run-startup-1",
+        "job-startup-1",
+        "interrupted",
+    )
 
 
 async def test_restore_on_startup_prefers_end_turn_events_over_interrupted(executor, db, tmp_path):
@@ -494,7 +534,7 @@ async def test_restore_on_startup_prefers_end_turn_events_over_interrupted(execu
 
     executor.get_session_status = AsyncMock(return_value={"status": "dead"})
     state_machine = AsyncMock()
-    state_machine.tick = AsyncMock()
+    state_machine.on_job_status_changed = AsyncMock()
     executor.set_state_machine(state_machine)
 
     await executor.restore_on_startup()
@@ -502,7 +542,11 @@ async def test_restore_on_startup_prefers_end_turn_events_over_interrupted(execu
     job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-startup-endturn",))
     assert job["status"] == "completed"
     assert job["ended_at"] is not None
-    state_machine.tick.assert_called_once_with("run-startup-endturn")
+    state_machine.on_job_status_changed.assert_awaited_once_with(
+        "run-startup-endturn",
+        "job-startup-endturn",
+        "completed",
+    )
 
 
 async def test_restore_on_startup_reconciles_orphan_job_without_ticking_missing_run(executor, db):
@@ -519,7 +563,7 @@ async def test_restore_on_startup_reconciles_orphan_job_without_ticking_missing_
 
     executor.get_session_status = AsyncMock(return_value=None)
     state_machine = AsyncMock()
-    state_machine.tick = AsyncMock()
+    state_machine.on_job_status_changed = AsyncMock()
     executor.set_state_machine(state_machine)
 
     await executor.restore_on_startup()
@@ -527,7 +571,7 @@ async def test_restore_on_startup_reconciles_orphan_job_without_ticking_missing_
     job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-orphan-startup",))
     assert job["status"] == "interrupted"
     assert job["ended_at"] is not None
-    state_machine.tick.assert_not_called()
+    state_machine.on_job_status_changed.assert_not_called()
 
 
 class _FakeStdout:
@@ -579,7 +623,7 @@ async def test_watch_prefers_end_turn_events_over_interrupted_exit_code(executor
     )
 
     state_machine = AsyncMock()
-    state_machine.tick = AsyncMock()
+    state_machine.on_job_status_changed = AsyncMock()
     executor.set_state_machine(state_machine)
 
     process = _FakeProcess([b'{"result":{"stopReason":"end_turn"}}\n'], 130)
@@ -593,4 +637,54 @@ async def test_watch_prefers_end_turn_events_over_interrupted_exit_code(executor
     assert job["events_file"] is not None
     assert "job.completed" in event_types
     assert "job.interrupted" not in event_types
-    state_machine.tick.assert_called_once_with("run-watch-endturn")
+    state_machine.on_job_status_changed.assert_awaited_once_with(
+        "run-watch-endturn",
+        "job-watch-endturn",
+        "completed",
+    )
+
+
+@pytest.mark.parametrize(
+    "returncode,expected_status",
+    [
+        (0, "completed"),
+        (1, "failed"),
+        (3, "timeout"),
+        (130, "interrupted"),
+    ],
+)
+async def test_watch_notifies_state_machine_about_terminal_job_status(executor, db, returncode, expected_status):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-watch-terminal", "T-TERM", "/repo", "running", "DESIGN_RUNNING", now, now),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            "job-watch-terminal",
+            "run-watch-terminal",
+            "local",
+            "claude",
+            "DESIGN_RUNNING",
+            "running",
+            "/t.md",
+            "/wt",
+            "run-watch-terminal-design",
+            now,
+        ),
+    )
+
+    state_machine = AsyncMock()
+    executor.set_state_machine(state_machine)
+
+    process = _FakeProcess([], returncode)
+    await executor._watch("job-watch-terminal", process, "run-watch-terminal", "local", "run-watch-terminal-design")
+
+    state_machine.on_job_status_changed.assert_awaited_once_with(
+        "run-watch-terminal",
+        "job-watch-terminal",
+        expected_status,
+    )

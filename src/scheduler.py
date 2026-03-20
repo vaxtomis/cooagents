@@ -188,7 +188,10 @@ class Scheduler:
                 limit_keys=("job_id",),
             )
         if self.sm:
-            await self.sm.tick(job["run_id"])
+            if hasattr(self.sm, "on_job_status_changed"):
+                await self.sm.on_job_status_changed(job["run_id"], job["id"], "timeout")
+            else:
+                await self.sm.tick(job["run_id"])
 
     async def _handle_job_timeout(self, job: dict, now: datetime) -> None:
         await self.executor.cancel_session(job["run_id"], job["agent_type"], final_status="timeout")
@@ -200,4 +203,7 @@ class Scheduler:
                 limit_keys=("job_id",),
             )
         if self.sm:
-            await self.sm.tick(job["run_id"])
+            if hasattr(self.sm, "on_job_status_changed"):
+                await self.sm.on_job_status_changed(job["run_id"], job["id"], "timeout")
+            else:
+                await self.sm.tick(job["run_id"])
