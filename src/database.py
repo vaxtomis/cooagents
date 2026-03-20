@@ -3,6 +3,7 @@ Async SQLite database wrapper using aiosqlite.
 """
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class Database:
     """Async SQLite database wrapper."""
+
+    _BUSY_TIMEOUT_MS = 5000
+    _LOCK_RETRY_ATTEMPTS = 3
+    _LOCK_RETRY_BASE_DELAY_SEC = 0.1
 
     def __init__(self, db_path: str | Path, schema_path: str | Path) -> None:
         db = Path(db_path)
@@ -33,10 +38,11 @@ class Database:
 
     async def connect(self) -> None:
         """Open the aiosqlite connection, apply schema, and enable WAL mode."""
-        self._conn = await aiosqlite.connect(self._db_path)
+        self._conn = await aiosqlite.connect(self._db_path, timeout=self._BUSY_TIMEOUT_MS / 1000)
         # Return rows as sqlite3.Row so they support both index and key access
         self._conn.row_factory = sqlite3.Row
         await self._conn.execute("PRAGMA foreign_keys=ON")
+        await self._conn.execute(f"PRAGMA busy_timeout={self._BUSY_TIMEOUT_MS}")
         # Apply schema (idempotent via CREATE IF NOT EXISTS)
         schema_sql = self._schema_path.read_text(encoding="utf-8")
         await self._conn.executescript(schema_sql)
@@ -69,6 +75,20 @@ class Database:
         if not await self._column_exists("jobs", "running_started_at"):
             await conn.execute("ALTER TABLE jobs ADD COLUMN running_started_at TEXT")
 
+    def _is_locked_error(self, exc: sqlite3.OperationalError) -> bool:
+        message = str(exc).lower()
+        return "database is locked" in message or "database table is locked" in message
+
+    async def _retry_locked_operation(self, operation):
+        attempts = 1 if self._in_transaction else self._LOCK_RETRY_ATTEMPTS
+        for attempt in range(attempts):
+            try:
+                return await operation()
+            except sqlite3.OperationalError as exc:
+                if attempt == attempts - 1 or not self._is_locked_error(exc):
+                    raise
+                await asyncio.sleep(self._LOCK_RETRY_BASE_DELAY_SEC * (2 ** attempt))
+
     async def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> int | None:
         """Execute a write statement and return lastrowid.
 
@@ -77,28 +97,45 @@ class Database:
         rollback at the end of the transaction block.
         """
         conn = self._ensure_connected()
-        async with conn.execute(sql, params or ()) as cursor:
-            lastrowid = cursor.lastrowid
-        # Auto-commit only when we are NOT inside an explicit transaction block.
-        if not self._in_transaction:
-            await conn.commit()
-        return lastrowid
+
+        async def _execute_once():
+            try:
+                async with conn.execute(sql, params or ()) as cursor:
+                    lastrowid = cursor.lastrowid
+                # Auto-commit only when we are NOT inside an explicit transaction block.
+                if not self._in_transaction:
+                    await conn.commit()
+                return lastrowid
+            except sqlite3.OperationalError:
+                if not self._in_transaction:
+                    await conn.rollback()
+                raise
+
+        return await self._retry_locked_operation(_execute_once)
 
     async def fetchone(self, sql: str, params: tuple[Any, ...] | None = None) -> dict[str, Any] | None:
         """Execute a query and return the first row as a dict, or None."""
         conn = self._ensure_connected()
-        async with conn.execute(sql, params or ()) as cursor:
-            row = await cursor.fetchone()
-            if row is None:
-                return None
-            return dict(row)
+
+        async def _fetchone_once():
+            async with conn.execute(sql, params or ()) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    return None
+                return dict(row)
+
+        return await self._retry_locked_operation(_fetchone_once)
 
     async def fetchall(self, sql: str, params: tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
         """Execute a query and return all rows as a list of dicts."""
         conn = self._ensure_connected()
-        async with conn.execute(sql, params or ()) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+
+        async def _fetchall_once():
+            async with conn.execute(sql, params or ()) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+        return await self._retry_locked_operation(_fetchall_once)
 
     @asynccontextmanager
     async def transaction(self):

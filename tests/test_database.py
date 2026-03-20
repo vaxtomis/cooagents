@@ -1,3 +1,7 @@
+import asyncio
+import sqlite3
+from unittest.mock import AsyncMock
+
 import pytest
 from src.database import Database
 
@@ -15,6 +19,11 @@ async def test_connect_creates_tables(db):
 async def test_connect_enables_foreign_keys(db):
     row = await db.fetchone("PRAGMA foreign_keys")
     assert row["foreign_keys"] == 1
+
+
+async def test_connect_sets_busy_timeout(db):
+    row = await db.fetchone("PRAGMA busy_timeout")
+    assert next(iter(row.values())) == 5000
 
 async def test_insert_and_fetch_run(db):
     await db.execute(
@@ -36,3 +45,23 @@ async def test_transaction_rollback(db):
         pass
     row = await db.fetchone("SELECT * FROM runs WHERE id=?", ("r2",))
     assert row is None
+
+
+async def test_retry_locked_operation_retries_until_success(db):
+    attempts = 0
+
+    async def flaky_operation():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return "ok"
+
+    with pytest.MonkeyPatch.context() as mp:
+        sleep_mock = AsyncMock()
+        mp.setattr(asyncio, "sleep", sleep_mock)
+        result = await db._retry_locked_operation(flaky_operation)
+
+    assert result == "ok"
+    assert attempts == 2
+    sleep_mock.assert_awaited_once()

@@ -941,13 +941,16 @@ async def test_design_dispatched_reconciles_dead_running_session_to_failed(sm, d
         ("job-des-dead", rid, "local", "claude", "DESIGN_DISPATCHED", "running", "run-des-dead-design", str(tmp_path), now),
     )
 
-    result = await sm.tick(rid)
+    with patch("src.state_machine.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+        result = await sm.tick(rid)
     job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-des-dead",))
 
     assert result["current_stage"] == "FAILED"
     assert result["status"] == "failed"
     assert job["status"] == "interrupted"
     assert job["ended_at"] is not None
+    assert executor.get_session_status.await_count == 3
+    assert sleep_mock.await_count == 2
 
 
 async def test_design_dispatched_keeps_fresh_dead_session_pending_during_grace(sm, db, mocks, tmp_path):
@@ -1025,7 +1028,8 @@ async def test_design_running_prefers_end_turn_events_over_dead_session(sm, db, 
     (design_dir / "DES-T-DES-ENDTURN.md").write_text("# Design", encoding="utf-8")
     (design_dir / "ADR-T-DES-ENDTURN-001.md").write_text("# ADR", encoding="utf-8")
 
-    result = await sm.tick(rid)
+    with patch("src.state_machine.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+        result = await sm.tick(rid)
     job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-des-endturn",))
     events = await db.fetchall("SELECT event_type FROM events WHERE run_id=? ORDER BY id", (rid,))
     event_types = [row["event_type"] for row in events]
@@ -1035,6 +1039,8 @@ async def test_design_running_prefers_end_turn_events_over_dead_session(sm, db, 
     assert job["status"] == "completed"
     assert "job.interrupted" not in event_types
     executor.close_session.assert_called_once()
+    assert executor.get_session_status.await_count == 3
+    assert sleep_mock.await_count == 2
 
 
 async def test_design_dispatched_keeps_alive_session_running(sm, db, mocks, tmp_path):
@@ -1078,10 +1084,41 @@ async def test_dev_running_reconciles_missing_running_session_to_failed(sm, db, 
         ("job-dev-missing", rid, "local", "codex", "DEV_RUNNING", "running", "run-dev-missing-dev", str(tmp_path), now),
     )
 
-    result = await sm.tick(rid)
+    with patch("src.state_machine.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+        result = await sm.tick(rid)
     job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-dev-missing",))
 
     assert result["current_stage"] == "FAILED"
     assert result["status"] == "failed"
     assert job["status"] == "interrupted"
     assert job["ended_at"] is not None
+    assert executor.get_session_status.await_count == 3
+    assert sleep_mock.await_count == 2
+
+
+async def test_dev_running_keeps_running_when_session_probe_recovers(sm, db, mocks, tmp_path):
+    """DEV_RUNNING should not fail when a follow-up session probe reports the job as healthy."""
+    _, executor, _, _ = mocks
+    executor.get_session_status = AsyncMock(side_effect=[None, {"status": "running"}])
+
+    run = await sm.create_run("T-DEV-RECOVER", str(tmp_path))
+    rid = run["id"]
+    await db.execute("UPDATE runs SET current_stage='DEV_RUNNING' WHERE id=?", (rid,))
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,session_name,worktree,started_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("job-dev-recover", rid, "local", "codex", "DEV_RUNNING", "running", "run-dev-recover-dev", str(tmp_path), now),
+    )
+
+    with patch("src.state_machine.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+        result = await sm.tick(rid)
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-dev-recover",))
+
+    assert result["current_stage"] == "DEV_RUNNING"
+    assert result["status"] == "running"
+    assert job["status"] == "running"
+    assert job["ended_at"] is None
+    assert executor.get_session_status.await_count == 2
+    sleep_mock.assert_awaited_once()

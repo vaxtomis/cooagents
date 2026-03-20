@@ -78,6 +78,18 @@ class AcpxExecutor:
             return 60
         return getattr(timeout_cfg, "dispatch_ensure", 60)
 
+    def _session_reconcile_attempts(self):
+        timeout_cfg = getattr(self.config, "timeouts", None) if self.config else None
+        if not timeout_cfg:
+            return 3
+        return max(1, getattr(timeout_cfg, "session_reconcile_attempts", 3))
+
+    def _session_reconcile_delay(self):
+        timeout_cfg = getattr(self.config, "timeouts", None) if self.config else None
+        if not timeout_cfg:
+            return 0.5
+        return max(0.0, float(getattr(timeout_cfg, "session_reconcile_delay", 0.5)))
+
     def _get_allowed_tools(self, agent_type):
         cfg = self._acpx_cfg()
         if not cfg:
@@ -412,6 +424,19 @@ class AcpxExecutor:
         except Exception:
             return None
 
+    async def _probe_session_status(self, run_id, agent_type, host=None):
+        attempts = self._session_reconcile_attempts()
+        delay = self._session_reconcile_delay()
+        last_status = None
+        for attempt in range(attempts):
+            last_status = await self.get_session_status(run_id, agent_type, host=host)
+            session_state = last_status.get("status") if last_status else None
+            if session_state in {"running", "alive"}:
+                return last_status
+            if attempt < attempts - 1 and delay > 0:
+                await asyncio.sleep(delay)
+        return last_status
+
     async def get_session_detail(self, run_id, agent_type) -> dict | None:
         """Query rich session metadata via ``sessions show`` (token usage, exit code, etc.)."""
         job = await self.db.fetchone(
@@ -551,8 +576,8 @@ class AcpxExecutor:
                     )
                     if host:
                         host = dict(host)
-                status = await self.get_session_status(j["run_id"], j["agent_type"], host=host)
-                if status and status.get("status") == "running":
+                status = await self._probe_session_status(j["run_id"], j["agent_type"], host=host)
+                if status and status.get("status") in {"running", "alive"}:
                     continue  # Still running, leave it
             restored_status = self._finalize_terminal_status("interrupted", self._job_events_file(j))
             await self.jobs.update_status(j["id"], restored_status, ended_at=now)

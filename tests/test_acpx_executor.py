@@ -521,7 +521,8 @@ async def test_restore_on_startup_ticks_run_after_reconciling_dead_session(execu
     state_machine.on_job_status_changed = AsyncMock()
     executor.set_state_machine(state_machine)
 
-    await executor.restore_on_startup()
+    with patch("src.acpx_executor.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+        await executor.restore_on_startup()
 
     job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-startup-1",))
     assert job["status"] == "interrupted"
@@ -531,6 +532,8 @@ async def test_restore_on_startup_ticks_run_after_reconciling_dead_session(execu
         "job-startup-1",
         "interrupted",
     )
+    assert executor.get_session_status.await_count == 3
+    assert sleep_mock.await_count == 2
 
 
 async def test_restore_on_startup_prefers_end_turn_events_over_interrupted(executor, db, tmp_path):
@@ -567,7 +570,8 @@ async def test_restore_on_startup_prefers_end_turn_events_over_interrupted(execu
     state_machine.on_job_status_changed = AsyncMock()
     executor.set_state_machine(state_machine)
 
-    await executor.restore_on_startup()
+    with patch("src.acpx_executor.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+        await executor.restore_on_startup()
 
     job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-startup-endturn",))
     assert job["status"] == "completed"
@@ -577,6 +581,38 @@ async def test_restore_on_startup_prefers_end_turn_events_over_interrupted(execu
         "job-startup-endturn",
         "completed",
     )
+    assert executor.get_session_status.await_count == 3
+    assert sleep_mock.await_count == 2
+
+
+async def test_restore_on_startup_keeps_running_job_when_probe_recovers(executor, db):
+    """restore_on_startup should leave the job running when a follow-up probe reports it healthy."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-startup-recover", "T-RECOVER", "/repo", "running", "DEV_RUNNING", now, now),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("job-startup-recover", "run-startup-recover", None, "codex", "DEV_RUNNING", "running", "/t.md", "/wt", "run-startup-recover-dev", now),
+    )
+
+    executor.get_session_status = AsyncMock(side_effect=[{"status": "dead"}, {"status": "running"}])
+    state_machine = AsyncMock()
+    state_machine.on_job_status_changed = AsyncMock()
+    executor.set_state_machine(state_machine)
+
+    with patch("src.acpx_executor.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+        await executor.restore_on_startup()
+
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-startup-recover",))
+    assert job["status"] == "running"
+    assert job["ended_at"] is None
+    assert executor.get_session_status.await_count == 2
+    sleep_mock.assert_awaited_once()
+    state_machine.on_job_status_changed.assert_not_called()
 
 
 async def test_restore_on_startup_reconciles_orphan_job_without_ticking_missing_run(executor, db):

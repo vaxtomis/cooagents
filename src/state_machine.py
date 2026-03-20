@@ -99,6 +99,18 @@ class StateMachine:
             return 30
         return getattr(timeout_cfg, "dispatch_reconcile_grace", 30)
 
+    def _session_reconcile_attempts(self) -> int:
+        timeout_cfg = getattr(self._config, "timeouts", None) if self._config else None
+        if not timeout_cfg:
+            return 3
+        return max(1, getattr(timeout_cfg, "session_reconcile_attempts", 3))
+
+    def _session_reconcile_delay(self) -> float:
+        timeout_cfg = getattr(self._config, "timeouts", None) if self._config else None
+        if not timeout_cfg:
+            return 0.5
+        return max(0.0, float(getattr(timeout_cfg, "session_reconcile_delay", 0.5)))
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -848,6 +860,19 @@ class StateMachine:
         age = (datetime.now(timezone.utc) - started).total_seconds()
         return age < self._dispatch_reconcile_grace()
 
+    async def _probe_session_status(self, run: dict, job: dict, host: dict | None = None):
+        attempts = self._session_reconcile_attempts()
+        delay = self._session_reconcile_delay()
+        last_status = None
+        for attempt in range(attempts):
+            last_status = await self.executor.get_session_status(run["id"], job["agent_type"], host=host)
+            session_state = last_status.get("status") if last_status else None
+            if session_state in {"running", "alive"}:
+                return last_status
+            if attempt < attempts - 1 and delay > 0:
+                await asyncio.sleep(delay)
+        return last_status
+
     async def _reconcile_job_session(self, run: dict, job: dict) -> dict:
         if job["status"] != "running" or not hasattr(self.executor, "get_session_status"):
             return job
@@ -858,7 +883,7 @@ class StateMachine:
             if host:
                 host = dict(host)
 
-        status = await self.executor.get_session_status(run["id"], job["agent_type"], host=host)
+        status = await self._probe_session_status(run, job, host=host)
         session_state = status.get("status") if status else None
         if session_state in {"running", "alive"}:
             return job
