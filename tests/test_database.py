@@ -12,6 +12,10 @@ async def test_connect_creates_tables(db):
     row = await db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'")
     assert row is not None
 
+async def test_connect_enables_foreign_keys(db):
+    row = await db.fetchone("PRAGMA foreign_keys")
+    assert row["foreign_keys"] == 1
+
 async def test_insert_and_fetch_run(db):
     await db.execute(
         "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",

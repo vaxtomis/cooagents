@@ -94,6 +94,24 @@ async def test_select_host_uses_real_jobs_only(hm, db, jobs):
     host = await hm.select_host("claude")
     assert host is None
 
+
+async def test_select_host_ignores_orphan_jobs(hm, db):
+    await hm.register("h1", "local", "both", max_concurrent=1)
+    now = "2026-03-20T00:00:00+00:00"
+
+    await db.execute("PRAGMA foreign_keys=OFF")
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,started_at) VALUES(?,?,?,?,?,?,?)",
+        ("job-orphan", "missing-run", "h1", "claude", "DESIGN_RUNNING", "running", now),
+    )
+    await db.execute("PRAGMA foreign_keys=ON")
+
+    hosts = await hm.list_all()
+    host = await hm.select_host("claude")
+
+    assert hosts[0]["current_load"] == 0
+    assert host["id"] == "h1"
+
 async def test_load_from_config(hm):
     config = [
         {"id": "pc1", "host": "local", "agent_type": "both", "max_concurrent": 2},

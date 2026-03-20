@@ -36,6 +36,7 @@ class Database:
         self._conn = await aiosqlite.connect(self._db_path)
         # Return rows as sqlite3.Row so they support both index and key access
         self._conn.row_factory = sqlite3.Row
+        await self._conn.execute("PRAGMA foreign_keys=ON")
         # Apply schema (idempotent via CREATE IF NOT EXISTS)
         schema_sql = self._schema_path.read_text(encoding="utf-8")
         await self._conn.executescript(schema_sql)

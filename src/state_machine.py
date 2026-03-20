@@ -8,6 +8,7 @@ INIT → REQ_COLLECTING → REQ_REVIEW → DESIGN_QUEUED → DESIGN_DISPATCHED
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -80,6 +81,7 @@ class StateMachine:
         if config:
             self._design_max_turns = getattr(getattr(config, 'turns', None), 'design_max_turns', 1)
             self._dev_max_turns = getattr(getattr(config, 'turns', None), 'dev_max_turns', 1)
+        self._dispatch_locks = {}
 
     def _execution_timeout(self, phase: str) -> int:
         defaults = {"design": 1800, "dev": 3600}
@@ -341,52 +343,74 @@ class StateMachine:
 
     async def _tick_design_queued(self, run: dict) -> None:
         """Try to dispatch the design agent job if a host is available."""
-        host = await self.hosts.select_host("claude")
-        if not host:
-            await self._emit_limited(run["id"], "host.unavailable", {
-                "stage": "DESIGN_QUEUED",
-                "agent_type": "claude",
-                "ticket": run["ticket"],
-            }, limit_keys=("stage",))
-            return
+        lock = self._dispatch_locks.setdefault(run["id"], asyncio.Lock())
+        async with lock:
+            current = await self._get_run(run["id"])
+            if current["status"] != "running" or current["current_stage"] != "DESIGN_QUEUED":
+                return
+            if self.jobs and await self.jobs.get_active_job(run["id"]):
+                return
 
-        branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "design")
+            host = await self.hosts.select_host("claude")
+            if not host:
+                await self._emit_limited(run["id"], "host.unavailable", {
+                    "stage": "DESIGN_QUEUED",
+                    "agent_type": "claude",
+                    "ticket": run["ticket"],
+                }, limit_keys=("stage",))
+                return
 
-        now = datetime.now(timezone.utc).isoformat()
-        await self.db.execute(
-            "UPDATE runs SET design_worktree=?, design_branch=?, updated_at=? WHERE id=?",
-            (wt, branch, now, run["id"]),
-        )
+            branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "design")
 
-        task_path = os.path.join(self.coop_dir, "runs", run["id"], "TASK-design.md")
-        os.makedirs(os.path.dirname(task_path), exist_ok=True)
-        req_source = Path(run["repo_path"]) / "docs" / "req" / f"REQ-{run['ticket']}.md"
-        req_path = self._copy_file_to_worktree(
-            req_source,
-            wt,
-            Path("docs") / "req" / req_source.name,
-        )
+            now = datetime.now(timezone.utc).isoformat()
+            await self.db.execute(
+                "UPDATE runs SET design_worktree=?, design_branch=?, updated_at=? WHERE id=?",
+                (wt, branch, now, run["id"]),
+            )
 
-        template = "templates/INIT-design.md"
+            task_path = os.path.join(self.coop_dir, "runs", run["id"], "TASK-design.md")
+            os.makedirs(os.path.dirname(task_path), exist_ok=True)
+            req_source = Path(run["repo_path"]) / "docs" / "req" / f"REQ-{run['ticket']}.md"
+            req_path = self._copy_file_to_worktree(
+                req_source,
+                wt,
+                Path("docs") / "req" / req_source.name,
+            )
 
-        await self.artifacts.render_task(
-            template,
-            {
-                "run_id": run["id"],
-                "ticket": run["ticket"],
-                "repo_path": run["repo_path"],
-                "worktree": wt,
-                "req_path": req_path,
-            },
-            task_path,
-        )
+            template = "templates/INIT-design.md"
 
-        timeout_sec = self._execution_timeout("design")
-        if hasattr(self.executor, 'start_session'):
-            await self.executor.start_session(run["id"], host, "claude", task_path, wt, timeout_sec)
-        else:
-            await self.executor.dispatch(run["id"], host, "claude", task_path, wt, timeout_sec)
-        await self._update_stage(run["id"], "DESIGN_QUEUED", "DESIGN_DISPATCHED")
+            await self.artifacts.render_task(
+                template,
+                {
+                    "run_id": run["id"],
+                    "ticket": run["ticket"],
+                    "repo_path": run["repo_path"],
+                    "worktree": wt,
+                    "req_path": req_path,
+                },
+                task_path,
+            )
+
+            timeout_sec = self._execution_timeout("design")
+            try:
+                if hasattr(self.executor, 'start_session'):
+                    await self.executor.start_session(run["id"], host, "claude", task_path, wt, timeout_sec)
+                else:
+                    await self.executor.dispatch(run["id"], host, "claude", task_path, wt, timeout_sec)
+            except asyncio.TimeoutError:
+                job = await self.db.fetchone(
+                    "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+                    (run["id"],),
+                )
+                if job:
+                    await self._emit_limited(
+                        run["id"],
+                        "job.timeout",
+                        {"run_id": run["id"], "job_id": job["id"], "stage": job.get("stage", "")},
+                        limit_keys=("job_id",),
+                    )
+                return
+            await self._update_stage(run["id"], "DESIGN_QUEUED", "DESIGN_DISPATCHED")
 
     async def _tick_design_dispatched(self, run: dict) -> None:
         """Advance to DESIGN_RUNNING once the agent job reports as running."""
@@ -453,56 +477,78 @@ class StateMachine:
 
     async def _tick_dev_queued(self, run: dict) -> None:
         """Try to dispatch the dev agent job if a host is available."""
-        host = await self.hosts.select_host("codex")
-        if not host:
-            await self._emit_limited(run["id"], "host.unavailable", {
-                "stage": "DEV_QUEUED",
-                "agent_type": "codex",
-                "ticket": run["ticket"],
-            }, limit_keys=("stage",))
-            return
+        lock = self._dispatch_locks.setdefault(run["id"], asyncio.Lock())
+        async with lock:
+            current = await self._get_run(run["id"])
+            if current["status"] != "running" or current["current_stage"] != "DEV_QUEUED":
+                return
+            if self.jobs and await self.jobs.get_active_job(run["id"]):
+                return
 
-        branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "dev")
+            host = await self.hosts.select_host("codex")
+            if not host:
+                await self._emit_limited(run["id"], "host.unavailable", {
+                    "stage": "DEV_QUEUED",
+                    "agent_type": "codex",
+                    "ticket": run["ticket"],
+                }, limit_keys=("stage",))
+                return
 
-        now = datetime.now(timezone.utc).isoformat()
-        await self.db.execute(
-            "UPDATE runs SET dev_worktree=?, dev_branch=?, updated_at=? WHERE id=?",
-            (wt, branch, now, run["id"]),
-        )
+            branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "dev")
 
-        task_path = os.path.join(self.coop_dir, "runs", run["id"], "TASK-dev.md")
-        os.makedirs(os.path.dirname(task_path), exist_ok=True)
-        design_arts = await self.artifacts.get_by_run(run["id"], kind="design")
-        design_path = ""
-        if design_arts:
-            latest_design = design_arts[-1]
-            source_path = Path(latest_design["path"])
-            design_path = self._copy_file_to_worktree(
-                source_path,
-                wt,
-                Path("docs") / "design" / source_path.name,
+            now = datetime.now(timezone.utc).isoformat()
+            await self.db.execute(
+                "UPDATE runs SET dev_worktree=?, dev_branch=?, updated_at=? WHERE id=?",
+                (wt, branch, now, run["id"]),
             )
 
-        template = "templates/INIT-dev.md"
+            task_path = os.path.join(self.coop_dir, "runs", run["id"], "TASK-dev.md")
+            os.makedirs(os.path.dirname(task_path), exist_ok=True)
+            design_arts = await self.artifacts.get_by_run(run["id"], kind="design")
+            design_path = ""
+            if design_arts:
+                latest_design = design_arts[-1]
+                source_path = Path(latest_design["path"])
+                design_path = self._copy_file_to_worktree(
+                    source_path,
+                    wt,
+                    Path("docs") / "design" / source_path.name,
+                )
 
-        await self.artifacts.render_task(
-            template,
-            {
-                "run_id": run["id"],
-                "ticket": run["ticket"],
-                "repo_path": run["repo_path"],
-                "worktree": wt,
-                "design_path": design_path,
-            },
-            task_path,
-        )
+            template = "templates/INIT-dev.md"
 
-        timeout_sec = self._execution_timeout("dev")
-        if hasattr(self.executor, 'start_session'):
-            await self.executor.start_session(run["id"], host, "codex", task_path, wt, timeout_sec)
-        else:
-            await self.executor.dispatch(run["id"], host, "codex", task_path, wt, timeout_sec)
-        await self._update_stage(run["id"], "DEV_QUEUED", "DEV_DISPATCHED")
+            await self.artifacts.render_task(
+                template,
+                {
+                    "run_id": run["id"],
+                    "ticket": run["ticket"],
+                    "repo_path": run["repo_path"],
+                    "worktree": wt,
+                    "design_path": design_path,
+                },
+                task_path,
+            )
+
+            timeout_sec = self._execution_timeout("dev")
+            try:
+                if hasattr(self.executor, 'start_session'):
+                    await self.executor.start_session(run["id"], host, "codex", task_path, wt, timeout_sec)
+                else:
+                    await self.executor.dispatch(run["id"], host, "codex", task_path, wt, timeout_sec)
+            except asyncio.TimeoutError:
+                job = await self.db.fetchone(
+                    "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+                    (run["id"],),
+                )
+                if job:
+                    await self._emit_limited(
+                        run["id"],
+                        "job.timeout",
+                        {"run_id": run["id"], "job_id": job["id"], "stage": job.get("stage", "")},
+                        limit_keys=("job_id",),
+                    )
+                return
+            await self._update_stage(run["id"], "DEV_QUEUED", "DEV_DISPATCHED")
 
     async def _tick_dev_dispatched(self, run: dict) -> None:
         """Advance to DEV_RUNNING once the dev job reports as running."""

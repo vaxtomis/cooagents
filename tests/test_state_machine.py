@@ -8,6 +8,7 @@ External dependencies that do not exist yet are mocked:
                         → dict or None
   - merge_manager     : enqueue / get_status as needed
 """
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.database import Database
@@ -21,6 +22,10 @@ from src.job_manager import JobManager
 async def db(tmp_path):
     d = Database(db_path=tmp_path / "test.db", schema_path="db/schema.sql")
     await d.connect()
+    await d.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("local", "local", "both", 4, "active", "2026-03-20T00:00:00+00:00", "2026-03-20T00:00:00+00:00"),
+    )
     yield d
     await d.close()
 
@@ -161,6 +166,43 @@ async def test_design_queued_copies_requirement_into_design_worktree(sm, tmp_pat
     assert copied_req.read_text(encoding="utf-8") == "# Requirement content"
     render_args = sm.artifacts.render_task.await_args.args
     assert render_args[1]["req_path"] == "docs/req/REQ-T-REQCOPY.md"
+
+
+async def test_design_queued_skips_dispatch_when_active_job_exists(sm, mocks, db, tmp_path):
+    _, executor, _, _ = mocks
+    executor.start_session = AsyncMock(return_value="job-dup")
+
+    run = await sm.create_run("T-DUP", str(tmp_path))
+    rid = run["run_id"]
+    await sm.submit_requirement(rid, "# Req")
+    await sm.approve(rid, "req", "user1")
+
+    now = "2026-03-20T00:00:00+00:00"
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("job-existing", rid, "local", "claude", "DESIGN_DISPATCHED", "starting", "/t.md", str(tmp_path), "run-dup-design", now),
+    )
+
+    run = await sm.tick(rid)
+
+    assert run["current_stage"] == "DESIGN_QUEUED"
+    executor.start_session.assert_not_called()
+
+
+async def test_design_queued_keeps_stage_when_start_session_times_out(sm, mocks, tmp_path):
+    _, executor, _, _ = mocks
+    executor.start_session = AsyncMock(side_effect=asyncio.TimeoutError())
+
+    run = await sm.create_run("T-ENSURE-TIMEOUT", str(tmp_path))
+    rid = run["run_id"]
+    await sm.submit_requirement(rid, "# Req")
+    await sm.approve(rid, "req", "user1")
+
+    run = await sm.tick(rid)
+
+    assert run["current_stage"] == "DESIGN_QUEUED"
+    assert run["status"] == "running"
 
 
 # ---------------------------------------------------------------------------

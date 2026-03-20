@@ -1,4 +1,5 @@
 import os
+import asyncio
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,6 +12,10 @@ from src.config import Settings
 async def db(tmp_path):
     d = Database(db_path=tmp_path / "test.db", schema_path="db/schema.sql")
     await d.connect()
+    await d.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("local", "local", "both", 4, "active", "2026-03-20T00:00:00+00:00", "2026-03-20T00:00:00+00:00"),
+    )
     yield d
     await d.close()
 
@@ -367,6 +372,41 @@ async def test_start_session_records_dispatched_stage_for_queued_runs(
     assert job["session_name"] == session_name
 
 
+async def test_start_session_times_out_stuck_ensure(executor, db):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-stuck-ensure", "T-STUCK", "/repo", "running", "DESIGN_QUEUED", now, now),
+    )
+
+    class FakeConfig:
+        class timeouts:
+            dispatch_ensure = 0.01
+
+    executor.config = FakeConfig()
+
+    async def _slow_run_cmd(cmd, cwd):
+        await asyncio.sleep(0.05)
+        return "", "", 0
+
+    host = {"id": "local", "host": "local"}
+    executor._run_cmd = AsyncMock(side_effect=_slow_run_cmd)
+    executor._start_local = AsyncMock()
+    executor._emit_event = AsyncMock()
+
+    with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
+        with pytest.raises(asyncio.TimeoutError):
+            await executor.start_session("run-stuck-ensure", host, "claude", "/task.md", "/wt", 120)
+
+    job = await db.fetchone("SELECT * FROM jobs WHERE run_id=?", ("run-stuck-ensure",))
+
+    assert job["status"] == "timeout"
+    assert job["ended_at"] is not None
+    executor._start_local.assert_not_called()
+
+
 # ------------------------------------------------------------------
 # Resource cleanup
 # ------------------------------------------------------------------
@@ -461,6 +501,31 @@ async def test_restore_on_startup_prefers_end_turn_events_over_interrupted(execu
     assert job["status"] == "completed"
     assert job["ended_at"] is not None
     state_machine.tick.assert_called_once_with("run-startup-endturn")
+
+
+async def test_restore_on_startup_reconciles_orphan_job_without_ticking_missing_run(executor, db):
+    """restore_on_startup should terminate orphan jobs without ticking a missing run."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    await db.execute("PRAGMA foreign_keys=OFF")
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("job-orphan-startup", "missing-run", None, "claude", "DESIGN_DISPATCHED", "running", "/t.md", "/wt", "missing-run-design", now),
+    )
+    await db.execute("PRAGMA foreign_keys=ON")
+
+    executor.get_session_status = AsyncMock(return_value=None)
+    state_machine = AsyncMock()
+    state_machine.tick = AsyncMock()
+    executor.set_state_machine(state_machine)
+
+    await executor.restore_on_startup()
+
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-orphan-startup",))
+    assert job["status"] == "interrupted"
+    assert job["ended_at"] is not None
+    state_machine.tick.assert_not_called()
 
 
 class _FakeStdout:

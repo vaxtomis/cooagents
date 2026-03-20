@@ -5,6 +5,15 @@ class HostManager:
     def __init__(self, db):
         self.db = db
 
+    async def _count_active_jobs(self, host_id):
+        row = await self.db.fetchone(
+            "SELECT COUNT(*) as cnt FROM jobs j "
+            "WHERE j.host_id=? AND j.status IN ('starting','running') "
+            "AND EXISTS (SELECT 1 FROM runs r WHERE r.id = j.run_id)",
+            (host_id,)
+        )
+        return row["cnt"] if row else 0
+
     async def register(self, id, host, agent_type, max_concurrent=2, ssh_key=None, labels=None):
         now = datetime.now(timezone.utc).isoformat()
         labels_json = None
@@ -33,11 +42,7 @@ class HostManager:
         for r in rows:
             d = dict(r)
             # Add current_load from jobs count
-            load = await self.db.fetchone(
-                "SELECT COUNT(*) as cnt FROM jobs WHERE host_id=? AND status IN ('starting','running')",
-                (d["id"],)
-            )
-            d["current_load"] = load["cnt"] if load else 0
+            d["current_load"] = await self._count_active_jobs(d["id"])
             result.append(d)
         return result
 
@@ -50,11 +55,7 @@ class HostManager:
         candidates = []
         for r in rows:
             d = dict(r)
-            load = await self.db.fetchone(
-                "SELECT COUNT(*) as cnt FROM jobs WHERE host_id=? AND status IN ('starting','running')",
-                (d["id"],)
-            )
-            d["current_load"] = load["cnt"] if load else 0
+            d["current_load"] = await self._count_active_jobs(d["id"])
             if d["current_load"] < d["max_concurrent"]:
                 candidates.append(d)
 

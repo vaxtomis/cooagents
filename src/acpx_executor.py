@@ -54,6 +54,12 @@ class AcpxExecutor:
         """Return the AcpxConfig or None."""
         return getattr(self.config, "acpx", None) if self.config else None
 
+    def _dispatch_ensure_timeout(self):
+        timeout_cfg = getattr(self.config, "timeouts", None) if self.config else None
+        if not timeout_cfg:
+            return 60
+        return getattr(timeout_cfg, "dispatch_ensure", 60)
+
     def _get_allowed_tools(self, agent_type):
         cfg = self._acpx_cfg()
         if not cfg:
@@ -261,10 +267,27 @@ class AcpxExecutor:
 
         # Ensure session exists
         ensure_cmd = self._build_acpx_ensure_cmd(agent_type, session_name, worktree)
-        if host["host"] == "local":
-            await self._run_cmd(ensure_cmd, worktree)
-        else:
-            await self._run_ssh_cmd(host, ensure_cmd)
+        try:
+            ensure_timeout = self._dispatch_ensure_timeout()
+            if host["host"] == "local":
+                _, _, rc = await asyncio.wait_for(
+                    self._run_cmd(ensure_cmd, worktree),
+                    timeout=ensure_timeout,
+                )
+            else:
+                _, _, rc = await asyncio.wait_for(
+                    self._run_ssh_cmd(host, ensure_cmd),
+                    timeout=ensure_timeout,
+                )
+        except asyncio.TimeoutError:
+            now = datetime.now(timezone.utc).isoformat()
+            await self.jobs.update_status(job_id, "timeout", ended_at=now)
+            raise
+
+        if rc != 0:
+            now = datetime.now(timezone.utc).isoformat()
+            await self.jobs.update_status(job_id, "failed", ended_at=now)
+            raise RuntimeError(f"acpx ensure failed for {session_name}")
 
         # Send initial prompt
         prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, task_file)
@@ -492,6 +515,10 @@ class AcpxExecutor:
         reconciled_run_ids = set()
         for job in jobs:
             j = dict(job)
+            run = await self.db.fetchone("SELECT id FROM runs WHERE id=?", (j["run_id"],))
+            if not run:
+                await self.jobs.update_status(j["id"], "interrupted", ended_at=now)
+                continue
             if j.get("session_name"):
                 host = None
                 if j.get("host_id"):
