@@ -292,7 +292,7 @@ class AcpxExecutor:
         # Send initial prompt
         prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, task_file)
 
-        await self.jobs.update_status(job_id, "running")
+        await self.jobs.mark_running(job_id)
         await self.hosts.increment_load(host["id"])
         await self._emit_event(run_id, "session.created", {"session_name": session_name, "agent_type": agent_type})
 

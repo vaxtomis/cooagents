@@ -19,9 +19,9 @@ class JobManager:
         job_id = f"job-{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
         await self.db.execute(
-            """INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,base_commit,session_name,started_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-            (job_id, run_id, host_id, agent_type, stage, "starting", task_file, worktree, base_commit, session_name, now)
+            """INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,base_commit,session_name,timeout_sec,started_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (job_id, run_id, host_id, agent_type, stage, "starting", task_file, worktree, base_commit, session_name, timeout_sec, now)
         )
         return job_id
 
@@ -37,6 +37,13 @@ class JobManager:
         sql += " WHERE id=?"
         params.append(job_id)
         await self.db.execute(sql, tuple(params))
+
+    async def mark_running(self, job_id, started_at=None):
+        started_at = started_at or datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE jobs SET status=?, running_started_at=? WHERE id=?",
+            ("running", started_at, job_id),
+        )
 
     async def get_active_job(self, run_id):
         return await self.db.fetchone(

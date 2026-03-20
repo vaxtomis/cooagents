@@ -40,6 +40,7 @@ class Database:
         # Apply schema (idempotent via CREATE IF NOT EXISTS)
         schema_sql = self._schema_path.read_text(encoding="utf-8")
         await self._conn.executescript(schema_sql)
+        await self._apply_compat_migrations()
         # Enable WAL journal mode for better concurrency
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.commit()
@@ -54,6 +55,19 @@ class Database:
         if self._conn is None:
             raise RuntimeError("Database is not connected. Call connect() first.")
         return self._conn
+
+    async def _column_exists(self, table: str, column: str) -> bool:
+        conn = self._ensure_connected()
+        async with conn.execute(f"PRAGMA table_info({table})") as cursor:
+            rows = await cursor.fetchall()
+        return any(row["name"] == column for row in rows)
+
+    async def _apply_compat_migrations(self) -> None:
+        conn = self._ensure_connected()
+        if not await self._column_exists("jobs", "timeout_sec"):
+            await conn.execute("ALTER TABLE jobs ADD COLUMN timeout_sec INTEGER")
+        if not await self._column_exists("jobs", "running_started_at"):
+            await conn.execute("ALTER TABLE jobs ADD COLUMN running_started_at TEXT")
 
     async def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> int | None:
         """Execute a write statement and return lastrowid.

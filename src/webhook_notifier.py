@@ -95,7 +95,7 @@ class WebhookNotifier:
 
         # Look up run for ticket, stage, and per-run notify config
         ticket = payload.get("ticket", "")
-        stage = payload.get("stage", "")
+        stage = payload.get("current_stage") or payload.get("stage") or payload.get("job_stage") or ""
         channel = cfg.default_channel
         to = cfg.default_to
 

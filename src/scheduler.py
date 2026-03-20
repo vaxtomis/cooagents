@@ -69,12 +69,15 @@ class Scheduler:
                 )
                 for job in running_jobs:
                     j = dict(job)
-                    started = datetime.fromisoformat(j["started_at"])
+                    timeout = j.get("timeout_sec")
                     stage = j.get("stage", "")
-                    if "DESIGN" in stage:
-                        timeout = self.config.timeouts.design_execution
-                    else:
-                        timeout = self.config.timeouts.dev_execution
+                    if timeout is None:
+                        if "DESIGN" in stage:
+                            timeout = self.config.timeouts.design_execution
+                        else:
+                            timeout = self.config.timeouts.dev_execution
+                    baseline = j.get("running_started_at") or j["started_at"]
+                    started = datetime.fromisoformat(baseline)
                     if (now - started).total_seconds() > timeout:
                         await self._handle_job_timeout(j, now)
 
@@ -143,24 +146,58 @@ class Scheduler:
         )
         await self.webhooks.notify(event_type, payload)
 
+    def _job_expected_run_stages(self, job: dict) -> set[str]:
+        stage = job.get("stage", "")
+        if "DESIGN" in stage:
+            return {"DESIGN_DISPATCHED", "DESIGN_RUNNING"}
+        if "DEV" in stage:
+            return {"DEV_DISPATCHED", "DEV_RUNNING"}
+        return {stage} if stage else set()
+
+    async def _build_job_timeout_payload(self, job: dict) -> dict:
+        run = await self.db.fetchone("SELECT current_stage FROM runs WHERE id=?", (job["run_id"],))
+        current_stage = run.get("current_stage", "") if run else ""
+        return {
+            "run_id": job["run_id"],
+            "job_id": job["id"],
+            "stage": current_stage or job.get("stage", ""),
+            "job_stage": job.get("stage", ""),
+            "current_stage": current_stage,
+        }
+
+    async def _should_notify_job_timeout(self, job: dict) -> bool:
+        run = await self.db.fetchone("SELECT status, current_stage FROM runs WHERE id=?", (job["run_id"],))
+        if not run or run.get("status") != "running":
+            return False
+        expected_stages = self._job_expected_run_stages(job)
+        current_stage = run.get("current_stage", "")
+        if expected_stages and current_stage not in expected_stages:
+            return False
+        active_job = await self.jobs.get_active_job(job["run_id"])
+        if active_job and active_job.get("id") != job["id"]:
+            return False
+        return True
+
     async def _handle_starting_job_timeout(self, job: dict, now: datetime) -> None:
         await self.jobs.update_status(job["id"], "timeout", ended_at=now.isoformat())
-        await self._notify_limited(
-            job["run_id"],
-            "job.timeout",
-            {"run_id": job["run_id"], "job_id": job["id"], "stage": job.get("stage", "")},
-            limit_keys=("job_id",),
-        )
+        if await self._should_notify_job_timeout(job):
+            await self._notify_limited(
+                job["run_id"],
+                "job.timeout",
+                await self._build_job_timeout_payload(job),
+                limit_keys=("job_id",),
+            )
         if self.sm:
             await self.sm.tick(job["run_id"])
 
     async def _handle_job_timeout(self, job: dict, now: datetime) -> None:
         await self.executor.cancel_session(job["run_id"], job["agent_type"], final_status="timeout")
-        await self._notify_limited(
-            job["run_id"],
-            "job.timeout",
-            {"run_id": job["run_id"], "job_id": job["id"], "stage": job.get("stage", "")},
-            limit_keys=("job_id",),
-        )
+        if await self._should_notify_job_timeout(job):
+            await self._notify_limited(
+                job["run_id"],
+                "job.timeout",
+                await self._build_job_timeout_payload(job),
+                limit_keys=("job_id",),
+            )
         if self.sm:
             await self.sm.tick(job["run_id"])

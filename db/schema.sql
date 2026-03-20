@@ -110,6 +110,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   session_name   TEXT,
   turn_count     INTEGER DEFAULT 1,
   events_file    TEXT,
+  timeout_sec    INTEGER,
+  running_started_at TEXT,
   started_at     TEXT NOT NULL,
   ended_at       TEXT
 );

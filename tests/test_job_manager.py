@@ -16,6 +16,10 @@ async def test_create_job_with_session(db, tmp_path):
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     await db.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("h1", "local", "both", 4, "active", now, now)
+    )
+    await db.execute(
         "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
         ("r-sess", "T-1", "/repo", "running", "INIT", now, now)
     )
@@ -28,10 +32,57 @@ async def test_create_job_with_session(db, tmp_path):
     assert job["turn_count"] == 1
 
 
+async def test_create_job_persists_timeout_metadata(db):
+    jm = JobManager(db)
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("h1", "local", "both", 4, "active", now, now)
+    )
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("r-timeout", "T-2", "/repo", "running", "INIT", now, now)
+    )
+
+    job_id = await jm.create_job(
+        "r-timeout", "h1", "claude", "DESIGN_DISPATCHED", "/task.md", "/wt", "abc123", 222
+    )
+
+    job = await db.fetchone("SELECT timeout_sec, running_started_at FROM jobs WHERE id=?", (job_id,))
+    assert job["timeout_sec"] == 222
+    assert job["running_started_at"] is None
+
+
+async def test_mark_running_sets_running_started_at(db):
+    jm = JobManager(db)
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("h1", "local", "both", 4, "active", now, now)
+    )
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("r-running", "T-3", "/repo", "running", "INIT", now, now)
+    )
+    job_id = await jm.create_job("r-running", "h1", "claude", "DESIGN", "/t.md", "/wt", "abc", 1800)
+
+    await jm.mark_running(job_id, started_at=now)
+
+    job = await db.fetchone("SELECT status, running_started_at FROM jobs WHERE id=?", (job_id,))
+    assert job["status"] == "running"
+    assert job["running_started_at"] == now
+
+
 async def test_increment_turn(db, tmp_path):
     jm = JobManager(db)
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("h1", "local", "both", 4, "active", now, now)
+    )
     await db.execute(
         "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
         ("r-turn", "T-1", "/repo", "running", "INIT", now, now)
@@ -47,6 +98,10 @@ async def test_record_and_get_turns(db, tmp_path):
     jm = JobManager(db)
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("h1", "local", "both", 4, "active", now, now)
+    )
     await db.execute(
         "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
         ("r-turns", "T-1", "/repo", "running", "INIT", now, now)

@@ -1,5 +1,8 @@
+import asyncio
+import json
 import pytest
-from unittest.mock import AsyncMock
+from datetime import datetime, timezone, timedelta
+from unittest.mock import AsyncMock, patch
 from src.artifact_manager import ArtifactManager
 from src.database import Database
 from src.job_manager import JobManager
@@ -100,6 +103,10 @@ async def test_notify_limited_caps_review_reminder_to_three(db):
             review_reminder = 86400
 
     sched = Scheduler(db, hm, jm, ae, wh, FakeConfig())
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-review-1", "T-1", "/repo", "running", "DESIGN_REVIEW", "2026-03-20T00:00:00+00:00", "2026-03-20T00:00:00+00:00"),
+    )
 
     for _ in range(4):
         await sched._notify_limited(
@@ -146,6 +153,10 @@ async def test_handle_job_timeout_marks_run_failed_and_limits_notifications(db, 
     run = await sm.create_run("T-TIMEOUT", str(tmp_path))
     rid = run["id"]
     now = "2026-03-20T00:00:00+00:00"
+    await db.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("local", "local", "both", 4, "active", now, now),
+    )
     await db.execute("UPDATE runs SET current_stage='DESIGN_RUNNING' WHERE id=?", (rid,))
     await db.execute(
         "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) "
@@ -172,5 +183,132 @@ async def test_handle_job_timeout_marks_run_failed_and_limits_notifications(db, 
     assert updated_job["status"] == "timeout"
     assert updated_run["status"] == "failed"
     assert updated_run["current_stage"] == "FAILED"
-    assert len(timeout_events) == 3
-    assert wh.notify.await_count == 3
+    assert len(timeout_events) == 1
+    assert wh.notify.await_count == 1
+    payload = json.loads(timeout_events[0]["payload_json"])
+    assert payload["stage"] == "DESIGN_RUNNING"
+    assert payload["job_stage"] == "DESIGN_RUNNING"
+    assert payload["current_stage"] == "DESIGN_RUNNING"
+
+
+async def test_timeout_enforcement_uses_running_started_at_and_job_timeout_sec(db, tmp_path):
+    hm = AsyncMock()
+    ae = AsyncMock()
+    wh = AsyncMock()
+    wh.notify = AsyncMock()
+    jm = JobManager(db)
+    (tmp_path / ".git").mkdir(exist_ok=True)
+
+    class FakeConfig:
+        class health_check:
+            interval = 60
+            ssh_timeout = 5
+        class timeouts:
+            dispatch_startup = 300
+            design_execution = 30
+            dev_execution = 30
+            review_reminder = 86400
+
+    sched = Scheduler(db, hm, jm, ae, wh, FakeConfig())
+    now = "2026-03-20T00:00:00+00:00"
+    await db.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("local", "local", "both", 4, "active", now, now),
+    )
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-live-timeout", "T-LIVE", str(tmp_path), "running", "DESIGN_RUNNING", now, now),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,timeout_sec,started_at,running_started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "job-live-timeout",
+            "run-live-timeout",
+            "local",
+            "claude",
+            "DESIGN_RUNNING",
+            "running",
+            "/t.md",
+            str(tmp_path),
+            "run-live-timeout-design",
+            600,
+            "2026-03-19T23:00:00+00:00",
+            "2026-03-19T23:55:00+00:00",
+        ),
+    )
+
+    sleep_mock = AsyncMock(side_effect=[None, asyncio.CancelledError()])
+    with patch("src.scheduler.asyncio.sleep", sleep_mock), patch("src.scheduler.datetime") as dt_mock:
+        dt_mock.now.return_value = datetime.fromisoformat(now)
+        dt_mock.fromisoformat.side_effect = datetime.fromisoformat
+        dt_mock.side_effect = datetime
+        dt_mock.timezone = timezone
+        dt_mock.timedelta = timedelta
+        try:
+            await sched._timeout_enforcement_loop()
+        except asyncio.CancelledError:
+            pass
+
+    ae.cancel_session.assert_not_called()
+
+
+async def test_handle_job_timeout_skips_notification_after_stage_advances(db, tmp_path):
+    hm = AsyncMock()
+    ae = AsyncMock()
+    wh = AsyncMock()
+    wh.notify = AsyncMock()
+    jm = JobManager(db)
+    (tmp_path / ".git").mkdir(exist_ok=True)
+
+    class FakeConfig:
+        class health_check:
+            interval = 60
+            ssh_timeout = 5
+        class timeouts:
+            dispatch_startup = 300
+            design_execution = 1800
+            dev_execution = 3600
+            review_reminder = 86400
+
+    sched = Scheduler(db, hm, jm, ae, wh, FakeConfig())
+    now = "2026-03-20T00:00:00+00:00"
+    await db.execute(
+        "INSERT INTO agent_hosts(id,host,agent_type,max_concurrent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("local", "local", "both", 4, "active", now, now),
+    )
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-advanced", "T-ADV", str(tmp_path), "running", "DESIGN_REVIEW", now, now),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            "job-advanced",
+            "run-advanced",
+            "local",
+            "claude",
+            "DESIGN_RUNNING",
+            "running",
+            "/t.md",
+            str(tmp_path),
+            "run-advanced-design",
+            now,
+        ),
+    )
+
+    async def _mark_timeout(run_id, agent_type, final_status="cancelled"):
+        await jm.update_status("job-advanced", final_status, ended_at=now)
+
+    ae.cancel_session = AsyncMock(side_effect=_mark_timeout)
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-advanced",))
+
+    await sched._handle_job_timeout(job, datetime.fromisoformat(now))
+
+    timeout_events = await db.fetchall(
+        "SELECT * FROM events WHERE run_id=? AND event_type='job.timeout'",
+        ("run-advanced",),
+    )
+    assert timeout_events == []
+    assert wh.notify.await_count == 0

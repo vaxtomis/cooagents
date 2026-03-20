@@ -239,6 +239,38 @@ async def test_openclaw_prefers_event_stage_over_run_current_stage(wn_with_hooks
     assert "DESIGN_DISPATCHED" not in captured["body"]["message"]
 
 
+async def test_openclaw_prefers_current_stage_over_job_stage(wn_with_hooks, db):
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("r-current-stage", "PROJ-CUR", "/repo", "running", "DESIGN_RUNNING", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+    )
+
+    captured = {}
+
+    async def mock_post(url, content, headers):
+        captured["body"] = json.loads(content)
+        resp = MagicMock()
+        resp.status_code = 200
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.post = mock_post
+    wn_with_hooks._client = mock_client
+
+    await wn_with_hooks._deliver_to_openclaw(
+        "job.timeout",
+        {
+            "run_id": "r-current-stage",
+            "job_id": "job-2",
+            "job_stage": "DESIGN_RUNNING",
+            "current_stage": "DESIGN_REVIEW",
+        },
+    )
+
+    assert "DESIGN_REVIEW" in captured["body"]["message"]
+    assert "DESIGN_RUNNING" not in captured["body"]["message"]
+
+
 async def test_openclaw_delivery_retries_before_succeeding(wn_with_hooks, db):
     """OpenClaw delivery should retry transient failures before logging failure."""
     await db.execute(

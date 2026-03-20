@@ -370,6 +370,8 @@ async def test_start_session_records_dispatched_stage_for_queued_runs(
     assert job["stage"] == expected_stage
     assert job["status"] == "running"
     assert job["session_name"] == session_name
+    assert job["timeout_sec"] == 120
+    assert job["running_started_at"] is not None
 
 
 async def test_start_session_times_out_stuck_ensure(executor, db):
