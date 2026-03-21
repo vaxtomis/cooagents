@@ -210,8 +210,8 @@ _job_id: ContextVar[str | None] = ContextVar("job_id", default=None)
 _span_type: ContextVar[str] = ContextVar("span_type", default="request")
 
 
-def new_trace(trace_id: str | None = None):
-    """Generate (or accept) a trace_id and set it in context."""
+def new_trace(trace_id: str | None = None) -> str:
+    """Generate (or accept) a trace_id and set it in context. Returns the trace_id string."""
     tid = trace_id or uuid.uuid4().hex[:16]
     _trace_id.set(tid)
     _run_id.set(None)
@@ -378,11 +378,15 @@ def format_error(exc: Exception, max_lines: int = 10) -> str:
 class TraceEmitter:
     """Manages trace event emission and background consumption."""
 
-    def __init__(self, db, enabled: bool = True):
+    def __init__(self, db=None, enabled: bool = True):
         self._db = db
         self._enabled = enabled
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=2048)
         self._running = False
+
+    def set_db(self, db):
+        """Wire the database after construction (avoids circular init)."""
+        self._db = db
 
     async def emit(
         self,
@@ -443,7 +447,7 @@ class TraceEmitter:
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.warning("trace consumer: batch write failed, %d events dropped", len(batch) if 'batch' in dir() else 0)
+                logger.warning("trace consumer: batch write failed, %d events dropped", len(batch))
 
         # Drain remaining on shutdown
         await self._drain_remaining()
@@ -873,7 +877,7 @@ import json
 import pytest
 from datetime import datetime, timezone
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import AsyncClient, ASGITransport
 from src.database import Database
 
 @pytest.fixture
@@ -884,16 +888,14 @@ async def db(tmp_path):
     await d.close()
 
 @pytest.fixture
-def app(db):
+async def client(db):
     from routes.diagnostics import create_diagnostics_router
     app = FastAPI()
     router = create_diagnostics_router(db)
     app.include_router(router)
-    return app
-
-@pytest.fixture
-def client(app):
-    return TestClient(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
 
 
 async def test_run_trace_returns_events(db, client):
@@ -908,7 +910,7 @@ async def test_run_trace_returns_events(db, client):
         "VALUES(?,?,?,?,?,?,?,?)",
         ("run-1", "stage.transition", '{"from":"INIT","to":"REQ_COLLECTING"}', now, "t1", "run", "info", "state_machine"),
     )
-    resp = client.get("/runs/run-1/trace")
+    resp = await client.get("/runs/run-1/trace")
     assert resp.status_code == 200
     data = resp.json()
     assert data["run_id"] == "run-1"
@@ -917,7 +919,7 @@ async def test_run_trace_returns_events(db, client):
 
 
 async def test_run_trace_404(client):
-    resp = client.get("/runs/nonexistent/trace")
+    resp = await client.get("/runs/nonexistent/trace")
     assert resp.status_code == 404
 
 
@@ -932,7 +934,7 @@ async def test_job_diagnosis_returns_data(db, client):
         "INSERT INTO jobs(id,run_id,agent_type,stage,status,started_at) VALUES(?,?,?,?,?,?)",
         ("job-1", "run-1", "claude", "DEV_RUNNING", "failed", now),
     )
-    resp = client.get("/jobs/job-1/diagnosis")
+    resp = await client.get("/jobs/job-1/diagnosis")
     assert resp.status_code == 200
     data = resp.json()
     assert data["job_id"] == "job-1"
@@ -951,7 +953,7 @@ async def test_trace_lookup(db, client):
         "VALUES(?,?,?,?,?,?,?,?)",
         ("run-1", "request.received", None, now, "trace-abc", "request", "info", "middleware"),
     )
-    resp = client.get("/traces/trace-abc")
+    resp = await client.get("/traces/trace-abc")
     assert resp.status_code == 200
     data = resp.json()
     assert data["trace_id"] == "trace-abc"
@@ -987,7 +989,7 @@ def create_diagnostics_router(db=None):
     async def run_trace(
         request: Request,
         run_id: str,
-        level: str = Query("info", regex="^(debug|info|warning|error)$"),
+        level: str = Query("info", pattern="^(debug|info|warning|error)$"),
         span_type: str | None = Query(None),
         limit: int = Query(200, le=1000),
         offset: int = Query(0, ge=0),
@@ -1072,6 +1074,17 @@ def create_diagnostics_router(db=None):
                 "duration_ms": duration,
             })
 
+        # Compute total_duration_ms from first to last event
+        total_duration_ms = None
+        if events:
+            from datetime import datetime as dt
+            try:
+                first = dt.fromisoformat(events[0]["created_at"])
+                last = dt.fromisoformat(events[-1]["created_at"])
+                total_duration_ms = int((last - first).total_seconds() * 1000)
+            except Exception:
+                pass
+
         return {
             "run_id": run_id,
             "status": run["status"],
@@ -1083,6 +1096,7 @@ def create_diagnostics_router(db=None):
                 "errors": error_count["c"] if error_count else 0,
                 "warnings": warn_count["c"] if warn_count else 0,
                 "stages_visited": stages_visited,
+                "total_duration_ms": total_duration_ms,
                 "jobs": job_summaries,
             },
             "events": events,
@@ -1119,7 +1133,8 @@ def create_diagnostics_router(db=None):
             (job_id,),
         )
         error_detail = error_event["error_detail"] if error_event else None
-        error_summary = error_detail.split("\n")[-1] if error_detail else None
+        # Last line of traceback is typically the exception message (e.g., "TimeoutError: ...")
+        error_summary = error_detail.strip().split("\n")[-1] if error_detail else None
 
         # Last output excerpt from events_file
         last_output = None
@@ -1187,8 +1202,15 @@ def create_diagnostics_router(db=None):
     async def trace_lookup(request: Request, trace_id: str, level: str = Query("info")):
         d = _get_db(request)
 
+        # Apply level filtering
+        level_order = {"debug": 0, "info": 1, "warning": 2, "error": 3}
+        min_level = level_order.get(level, 1)
+        levels_included = [l for l, v in level_order.items() if v >= min_level]
+        placeholders = ",".join("?" * len(levels_included))
+
         events = await d.fetchall(
-            "SELECT * FROM events WHERE trace_id=? ORDER BY created_at, id", (trace_id,)
+            f"SELECT * FROM events WHERE trace_id=? AND level IN ({placeholders}) ORDER BY created_at, id",
+            (trace_id, *levels_included),
         )
         if not events:
             return JSONResponse(status_code=404, content={"error": "not_found", "message": f"Trace {trace_id} not found"})
@@ -1210,6 +1232,15 @@ def create_diagnostics_router(db=None):
         first_seen = events[0]["created_at"] if events else None
         last_seen = events[-1]["created_at"] if events else None
 
+        # Compute total_duration_ms
+        total_duration_ms = None
+        if first_seen and last_seen:
+            from datetime import datetime as dt
+            try:
+                total_duration_ms = int((dt.fromisoformat(last_seen) - dt.fromisoformat(first_seen)).total_seconds() * 1000)
+            except Exception:
+                pass
+
         # Determine origin from trace_id prefix
         origin = "scheduler" if trace_id.startswith("sched-") else "external" if "-" in trace_id else "internal"
 
@@ -1218,6 +1249,7 @@ def create_diagnostics_router(db=None):
             "origin": origin,
             "first_seen": first_seen,
             "last_seen": last_seen,
+            "total_duration_ms": total_duration_ms,
             "affected_runs": affected_runs,
             "affected_jobs": affected_jobs,
             "error_count": error_count,
@@ -1251,43 +1283,33 @@ git commit -m "feat(tracing): add diagnostic API endpoints for run/job/trace que
 Add imports at top of `src/app.py`:
 
 ```python
+import asyncio
 from src.trace_emitter import TraceEmitter
 from src.trace_middleware import TraceMiddleware
 ```
 
-In `lifespan()`, after `db = Database(...)` and `await db.connect()`, add:
+In `lifespan()`, replace the Database construction and add tracing setup. The init order is:
+1. Create `TraceEmitter` without DB (it only needs DB for the consumer)
+2. Create `Database` with the emitter's sync callback
+3. Connect DB, then wire it into the emitter
 
 ```python
-    # Tracing infrastructure
-    trace_emitter = TraceEmitter(db, enabled=settings.tracing.enabled)
-    consumer_task = asyncio.create_task(trace_emitter.start_consumer()) if settings.tracing.enabled else None
-```
+    # Tracing infrastructure — create emitter first (no DB yet)
+    trace_emitter = TraceEmitter(enabled=settings.tracing.enabled)
 
-Modify Database construction to pass callback:
-
-```python
-    db = Database(
-        db_path=settings.database.path,
-        schema_path="db/schema.sql",
-        on_trace_event=trace_emitter.emit_sync if settings.tracing.enabled else None,
-    )
-```
-
-Note: `TraceEmitter` must be created before `Database` to pass the callback, but it needs `db` for the consumer. Wire it as:
-
-```python
-    trace_emitter = TraceEmitter(None, enabled=settings.tracing.enabled)
     db = Database(
         db_path=settings.database.path,
         schema_path="db/schema.sql",
         on_trace_event=trace_emitter.emit_sync if settings.tracing.enabled else None,
     )
     await db.connect()
-    trace_emitter._db = db  # wire after connect
+
+    # Wire DB into emitter after connect
+    trace_emitter.set_db(db)
     consumer_task = asyncio.create_task(trace_emitter.start_consumer()) if settings.tracing.enabled else None
 ```
 
-Store on app state:
+Store on app state (alongside existing state assignments):
 
 ```python
     app.state.trace_emitter = trace_emitter
@@ -1306,26 +1328,30 @@ In shutdown (after `await scheduler.stop()`, before `await db.close()`):
 
 - [ ] **Step 2: Register middleware and diagnostics router**
 
-After `app = FastAPI(...)`, add middleware:
+The middleware needs the emitter at request time, but it's not available at module-import time. Update `TraceMiddleware.dispatch` to resolve the emitter lazily from `request.app.state`:
+
+In `src/trace_middleware.py`, update the `dispatch` method to add this fallback at the top:
 
 ```python
-# Middleware is added later in lifespan via app state, but Starlette requires it at init time.
-# Use a lazy pattern: middleware checks app.state for emitter.
+    async def dispatch(self, request: Request, call_next):
+        # Resolve emitter lazily — may not be available at construction time
+        emitter = self._emitter
+        if emitter is None and hasattr(request.app.state, "trace_emitter"):
+            emitter = request.app.state.trace_emitter
 ```
 
-Actually, add middleware right after app creation using a simple approach:
+Then use `emitter` (local var) instead of `self._emitter` throughout the method.
+
+After `app = FastAPI(...)` in `src/app.py`, add middleware:
 
 ```python
-app.add_middleware(TraceMiddleware, emitter=None)  # emitter set dynamically
+app.add_middleware(TraceMiddleware)  # emitter resolved lazily from app.state
 ```
-
-But since middleware needs the emitter at request time and it's not available at import time, modify `TraceMiddleware.dispatch` to fall back to `request.app.state.trace_emitter`.
 
 Add router imports at bottom of app.py:
 
 ```python
 from routes.diagnostics import create_diagnostics_router
-# Create router at module level with db=None — it will use request.app.state.db at runtime
 app.include_router(create_diagnostics_router(), prefix="/api/v1")
 ```
 
@@ -1502,6 +1528,7 @@ git commit -m "feat(tracing): instrument acpx_executor with job/session events a
 Add imports:
 
 ```python
+import uuid
 from src.trace_context import new_trace, bind_run
 from src.trace_emitter import TraceEmitter, format_error
 ```
@@ -1515,7 +1542,7 @@ In each background loop, at the start of each iteration, generate an internal tr
         while True:
             try:
                 await asyncio.sleep(self.config.health_check.interval)
-                new_trace(f"sched-health-{...}")  # use uuid hex
+                new_trace(f"sched-health-{uuid.uuid4().hex[:8]}")
                 # ... existing code ...
 ```
 

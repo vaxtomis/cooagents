@@ -52,7 +52,7 @@ _run_id:    ContextVar[str | None]  # current run
 _job_id:    ContextVar[str | None]  # current job
 _span_type: ContextVar[str]         # "request" | "run" | "job"
 
-def new_trace(trace_id: str = None) -> Token   # generate and set new trace_id
+def new_trace(trace_id: str = None) -> str    # generate and set new trace_id, returns the id
 def bind_run(run_id: str) -> Token             # bind run context
 def bind_job(job_id: str) -> Token             # bind job context
 def get_context() -> dict                       # return current {trace_id, run_id, job_id, span_type}
@@ -290,7 +290,7 @@ The partial index on `level` requires SQLite 3.8.0+ (2013). This is safe for all
 | `job_id`, `run_id`, `host_id`, `agent_type`, `stage`, `status`, `session_name`, `started_at`, `ended_at` | `jobs` table |
 | `diagnosis.duration_ms` | Computed: `ended_at - started_at` |
 | `diagnosis.turn_count` | `SELECT COUNT(*) FROM turns WHERE job_id = ?` |
-| `diagnosis.error_summary` | Latest `events` row with `job_id = ? AND level = 'error'` → first line of `error_detail` |
+| `diagnosis.error_summary` | Latest `events` row with `job_id = ? AND level = 'error'` → last line of `error_detail` (exception message) |
 | `diagnosis.error_detail` | Latest `events` row with `job_id = ? AND level = 'error'` → full `error_detail` column |
 | `diagnosis.last_output_excerpt` | Read last 500 chars from job's `events_file` (NDJSON on disk at `.coop/jobs/{job_id}/events.jsonl`). Returns `null` if file missing. |
 | `diagnosis.failure_context.stage_at_failure` | `jobs.stage` column |
