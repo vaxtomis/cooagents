@@ -280,7 +280,40 @@ curl -s "http://127.0.0.1:8321/api/v1/repos?path=/path/to/repo"
 
 ---
 
-## 13. Webhook 管理
+## 13. 诊断与链路追踪
+
+**前置条件：** 任务出现异常，需要排查失败原因。
+
+```bash
+# 查看 run 的完整事件链路
+curl -s http://127.0.0.1:8321/api/v1/runs/<run_id>/trace
+# 可选参数：?level=error（只看 error 级别）、?span_type=job、?limit=50&offset=0
+# Response: {"run_id":"<run_id>","summary":{"total_events":42,"errors":1,...},"events":[...]}
+
+# 查看 job 的故障诊断
+curl -s http://127.0.0.1:8321/api/v1/jobs/<job_id>/diagnosis
+# Response: {"job_id":"<job_id>","diagnosis":{"error_summary":"TimeoutError: ...","error_detail":"...","duration_ms":120000,...}}
+
+# 通过 trace_id 追踪完整请求链路
+curl -s http://127.0.0.1:8321/api/v1/traces/<trace_id>
+# trace_id 可从 HTTP 响应头 X-Trace-Id 获取
+# Response: {"trace_id":"<trace_id>","affected_runs":["run-1"],"affected_jobs":["job-1"],"events":[...]}
+```
+
+**典型排查流程：**
+```bash
+# 1. 查看 run 的错误事件
+curl -s "http://127.0.0.1:8321/api/v1/runs/<run_id>/trace?level=error"
+
+# 2. 从 summary.jobs 找到失败的 job_id，查看诊断
+curl -s http://127.0.0.1:8321/api/v1/jobs/<job_id>/diagnosis
+
+# 3. 根据 diagnosis.error_summary 决定处理方式
+```
+
+---
+
+## 14. Webhook 管理
 
 ```bash
 # 注册 webhook

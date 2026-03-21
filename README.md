@@ -40,6 +40,7 @@ flowchart LR
 - **优先级合并队列** — FIFO + 优先级排序，冲突检测，自动 rebase
 - **Webhook 事件通知** — HMAC 签名、事件过滤、失败重试，24 种事件类型
 - **Jinja2 模板引擎** — 灵活的任务指令模板，支持条件逻辑和循环
+- **三层链路追踪** — Request → Run → Job 全链路 `trace_id` 关联，`X-Trace-Id` 响应头自动传播，三个诊断 API 支持 OpenClaw 自主排查
 
 ## 架构概览
 
@@ -56,6 +57,7 @@ flowchart TB
         JM["Job Manager"] --- AE
         WH["Webhook Notifier"]
         SCH["Scheduler"]
+        TE["Trace Emitter"]
         DB[("SQLite (aiosqlite)")]
     end
 
@@ -144,6 +146,13 @@ acpx:
 turns:
   design_max_turns: 3        # 设计阶段最大轮次
   dev_max_turns: 5           # 开发阶段最大轮次
+
+tracing:
+  enabled: true                  # 启用链路追踪
+  retention_days: 7              # 已终结 run 的事件保留天数
+  debug_retention_days: 3        # debug 级别事件保留天数
+  orphan_retention_days: 3       # 无关联 run 的事件保留天数
+  cleanup_interval_hours: 24     # 清理循环间隔
 
 openclaw:
   deploy_skills: true          # 启动时是否同步 Skill
@@ -311,6 +320,16 @@ flowchart LR
 | `DELETE` | `/webhooks/{id}` | 移除订阅 |
 | `GET` | `/webhooks/{id}/deliveries` | 投递记录 |
 
+### 诊断与追踪 (`/api/v1`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/runs/{id}/trace` | Run 事件链路（支持 `level`/`span_type`/`limit`/`offset`） |
+| `GET` | `/jobs/{jid}/diagnosis` | Job 故障诊断（错误摘要、堆栈、轮次、主机状态） |
+| `GET` | `/traces/{trace_id}` | 按 trace_id 查询完整链路 |
+
+所有 API 响应携带 `X-Trace-Id` 响应头，可用于跨请求关联。
+
 ### 仓库视图 (`/api/v1/repos`)
 
 | 方法 | 路径 | 说明 |
@@ -419,7 +438,7 @@ erDiagram
 |----|------|
 | `runs` | 工作流 run 记录，含状态、阶段、worktree 路径 |
 | `steps` | 阶段转换历史（from → to） |
-| `events` | 事件审计日志 |
+| `events` | 事件审计日志（含 trace_id、job_id、span_type、level、duration_ms、error_detail、source） |
 | `approvals` | Gate 审批决策（approved / rejected） |
 | `artifacts` | 产物版本，含 SHA256 哈希、字节大小、审批状态 |
 | `jobs` | Agent 任务记录，含 session name、轮次计数 |
@@ -509,7 +528,7 @@ skills/cooagents-upgrade/
 
 ### API 参考文档
 
-`docs/openclaw-tools.json` 提供了 13 个函数调用定义，可作为 API 参考：
+`docs/openclaw-tools.json` 提供了 16 个函数调用定义，可作为 API 参考：
 
 | 函数 | 对应 API |
 |------|----------|
@@ -526,6 +545,9 @@ skills/cooagents-upgrade/
 | `cancel_task` | `DELETE /api/v1/runs/{id}` |
 | `list_artifacts` | `GET /api/v1/runs/{id}/artifacts` |
 | `get_artifact_content` | `GET /api/v1/runs/{id}/artifacts/{aid}/content` |
+| `get_run_trace` | `GET /api/v1/runs/{id}/trace` |
+| `get_job_diagnosis` | `GET /api/v1/jobs/{jid}/diagnosis` |
+| `get_trace` | `GET /api/v1/traces/{trace_id}` |
 
 ### 配置 Webhook 接收通知
 
@@ -550,7 +572,10 @@ curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
 | 合并 | `merge.completed` `merge.conflict` `merge.conflict_resolved` |
 | 主机 | `host.online` `host.offline` |
 | 轮次 | `turn.started` `turn.completed` |
-| Session | `session.created` `session.closed` |
+| Session | `session.created` `session.closed` `session.ensure_timeout` `session.ensure_failed` |
+| 追踪 | `request.received` `request.completed` `request.error` `stage.transition` `run.failed` |
+| 调度器 | `scheduler.health_check_error` `scheduler.timeout_enforcement_error` |
+| 数据库 | `db.lock_retry` |
 | 其他 | `review.reminder` `requirement.submitted` |
 
 ### OpenClaw Skill 部署
@@ -590,26 +615,30 @@ pytest tests/test_e2e.py -v
 pytest tests/test_acpx_executor.py -v
 ```
 
-测试覆盖（133 个测试）：
+测试覆盖（230 个测试）：
 
 | 模块 | 测试数 | 说明 |
 |------|--------|------|
-| `test_acpx_executor.py` | 24 | 命令构建、session 管理、exit code |
-| `test_state_machine.py` | 22 | 状态转换、Gate、多轮评估 |
-| `test_openclaw_hooks.py` | 14 | OpenClaw hooks 事件推送 |
-| `test_host_manager.py` | 8 | 选择、负载、健康检查 |
+| `test_state_machine.py` | 56 | 状态转换、Gate、多轮评估、reconciliation |
+| `test_acpx_executor.py` | 43 | 命令构建、session 管理、exit code |
+| `test_openclaw_hooks.py` | 19 | OpenClaw hooks 事件推送 |
+| `test_api.py` | 13 | HTTP 端点集成测试 |
+| `test_host_manager.py` | 10 | 选择、负载、健康检查 |
+| `test_database.py` | 9 | 连接、事务、tracing schema migration |
+| `test_scheduler.py` | 8 | 启动、停止、超时执行 |
 | `test_artifact_manager.py` | 7 | 注册、版本、Jinja2 渲染 |
 | `test_merge_manager.py` | 7 | 队列、优先级、冲突 |
-| `test_api.py` | 12 | HTTP 端点集成测试 |
-| `test_skill_deployer.py` | 6 | Skill 部署、覆盖、SSH 降级 |
-| `test_ensure_repo.py` | 5 | ensure_repo init/clone/exists |
-| `test_git_utils.py` | 6 | worktree、冲突检测 |
+| `test_config.py` | 7 | 配置加载、默认值、TracingConfig |
+| `test_trace_emitter.py` | 6 | 事件发射器、队列消费、format_error |
 | `test_webhook_notifier.py` | 6 | 订阅、过滤、投递 |
-| `test_config.py` | 5 | 配置加载、默认值 |
+| `test_skill_deployer.py` | 6 | Skill 部署、覆盖、SSH 降级 |
+| `test_job_manager.py` | 6 | session、轮次追踪 |
+| `test_git_utils.py` | 6 | worktree、冲突检测 |
+| `test_trace_context.py` | 5 | contextvars 传播、任务隔离 |
+| `test_ensure_repo.py` | 5 | ensure_repo init/clone/exists |
 | `test_e2e.py` | 4 | 完整流程、驳回重做、取消、重试 |
-| `test_job_manager.py` | 3 | session、轮次追踪 |
-| `test_database.py` | 3 | 连接、事务 |
-| `test_scheduler.py` | 1 | 启动、停止 |
+| `test_diagnostics.py` | 4 | 诊断 API（run trace、job diagnosis、trace lookup） |
+| `test_trace_middleware.py` | 3 | X-Trace-Id 中间件 |
 
 ## 项目结构
 
@@ -622,7 +651,7 @@ cooagents/
 │   └── schema.sql             # 数据库 Schema（10 表）
 ├── docs/
 │   ├── PROCESS.md             # 流程说明
-│   ├── openclaw-tools.json    # OpenClaw API 参考（13 函数）
+│   ├── openclaw-tools.json    # OpenClaw API 参考（16 函数）
 │   ├── design/                # 设计文档模板
 │   └── dev/                   # 开发文档模板
 ├── skills/                    # OpenClaw Skills（启动时部署）
@@ -640,7 +669,8 @@ cooagents/
 │   ├── artifacts.py           # 产物端点
 │   ├── repos.py               # Job/合并端点
 │   ├── agent_hosts.py         # 主机管理端点
-│   └── webhooks.py            # Webhook 端点
+│   ├── webhooks.py            # Webhook 端点
+│   └── diagnostics.py         # 诊断 API 端点（trace/diagnosis）
 ├── src/                       # 核心模块
 │   ├── app.py                 # FastAPI 应用入口
 │   ├── state_machine.py       # 16 阶段状态机
@@ -654,11 +684,14 @@ cooagents/
 │   ├── database.py            # 异步 SQLite
 │   ├── skill_deployer.py      # OpenClaw Skill 部署
 │   ├── config.py              # 配置加载
+│   ├── trace_context.py       # 链路追踪上下文（contextvars）
+│   ├── trace_emitter.py       # 事件发射器（async queue + batch write）
+│   ├── trace_middleware.py    # X-Trace-Id 中间件
 │   ├── models.py              # Pydantic 模型
 │   ├── git_utils.py           # Git 操作工具
 │   └── exceptions.py          # 自定义异常
 ├── templates/                 # Jinja2 任务模板
-├── tests/                     # 测试套件（133 tests）
+├── tests/                     # 测试套件（230 tests）
 ├── scripts/
 │   └── bootstrap.sh           # 初始化脚本
 ├── requirements.txt

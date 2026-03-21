@@ -136,6 +136,39 @@
         "run_id": {"type": "string", "description": "任务运行ID", "required": true},
         "artifact_id": {"type": "integer", "description": "产物ID", "required": true}
       }
+    },
+    {
+      "name": "get_run_trace",
+      "description": "获取任务的完整事件链路，含阶段转换、错误、耗时汇总",
+      "method": "GET",
+      "endpoint": "/api/v1/runs/{run_id}/trace",
+      "parameters": {
+        "run_id": {"type": "string", "description": "任务运行ID", "required": true},
+        "level": {"type": "string", "enum": ["debug", "info", "warning", "error"], "description": "最低日志级别过滤", "default": "info"},
+        "span_type": {"type": "string", "description": "按 span 类型过滤: request/run/job/system"},
+        "limit": {"type": "integer", "description": "返回事件数量限制", "default": 200},
+        "offset": {"type": "integer", "description": "分页偏移量", "default": 0}
+      }
+    },
+    {
+      "name": "get_job_diagnosis",
+      "description": "获取 Job 的故障诊断信息，含错误摘要、堆栈、耗时、轮次、主机状态",
+      "method": "GET",
+      "endpoint": "/api/v1/jobs/{job_id}/diagnosis",
+      "parameters": {
+        "job_id": {"type": "string", "description": "Job ID", "required": true},
+        "level": {"type": "string", "enum": ["debug", "info", "warning", "error"], "description": "最低日志级别过滤", "default": "info"}
+      }
+    },
+    {
+      "name": "get_trace",
+      "description": "通过 trace_id 追踪完整请求链路（从 HTTP 请求到 run 到 job）",
+      "method": "GET",
+      "endpoint": "/api/v1/traces/{trace_id}",
+      "parameters": {
+        "trace_id": {"type": "string", "description": "链路追踪ID（可从 HTTP 响应头 X-Trace-Id 获取）", "required": true},
+        "level": {"type": "string", "enum": ["debug", "info", "warning", "error"], "description": "最低日志级别过滤", "default": "info"}
+      }
     }
   ]
 }

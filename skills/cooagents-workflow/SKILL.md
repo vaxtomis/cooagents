@@ -118,14 +118,39 @@ metadata:
 | `gate.approved` / `gate.rejected` | 审批结果确认                  |
 | `run.failed`          | 任务进入 FAILED 状态                        |
 
-## E. 参考文档
+## E. 诊断 API（自主排查）
+
+当任务出现异常时，可通过诊断 API 主动拉取链路信息，无需等待 webhook 推送：
+
+```bash
+# 查看 run 的完整事件链路（含阶段转换、错误、耗时）
+exec curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}/trace
+# 可选参数：?level=error（只看错误）、?span_type=job（只看 job 事件）、?limit=50
+
+# 查看 job 的故障诊断（含错误摘要、轮次、主机状态、输出片段）
+exec curl -s http://127.0.0.1:8321/api/v1/jobs/{job_id}/diagnosis
+
+# 通过 trace_id 追踪完整请求链路（从 HTTP 请求到 run 到 job）
+exec curl -s http://127.0.0.1:8321/api/v1/traces/{trace_id}
+```
+
+**排查流程：**
+
+1. 收到 `job.failed` / `job.timeout` 事件后，先调用 `/runs/{run_id}/trace?level=error` 查看错误事件
+2. 从 trace 结果的 `summary.jobs` 中找到失败的 job_id
+3. 调用 `/jobs/{job_id}/diagnosis` 获取详细诊断：`error_summary`（错误摘要）、`error_detail`（完整堆栈）、`last_output_excerpt`（最后输出）
+4. 根据诊断结果决定 retry/recover 或通知用户
+
+**注意：** 所有 API 响应和 webhook 事件都会携带 `X-Trace-Id` 响应头，可用于跨请求关联。
+
+## F. 参考文档
 
 详细参考（使用 Read 工具按需读取）：
 - curl 命令详情 → references/api-playbook.md
 - 异常处理策略 → references/error-handling.md
 - 回复消息模板 → references/feishu-interaction.md
 
-## F. 操作原则
+## G. 操作原则
 
 - **最小干预**：能自动推进的阶段不打扰用户
 - **审批必须等待**：`*_REVIEW` 和 `MERGE_CONFLICT` 阶段必须等用户明确回复后再操作
@@ -134,7 +159,7 @@ metadata:
 - **错误上报**：FAILED 阶段参考 error-handling.md 处理，必要时告知用户
 - **审计留痕**：approve/reject 请求中的 `by` 字段必须填写真实用户标识
 
-## G. Webhook 事件消息（隔离会话）
+## H. Webhook 事件消息（隔离会话）
 
 你会通过 hooks 收到格式如下的事件通知：
 
@@ -165,7 +190,7 @@ stage: {current_stage}
 1. 格式化通知消息
 2. 回复通知（会自动投递到用户）
 
-## H. 审批回复处理（主会话）
+## I. 审批回复处理（主会话）
 
 当用户在对话中回复审批相关内容时（如"通过"、"驳回：原因..."），参考聊天记录中的审批请求消息，识别对应的 ticket 和 gate，然后执行审批操作。
 
