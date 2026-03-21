@@ -18,6 +18,7 @@ from pathlib import Path
 
 from src.event_limits import can_emit_event
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
+from src.trace_context import bind_run
 
 GATE_STAGES = {"req": "REQ_REVIEW", "design": "DESIGN_REVIEW", "dev": "DEV_REVIEW"}
 REJECT_TARGETS = {"req": "REQ_COLLECTING", "design": "DESIGN_QUEUED", "dev": "DEV_QUEUED"}
@@ -62,6 +63,7 @@ class StateMachine:
         config=None,
         job_manager=None,
         project_root=None,
+        trace_emitter=None,
     ):
         self.db = db
         self.artifacts = artifact_manager
@@ -81,6 +83,7 @@ class StateMachine:
         if config:
             self._design_max_turns = getattr(getattr(config, 'turns', None), 'design_max_turns', 1)
             self._dev_max_turns = getattr(getattr(config, 'turns', None), 'dev_max_turns', 1)
+        self._trace = trace_emitter
         self._dispatch_locks = {}
         self._progression_locks = {}
 
@@ -259,6 +262,7 @@ class StateMachine:
             (run_id, gate, "approved", by, comment, now),
         )
         await self._emit(run_id, "gate.approved", {"gate": gate, "by": by})
+        await self._trace_event("gate.approved", {"gate": gate, "by": by})
 
         next_stages = {"req": "DESIGN_QUEUED", "design": "DEV_QUEUED", "dev": "MERGE_QUEUED"}
         await self._update_stage(run_id, run["current_stage"], next_stages[gate])
@@ -293,6 +297,7 @@ class StateMachine:
             (run_id, gate, "rejected", by, reason, now),
         )
         await self._emit(run_id, "gate.rejected", {"gate": gate, "by": by, "reason": reason})
+        await self._trace_event("gate.rejected", {"gate": gate, "by": by, "reason": reason})
         target = REJECT_TARGETS[gate]
         await self._update_stage(run_id, run["current_stage"], target)
         return await self._get_run(run_id)
@@ -758,6 +763,7 @@ class StateMachine:
             "job_id": job["id"],
             "job_status": job["status"],
         })
+        await self._trace_event("run.failed", {"failed_at_stage": from_stage}, level="error")
         await self._snapshot(run_id)
 
     # ------------------------------------------------------------------
@@ -909,6 +915,11 @@ class StateMachine:
         updated = await self.db.fetchone("SELECT * FROM jobs WHERE id=?", (job["id"],))
         return dict(updated) if updated else {**job, "status": "interrupted", "ended_at": now}
 
+    async def _trace_event(self, event_type, payload=None, level="info", error_detail=None, duration_ms=None):
+        if self._trace:
+            await self._trace.emit(event_type, payload, level=level, error_detail=error_detail,
+                                   duration_ms=duration_ms, source="state_machine")
+
     async def _update_stage(
         self,
         run_id: str,
@@ -928,6 +939,8 @@ class StateMachine:
             (run_id, from_stage, to_stage, "system", now),
         )
         await self._emit(run_id, "stage.changed", {"from": from_stage, "to": to_stage, **extra})
+        bind_run(run_id)
+        await self._trace_event("stage.transition", {"from": from_stage, "to": to_stage})
 
         # Emit gate.waiting when entering a review/conflict stage
         _GATE_FOR_STAGE = {"REQ_REVIEW": "req", "DESIGN_REVIEW": "design",

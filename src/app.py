@@ -56,6 +56,7 @@ async def lifespan(app: FastAPI):
     sm = StateMachine(
         db, artifacts, hosts, executor, webhooks, merger,
         coop_dir=coop_dir, config=settings, job_manager=jobs, project_root=project_root,
+        trace_emitter=trace_emitter,
     )
     executor.set_state_machine(sm)
 
