@@ -21,7 +21,9 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs \
   -H "Content-Type: application/json" \
   -d '{"ticket":"PROJ-123","repo_path":"/path/to/repo","repo_url":"git@github.com:user/project.git","description":"任务描述"}'
 # repo_url 可选，仅做记录；repo_path 必须是已有的 git 仓库，否则返回 400
-# Response: {"id":"<run_id>","current_stage":"INIT",...}
+# 可选字段：preferences（dict）、notify_channel（通知渠道）、notify_to（通知目标）
+# Response: {"id":"<run_id>","current_stage":"REQ_COLLECTING",...}
+# 注：create 会自动推进 INIT → REQ_COLLECTING，响应中 current_stage 已为 REQ_COLLECTING
 
 # 2. 提交需求
 curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/submit-requirement \
@@ -122,6 +124,9 @@ curl -s http://127.0.0.1:8321/api/v1/runs/<run_id>/artifacts
 
 # 获取产物内容
 curl -s http://127.0.0.1:8321/api/v1/runs/<run_id>/artifacts/<artifact_id>/content
+
+# 获取产物与上一版本的 diff
+curl -s http://127.0.0.1:8321/api/v1/runs/<run_id>/artifacts/<artifact_id>/diff
 ```
 
 **预期响应（列出产物）：**
@@ -202,3 +207,94 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/tick
 ```
 
 **注意：** tick 是幂等的，若当前阶段无法推进（如等待审批），调用不会报错，而是返回当前状态。
+
+---
+
+## 9. 解决合并冲突
+
+**前置条件：** 任务处于 `MERGE_CONFLICT` 阶段，用户已在 worktree 中手动解决冲突。
+
+```bash
+curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/resolve-conflict \
+  -H "Content-Type: application/json" \
+  -d '{"by":"operator"}'
+# 将任务从 MERGE_CONFLICT 重新入队到 MERGE_QUEUED
+```
+
+**查看冲突文件列表：**
+
+```bash
+curl -s http://127.0.0.1:8321/api/v1/runs/<run_id>/conflicts
+# Response: {"conflicts":["path/to/file1.py","path/to/file2.py"]}
+```
+
+**预期响应：**
+```json
+{"id":"<run_id>","current_stage":"MERGE_QUEUED","status":"running"}
+```
+
+---
+
+## 10. 查看 Job 执行信息
+
+**前置条件：** 任务已分派 Agent 执行。
+
+```bash
+# 列出任务的所有 job
+curl -s http://127.0.0.1:8321/api/v1/runs/<run_id>/jobs
+
+# 获取 job 输出
+curl -s http://127.0.0.1:8321/api/v1/runs/<run_id>/jobs/<job_id>/output
+# Response: {"job_id":"<job_id>","output":...}
+```
+
+---
+
+## 11. 合并队列管理
+
+```bash
+# 手动入队合并（通常由状态机自动处理）
+curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/merge \
+  -H "Content-Type: application/json" \
+  -d '{"priority":0}'
+# priority 越大优先级越高，默认 0
+
+# 跳过合并
+curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/merge-skip
+
+# 查看合并队列
+curl -s http://127.0.0.1:8321/api/v1/repos/merge-queue
+```
+
+---
+
+## 12. 仓库管理
+
+```bash
+# 列出所有关联仓库
+curl -s http://127.0.0.1:8321/api/v1/repos
+
+# 按路径查看仓库的所有任务
+curl -s "http://127.0.0.1:8321/api/v1/repos?path=/path/to/repo"
+```
+
+---
+
+## 13. Webhook 管理
+
+```bash
+# 注册 webhook
+curl -s -X POST http://127.0.0.1:8321/api/v1/webhooks \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/hook","events":["job.completed","run.completed"],"secret":"optional-hmac-secret"}'
+# events 可选：不指定则接收所有事件；secret 可选：提供时使用 HMAC-SHA256 签名
+
+# 列出所有 webhook
+curl -s http://127.0.0.1:8321/api/v1/webhooks
+
+# 删除 webhook
+curl -s -X DELETE http://127.0.0.1:8321/api/v1/webhooks/<webhook_id>
+
+# 查看投递记录
+curl -s http://127.0.0.1:8321/api/v1/webhooks/<webhook_id>/deliveries
+```

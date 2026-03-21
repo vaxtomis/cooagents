@@ -55,7 +55,9 @@ metadata:
 │ MERGE_QUEUED        │ 自动     │ 等待合并                                │
 │ MERGING             │ 自动     │ 等待完成                                │
 │ MERGED              │ 自动     │ 回复完成通知                            │
-│ MERGE_CONFLICT      │ 人工     │ 回复冲突通知，附冲突文件列表            │
+│ MERGE_CONFLICT      │ 人工     │ exec curl GET /conflicts 获取冲突文件    │
+│                     │          │ → 回复冲突通知 → 等待用户解决 →          │
+│                     │          │ exec curl POST /resolve-conflict         │
 │ FAILED              │ 自动     │ 参考 error-handling.md 处理             │
 └─────────────────────┴──────────┴─────────────────────────────────────────┘
 
@@ -67,7 +69,9 @@ metadata:
 2. 若阶段为 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW`，先按 `references/feishu-interaction.md` 中的“审批云文件发送规则”选择对应产物并获取完整正文
 3. 使用飞书技能把正文上传为云文件并发送给用户
 4. 云文件发送成功后，再使用 `references/feishu-interaction.md` 中的审批模板发送审批说明
-5. `MERGE_CONFLICT` 不发送云文件，只发送冲突通知
+5. `MERGE_CONFLICT` 不发送云文件，先查询冲突文件列表：
+   exec `curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}/conflicts`
+   然后发送冲突通知，附冲突文件列表
 6. **等待用户下一条消息 — 不得自主决策**
 7. 解析用户回复：
    - 肯定回复（"通过"、"可以"、"approve"）：
@@ -75,6 +79,9 @@ metadata:
      然后 exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
    - 否定回复（含具体原因）：
      exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/reject -H "Content-Type: application/json" -d '{"gate":"当前 gate","by":"用户标识","reason":"用户原文"}'`
+   - `MERGE_CONFLICT` 场景 — 用户确认冲突已解决：
+     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/resolve-conflict -H "Content-Type: application/json" -d '{"by":"用户标识"}'`
+     然后 exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
 8. 回复操作结果
 
 `by` 字段：使用消息发送方的用户名或 ID，用于审计追踪。
@@ -86,20 +93,30 @@ metadata:
 
 ## D. Webhook 事件处理
 
+通过 OpenClaw hooks 推送的事件（OPENCLAW_EVENTS）：
+
 | 事件                  | 处理动作                                    |
 |-----------------------|---------------------------------------------|
-| `stage.changed` → `*_REVIEW` / `MERGE_CONFLICT` | 触发人工交互流程；`*_REVIEW` 需先发送云文件 |
-| `stage.changed` → 其他阶段 | 可选通知                               |
+| `gate.waiting`        | 触发人工交互流程；`*_REVIEW` 需先发送云文件，`MERGE_CONFLICT` 发送冲突通知 |
 | `job.completed`       | curl POST tick                              |
 | `job.failed` / `job.timeout` | 参见 error-handling.md              |
-| `job.interrupted` / `job.error` | 同 job.failed                     |
-| `merge.conflict`      | 回复冲突文件列表                            |
+| `job.interrupted`     | 同 job.failed                               |
+| `merge.conflict`      | exec curl GET /conflicts → 回复冲突文件列表 |
 | `merge.completed`     | 确认完成（随后 run.completed 到达）         |
 | `run.completed`       | 回复完成通知                                |
 | `run.cancelled`       | 回复取消通知                                |
 | `host.online`         | 对所有等待中的任务执行 tick                 |
-| `turn.started` / `turn.completed` | 跟踪多轮进度                  |
-| `gate.approved` / `gate.rejected` | 确认审批结果                  |
+| `host.offline`        | 健康检查发现主机离线                        |
+| `host.unavailable`    | 分派任务时无可用主机                        |
+
+仅通过通用 webhook 推送的事件（不经过 OpenClaw hooks）：
+
+| 事件                  | 说明                                        |
+|-----------------------|---------------------------------------------|
+| `stage.changed`       | 每次阶段流转时触发                          |
+| `turn.started` / `turn.completed` | 多轮评估进度跟踪              |
+| `gate.approved` / `gate.rejected` | 审批结果确认                  |
+| `run.failed`          | 任务进入 FAILED 状态                        |
 
 ## E. 参考文档
 

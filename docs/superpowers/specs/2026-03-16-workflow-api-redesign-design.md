@@ -1004,6 +1004,24 @@ merge_queue (
 )
 ```
 
+### turns 表
+
+（后续 event-driven-state-progression 中引入，用于多轮评估跟踪）
+
+```sql
+turns (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id      TEXT NOT NULL REFERENCES jobs(id),
+  turn_num    INTEGER NOT NULL,
+  prompt_file TEXT,
+  verdict     TEXT,
+  detail      TEXT,
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT,
+  UNIQUE(job_id, turn_num)
+)
+```
+
 ### 完整表清单
 
 | 表名 | 首次定义 | 用途 |
@@ -1017,6 +1035,7 @@ merge_queue (
 | agent_hosts | Section 7 / 12 | Agent Host 池 |
 | jobs | Section 8 / 12 | Agent 执行 Job |
 | merge_queue | Section 6 / 12 | 合并队列 |
+| turns | event-driven-state-progression | 多轮评估历史（per-turn 记录） |
 
 ### 数据库迁移策略
 

@@ -8,8 +8,8 @@
 |------|----------|----------|
 | `job.timeout` | `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/recover -H "Content-Type: application/json" -d '{"action":"resume"}'`，最多 3 次 | 连续 3 次 → 回复通知用户 |
 | `job.failed` | `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/retry -H "Content-Type: application/json" -d '{"by":"agent","note":"自动重试"}'`，最多 2 次 | 重试仍失败 → 回复通知用户 |
-| `job.interrupted` / `job.error` | 同 `job.failed` | 同上 |
-| `merge.conflict` | 立即回复通知用户，附冲突文件列表 | — |
+| `job.interrupted` | 同 `job.failed` | 同上 |
+| `merge.conflict` | exec `curl GET /conflicts` 获取冲突文件列表 → 回复通知用户 → 用户解决后执行 `curl POST /resolve-conflict` | — |
 | `host.offline` | 等待 `host.online` 事件后执行 `curl POST .../tick` | >30 分钟 → 回复通知用户 |
 | curl 4xx 响应 | 记录错误，不重试 | 回复通知用户 |
 | curl 5xx / 网络错误 | 等 10s 重试 1 次 | 仍失败 → 回复通知用户 |

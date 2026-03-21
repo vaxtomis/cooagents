@@ -18,6 +18,7 @@ OPENCLAW_EVENTS = frozenset({
     "run.completed",
     "run.cancelled",
     "host.online",
+    "host.offline",
     "host.unavailable",
 })
 
