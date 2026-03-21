@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
     webhooks = WebhookNotifier(
         db,
         openclaw_hooks=settings.openclaw.hooks if settings.openclaw.hooks.enabled else None,
+        trace_emitter=trace_emitter,
     )
     merger = MergeManager(db, webhooks)
 
@@ -67,7 +68,8 @@ async def lifespan(app: FastAPI):
 
     # Background scheduler
     from src.scheduler import Scheduler
-    scheduler = Scheduler(db, hosts, jobs, executor, webhooks, settings, state_machine=sm)
+    scheduler = Scheduler(db, hosts, jobs, executor, webhooks, settings, state_machine=sm,
+                          trace_emitter=trace_emitter)
     await scheduler.start()
 
     app.state.db = db

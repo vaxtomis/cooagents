@@ -24,10 +24,16 @@ OPENCLAW_EVENTS = frozenset({
 
 
 class WebhookNotifier:
-    def __init__(self, db, openclaw_hooks=None):
+    def __init__(self, db, openclaw_hooks=None, trace_emitter=None):
         self.db = db
         self._client = None
         self._openclaw_hooks = openclaw_hooks
+        self._trace = trace_emitter
+
+    async def _trace_event(self, event_type, payload=None, level="info", error_detail=None):
+        if self._trace:
+            await self._trace.emit(event_type, payload, level=level, error_detail=error_detail,
+                                   source="webhook")
 
     async def _get_client(self):
         if self._client is None:
@@ -79,8 +85,10 @@ class WebhookNotifier:
                 await asyncio.sleep(delay)
             success, failure = await self._deliver_to_openclaw_once(event_type, payload, idem_key)
             if success:
+                await self._trace_event("webhook.delivery.success", {"event_type": event_type, "run_id": run_id})
                 return
 
+        await self._trace_event("webhook.delivery.failed", {"event_type": event_type, "run_id": run_id, **(failure or {})}, level="error")
         await self._record_openclaw_delivery_failure(run_id, event_type, failure or {})
 
     def _make_openclaw_idempotency_key(self, run_id, event_type):
