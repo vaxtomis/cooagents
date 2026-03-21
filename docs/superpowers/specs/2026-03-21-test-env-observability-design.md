@@ -42,7 +42,7 @@ All events write to the extended `events` table. OpenClaw queries via 3 diagnost
 
 ## Correlation Context Propagation
 
-### New Module: `src/trace_context.py`
+### New Module: `src/trace_context.py` (under `src/` alongside existing modules)
 
 Based on Python `contextvars` (async-safe, zero-dependency):
 
@@ -98,20 +98,64 @@ All tracing code follows strict non-interference principles:
 4. **Zero-intrusion middleware** — records once at request entry and exit, does not modify request/response content.
 5. **Degradable** — if `trace_context` module fails to load, all `get_context()` calls return empty dict; event writes degrade to existing behavior without context.
 
+### Event Emission Interface
+
 ```python
+# Bounded queue — drops silently when full to maintain fire-and-forget guarantee
+_event_queue: asyncio.Queue = asyncio.Queue(maxsize=2048)
+
 async def emit_trace_event(event_type: str, payload: dict = None,
                            level: str = "info", error_detail: str = None):
     """Fire-and-forget — never raises, never blocks business logic."""
     try:
         ctx = get_context()  # {trace_id, run_id, job_id}
-        await _event_queue.put((event_type, ctx, payload, level, error_detail))
-    except Exception:
+        _event_queue.put_nowait((event_type, ctx, payload, level, error_detail))
+    except (asyncio.QueueFull, Exception):
         pass  # tracing failure must not affect business
 ```
 
+### Async Queue Consumer
+
+A background `asyncio.Task` started in `app.py` lifespan consumes from `_event_queue` and writes to the database:
+
+```python
+async def _trace_consumer(db: Database):
+    """Background task that drains the event queue and batch-writes to DB."""
+    while True:
+        batch = []
+        # Block on first item
+        item = await _event_queue.get()
+        batch.append(item)
+        # Drain any additional queued items (up to 64 per batch)
+        while len(batch) < 64:
+            try:
+                batch.append(_event_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        # Batch INSERT into events table
+        try:
+            await db.executemany(
+                "INSERT INTO events (run_id, event_type, payload_json, created_at, "
+                "trace_id, job_id, span_type, level, duration_ms, error_detail, source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [_item_to_row(item) for item in batch]
+            )
+        except Exception:
+            pass  # consumer must never crash — events are best-effort
+```
+
+**Lifecycle:**
+- Started as `asyncio.create_task(_trace_consumer(db))` in `app.py` lifespan `startup`
+- On shutdown: cancel the task, drain remaining items with a 3-second timeout, then close
+- Queue `maxsize=2048`: if producers outpace the consumer, `put_nowait` raises `QueueFull` which is silently caught — events are dropped rather than blocking business logic
+
 ## Events Table Extension
 
-### Schema Migration (backward-compatible ALTER TABLE)
+### Schema Migration
+
+Migration is performed in `database.py` `_apply_compat_migrations()`, using the existing pattern of checking `PRAGMA table_info` before adding columns.
+
+**Step 1: Add new columns (backward-compatible ALTER TABLE):**
 
 ```sql
 -- New columns (all nullable or with defaults — existing data unaffected)
@@ -122,16 +166,48 @@ ALTER TABLE events ADD COLUMN level        TEXT DEFAULT 'info';
 ALTER TABLE events ADD COLUMN duration_ms  INTEGER;
 ALTER TABLE events ADD COLUMN error_detail TEXT;
 ALTER TABLE events ADD COLUMN source       TEXT;
-
--- run_id becomes nullable (request-level events may have no run)
--- Handled by creating new table + migrating data if needed
-
--- New indexes
-CREATE INDEX idx_events_trace ON events(trace_id);
-CREATE INDEX idx_events_job   ON events(job_id);
-CREATE INDEX idx_events_level ON events(level) WHERE level IN ('warning','error');
-CREATE INDEX idx_events_span  ON events(span_type);
 ```
+
+**Step 2: Rebuild events table to make run_id nullable:**
+
+SQLite does not support `ALTER COLUMN`. The migration creates a new table, copies data, and swaps:
+
+```sql
+-- Rebuild events table with run_id nullable (removes NOT NULL + FK constraint)
+CREATE TABLE IF NOT EXISTS events_new (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id       TEXT REFERENCES runs(id),    -- now nullable
+  event_type   TEXT NOT NULL,
+  payload_json TEXT,
+  created_at   TEXT NOT NULL,
+  trace_id     TEXT,
+  job_id       TEXT,
+  span_type    TEXT DEFAULT 'system',
+  level        TEXT DEFAULT 'info',
+  duration_ms  INTEGER,
+  error_detail TEXT,
+  source       TEXT
+);
+INSERT INTO events_new SELECT id, run_id, event_type, payload_json, created_at,
+  trace_id, job_id, span_type, level, duration_ms, error_detail, source FROM events;
+DROP TABLE events;
+ALTER TABLE events_new RENAME TO events;
+```
+
+Note: SQLite nullable FK columns accept NULL values — a request-level event with `run_id = NULL` satisfies the FK constraint.
+
+**Step 3: Create indexes:**
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_events_run    ON events(run_id);
+CREATE INDEX IF NOT EXISTS idx_events_trace  ON events(trace_id);
+CREATE INDEX IF NOT EXISTS idx_events_job    ON events(job_id);
+CREATE INDEX IF NOT EXISTS idx_events_level  ON events(level)
+  WHERE level IN ('warning','error');
+CREATE INDEX IF NOT EXISTS idx_events_span   ON events(span_type);
+```
+
+The partial index on `level` requires SQLite 3.8.0+ (2013). This is safe for all modern Python distributions.
 
 ### Event Types by Layer
 
@@ -195,6 +271,22 @@ CREATE INDEX idx_events_span  ON events(span_type);
 
 **Purpose:** Deep-dive into a single job's execution details.
 
+**Data Sources:**
+
+| Response Field | Source |
+|---------------|--------|
+| `job_id`, `run_id`, `host_id`, `agent_type`, `stage`, `status`, `session_name`, `started_at`, `ended_at` | `jobs` table |
+| `diagnosis.duration_ms` | Computed: `ended_at - started_at` |
+| `diagnosis.turn_count` | `SELECT COUNT(*) FROM turns WHERE job_id = ?` |
+| `diagnosis.error_summary` | Latest `events` row with `job_id = ? AND level = 'error'` → first line of `error_detail` |
+| `diagnosis.error_detail` | Latest `events` row with `job_id = ? AND level = 'error'` → full `error_detail` column |
+| `diagnosis.last_output_excerpt` | Read last 500 chars from job's `events_file` (NDJSON on disk at `.coop/jobs/{job_id}/events.jsonl`). Returns `null` if file missing. |
+| `diagnosis.failure_context.stage_at_failure` | `jobs.stage` column |
+| `diagnosis.failure_context.host_status_at_failure` | `SELECT status FROM agent_hosts WHERE id = ?` (live query) |
+| `diagnosis.failure_context.retry_count` | `jobs.resume_count` column |
+| `events` | `SELECT * FROM events WHERE job_id = ? ORDER BY created_at` |
+| `turns` | `SELECT * FROM turns WHERE job_id = ? ORDER BY turn_num` |
+
 **Response:**
 ```json
 {
@@ -228,6 +320,8 @@ CREATE INDEX idx_events_span  ON events(span_type);
 }
 ```
 
+Note: Reading `events_file` from disk involves file I/O in an API handler. This is acceptable for a diagnostic endpoint (not high-frequency). The read is bounded to the last 500 chars to avoid large reads.
+
 ### `GET /traces/{trace_id}`
 
 **Purpose:** Trace a request's full impact across runs and jobs.
@@ -249,7 +343,32 @@ CREATE INDEX idx_events_span  ON events(span_type);
 
 ### Route Registration
 
-New file `src/routes/diagnostics.py` with router prefix `/diagnostics`.
+New file `routes/diagnostics.py`:
+
+```python
+router = APIRouter(tags=["diagnostics"])
+
+@router.get("/runs/{run_id}/trace")         # full path: /api/v1/runs/{run_id}/trace
+@router.get("/jobs/{job_id}/diagnosis")      # full path: /api/v1/jobs/{job_id}/diagnosis
+@router.get("/traces/{trace_id}")            # full path: /api/v1/traces/{trace_id}
+```
+
+Registered in `app.py` alongside existing routers under the `/api/v1` prefix. No `/diagnostics` prefix — endpoints integrate naturally with existing REST structure (e.g., `/runs/{id}/trace` extends the runs resource).
+
+## Relationship with Existing `_emit_event`
+
+`acpx_executor.py` already has an `_emit_event()` method that writes directly to the `events` table and triggers webhook notifications. The two systems coexist with distinct roles:
+
+| Aspect | `_emit_event` (existing) | `emit_trace_event` (new) |
+|--------|-------------------------|--------------------------|
+| **Purpose** | Business events that trigger webhooks and state progression | Diagnostic/tracing events for observability |
+| **Write mode** | Synchronous DB write (must be committed before webhook fires) | Async queue → batch write (best-effort) |
+| **Webhook trigger** | Yes — events like `job.completed` trigger OpenClaw notifications | No — purely for diagnostic queries |
+| **Failure impact** | Failure affects business flow | Failure is silently dropped |
+
+**Migration strategy:** `_emit_event` remains unchanged for all events that trigger webhooks or state changes. `emit_trace_event` is used for new diagnostic events (`stage.transition`, `request.*`, `cleanup.*`, `db.*`, etc.) and for enriching error context in existing `except` blocks. The two write to the same `events` table but serve different purposes. No refactoring of `_emit_event` is in scope.
+
+**Event type overlap:** Some event types (e.g., `job.completed`) are emitted by both systems. `_emit_event` records the business event; `emit_trace_event` may add a parallel trace event with additional context (trace_id, duration_ms, error_detail). This duplication is acceptable — diagnostic queries filter by `source` or `trace_id`, and the retention system cleans up old data.
 
 ## Exception Handling Reform
 
@@ -310,6 +429,32 @@ except Exception as exc:
 | webhook_notifier | deliver(), _deliver_openclaw() | webhook.delivery.* | info / error |
 | database | _retry_locked_operation(), transaction() | db.lock_retry / db.transaction_failed | warning / error |
 
+### Database Instrumentation: Avoiding Circular Dependency
+
+`database.py` is a low-level module with zero project imports. Adding a direct import of `trace_emitter` would create a circular dependency (`trace_emitter → database` and `database → trace_emitter`).
+
+**Solution:** `database.py` accepts an optional event callback at construction time:
+
+```python
+# database.py
+class Database:
+    def __init__(self, db_path: str, on_trace_event: Callable | None = None):
+        self._on_trace_event = on_trace_event
+
+    async def _retry_locked_operation(self, ...):
+        ...
+        except Exception as exc:
+            if self._on_trace_event:
+                self._on_trace_event("db.lock_retry", {"attempt": attempt}, "warning", str(exc))
+```
+
+```python
+# app.py — wiring at startup
+db = Database(db_path, on_trace_event=emit_trace_event_sync)
+```
+
+This keeps `database.py` dependency-free. The callback is a plain function reference, set once at startup.
+
 ## Event Retention
 
 | Data Type | Retention | Description |
@@ -319,6 +464,27 @@ except Exception as exc:
 | Orphan request events | 3 days | Health checks, non-run API requests |
 
 Scheduler adds a cleanup loop (every 24h). All retention periods configurable via `settings.yaml`.
+
+### Cleanup SQL
+
+```sql
+-- 1. Delete events for terminal runs older than retention_days
+DELETE FROM events WHERE run_id IN (
+  SELECT id FROM runs
+  WHERE status IN ('completed', 'failed', 'cancelled')
+    AND updated_at < datetime('now', '-7 days')
+);
+
+-- 2. Delete debug-level events older than debug_retention_days (regardless of run status)
+DELETE FROM events WHERE level = 'debug'
+  AND created_at < datetime('now', '-3 days');
+
+-- 3. Delete orphan events (no run association) older than orphan_retention_days
+DELETE FROM events WHERE run_id IS NULL
+  AND created_at < datetime('now', '-3 days');
+```
+
+The cleanup loop runs each query sequentially in the scheduler. Active runs (status = 'running') are never affected — only terminal runs with `updated_at` older than the threshold are cleaned. The `updated_at` column on `runs` serves as the "became terminal" timestamp.
 
 ### Configuration
 
@@ -331,6 +497,23 @@ tracing:
   cleanup_interval_hours: 24       # cleanup loop interval
 ```
 
+### TracingConfig Pydantic Model
+
+```python
+class TracingConfig(BaseModel):
+    enabled: bool = True
+    retention_days: int = 7
+    debug_retention_days: int = 3
+    orphan_retention_days: int = 3
+    cleanup_interval_hours: int = 24
+
+class Settings(BaseModel):
+    server: ServerConfig = ServerConfig()
+    database: DatabaseConfig = DatabaseConfig()
+    # ... existing fields ...
+    tracing: TracingConfig = TracingConfig()   # NEW
+```
+
 ## Module Overview
 
 ### New Files
@@ -338,34 +521,53 @@ tracing:
 | File | Responsibility |
 |------|---------------|
 | `src/trace_context.py` | contextvars management + `get_context()` |
-| `src/trace_emitter.py` | `emit_trace_event()` + async queue + `format_error()` |
+| `src/trace_emitter.py` | `emit_trace_event()` + async queue consumer + `format_error()` |
 | `src/trace_middleware.py` | FastAPI middleware: trace_id generation/propagation + request-level events |
-| `src/routes/diagnostics.py` | 3 diagnostic API endpoints |
+| `routes/diagnostics.py` | 3 diagnostic API endpoints |
 
 ### Modified Files
 
 | File | Changes |
 |------|---------|
 | `db/schema.sql` | events table extension + new indexes |
-| `src/app.py` | Register middleware + diagnostics router + start cleanup loop |
+| `src/app.py` | Register middleware + diagnostics router + start trace consumer + start cleanup loop + wire DB callback |
 | `src/config.py` | Add `TracingConfig` |
 | `src/state_machine.py` | `bind_run()` + stage transition/gate event instrumentation |
 | `src/acpx_executor.py` | `bind_job()` + session/job events + silent exception reform |
 | `src/scheduler.py` | Internal trace_id + health/timeout events + cleanup loop |
 | `src/webhook_notifier.py` | Delivery event instrumentation |
-| `src/database.py` | Lock retry/transaction failure events |
+| `src/database.py` | Accept optional `on_trace_event` callback; emit db.lock_retry / db.transaction_failed via callback |
 
 ### Dependency Graph
 
 ```
 trace_context.py  ← zero dependencies, pure contextvars
      ↑
-trace_emitter.py  ← depends on trace_context + database
+trace_emitter.py  ← depends on trace_context (database handle injected at startup)
      ↑
 trace_middleware.py ← depends on trace_context + trace_emitter
      ↑
-app.py ← registers middleware
+app.py ← registers middleware, starts consumer, wires callback into database
 
-state_machine / acpx_executor / scheduler / webhook_notifier / database
-  └── each calls trace_emitter.emit_trace_event() (fire-and-forget)
+database.py ← accepts on_trace_event callback (no import of trace_emitter)
+
+state_machine / acpx_executor / scheduler / webhook_notifier
+  └── each imports and calls trace_emitter.emit_trace_event() (fire-and-forget)
 ```
+
+## Testing
+
+### New Module Tests
+
+| Test File | Coverage |
+|-----------|----------|
+| `tests/test_trace_context.py` | Context propagation across `async` tasks; `bind_run`/`bind_job` nesting; `get_context()` returns correct values; context isolation between concurrent tasks |
+| `tests/test_trace_emitter.py` | Fire-and-forget guarantee (never raises); queue overflow behavior (silently drops); consumer batch write; `format_error()` truncation; disabled tracing (`enabled=false`) returns immediately |
+| `tests/test_trace_middleware.py` | `X-Trace-Id` header read/write; auto-generation when no header; `request.received`/`request.completed` events emitted; error requests emit `request.error` |
+| `tests/test_diagnostics.py` | Integration tests for all 3 diagnostic endpoints; pagination; level/span_type filtering; 404 for missing run/job/trace; diagnosis data source correctness |
+
+### Existing Test Impact
+
+- `emit_trace_event` calls in modified modules are fire-and-forget with `except: pass`. Existing tests should pass without modification.
+- For test isolation, `trace_emitter` should be importable with a no-op mode (when no consumer is running, events go to the queue and are never consumed — bounded queue prevents memory issues).
+- If existing tests mock `Database`, the `on_trace_event` callback defaults to `None`, so no tracing occurs in tests unless explicitly set up.
