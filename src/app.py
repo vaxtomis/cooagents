@@ -1,3 +1,4 @@
+import asyncio
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,6 +13,8 @@ from src.acpx_executor import AcpxExecutor
 from src.webhook_notifier import WebhookNotifier
 from src.merge_manager import MergeManager
 from src.state_machine import StateMachine
+from src.trace_emitter import TraceEmitter
+from src.trace_middleware import TraceMiddleware
 from src.exceptions import NotFoundError, ConflictError, BadRequestError
 from src.skill_deployer import deploy_skills
 
@@ -23,8 +26,19 @@ async def lifespan(app: FastAPI):
     settings = load_settings()
     await deploy_skills(settings)
 
-    db = Database(db_path=settings.database.path, schema_path="db/schema.sql")
+    # Tracing infrastructure — create emitter first (no DB yet)
+    trace_emitter = TraceEmitter(enabled=settings.tracing.enabled)
+
+    db = Database(
+        db_path=settings.database.path,
+        schema_path="db/schema.sql",
+        on_trace_event=trace_emitter.emit_sync if settings.tracing.enabled else None,
+    )
     await db.connect()
+
+    # Wire DB into emitter after connect
+    trace_emitter.set_db(db)
+    consumer_task = asyncio.create_task(trace_emitter.start_consumer()) if settings.tracing.enabled else None
 
     artifacts = ArtifactManager(db, project_root=project_root)
     hosts = HostManager(db)
@@ -64,16 +78,24 @@ async def lifespan(app: FastAPI):
     app.state.merger = merger
     app.state.settings = settings
     app.state.scheduler = scheduler
+    app.state.trace_emitter = trace_emitter
     app.state.start_time = time.time()
 
     yield
 
     await scheduler.stop()
+    if consumer_task:
+        trace_emitter.stop()
+        try:
+            await asyncio.wait_for(consumer_task, timeout=3.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
     await webhooks.close()
     await db.close()
 
 
 app = FastAPI(title="cooagents", version="0.2.0", lifespan=lifespan)
+app.add_middleware(TraceMiddleware)  # emitter resolved lazily from app.state
 
 
 @app.exception_handler(NotFoundError)
@@ -110,9 +132,11 @@ from routes.artifacts import router as artifacts_router
 from routes.agent_hosts import router as hosts_router
 from routes.webhooks import router as webhooks_router
 from routes.repos import router as repos_router
+from routes.diagnostics import create_diagnostics_router
 
 app.include_router(runs_router, prefix="/api/v1")
 app.include_router(artifacts_router, prefix="/api/v1")
 app.include_router(hosts_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(repos_router, prefix="/api/v1")
+app.include_router(create_diagnostics_router(), prefix="/api/v1")
