@@ -112,6 +112,15 @@ async def emit_trace_event(event_type: str, payload: dict = None,
         _event_queue.put_nowait((event_type, ctx, payload, level, error_detail))
     except (asyncio.QueueFull, Exception):
         pass  # tracing failure must not affect business
+
+def emit_trace_event_sync(event_type: str, payload: dict = None,
+                          level: str = "info", error_detail: str = None):
+    """Synchronous variant for use as database.py callback. Same fire-and-forget guarantee."""
+    try:
+        ctx = get_context()
+        _event_queue.put_nowait((event_type, ctx, payload, level, error_detail))
+    except (asyncio.QueueFull, Exception):
+        pass
 ```
 
 ### Async Queue Consumer
@@ -141,7 +150,8 @@ async def _trace_consumer(db: Database):
                 [_item_to_row(item) for item in batch]
             )
         except Exception:
-            pass  # consumer must never crash — events are best-effort
+            logger.warning("trace consumer: batch write failed, %d events dropped", len(batch))
+            # Log but do not re-raise — consumer must never crash
 ```
 
 **Lifecycle:**
@@ -170,7 +180,9 @@ ALTER TABLE events ADD COLUMN source       TEXT;
 
 **Step 2: Rebuild events table to make run_id nullable:**
 
-SQLite does not support `ALTER COLUMN`. The migration creates a new table, copies data, and swaps:
+SQLite does not support `ALTER COLUMN`. The migration creates a new table, copies data, and swaps.
+
+**Idempotency guard:** Before executing, check `PRAGMA table_info(events)` — if the `run_id` column already has `notnull = 0`, skip this step entirely. This prevents data loss on re-runs.
 
 ```sql
 -- Rebuild events table with run_id nullable (removes NOT NULL + FK constraint)
