@@ -32,3 +32,17 @@ def test_turns_config_defaults():
     s = Settings()
     assert s.turns.design_max_turns == 1
     assert s.turns.dev_max_turns == 1
+
+def test_tracing_config_defaults():
+    s = Settings()
+    assert s.tracing.enabled is True
+    assert s.tracing.retention_days == 7
+    assert s.tracing.debug_retention_days == 3
+    assert s.tracing.orphan_retention_days == 3
+    assert s.tracing.cleanup_interval_hours == 24
+
+def test_tracing_config_from_dict():
+    s = Settings.model_validate({"tracing": {"enabled": False, "retention_days": 14}})
+    assert s.tracing.enabled is False
+    assert s.tracing.retention_days == 14
+    assert s.tracing.debug_retention_days == 3

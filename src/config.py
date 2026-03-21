@@ -69,6 +69,14 @@ class OpenclawHooksConfig(BaseModel):
     default_to: str = ""
 
 
+class TracingConfig(BaseModel):
+    enabled: bool = True
+    retention_days: int = 7
+    debug_retention_days: int = 3
+    orphan_retention_days: int = 3
+    cleanup_interval_hours: int = 24
+
+
 class OpenclawConfig(BaseModel):
     deploy_skills: bool = True
     targets: list[OpenclawTarget] = []
@@ -84,6 +92,7 @@ class Settings(BaseModel):
     acpx: AcpxConfig = AcpxConfig()
     turns: TurnsConfig = TurnsConfig()
     openclaw: OpenclawConfig = OpenclawConfig()
+    tracing: TracingConfig = TracingConfig()
 
 
 def load_settings(path: Path | str | None = None) -> Settings:
