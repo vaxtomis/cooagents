@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
     executor = AcpxExecutor(
         db, jobs, hosts, artifacts, webhooks,
         config=settings, coop_dir=coop_dir, project_root=project_root,
+        trace_emitter=trace_emitter,
     )
     sm = StateMachine(
         db, artifacts, hosts, executor, webhooks, merger,

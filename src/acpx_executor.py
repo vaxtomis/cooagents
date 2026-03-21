@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 
+from src.trace_context import bind_run, bind_job
+from src.trace_emitter import format_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,7 +24,7 @@ _EXIT_CODE_MAP = {
 
 
 class AcpxExecutor:
-    def __init__(self, db, job_manager, host_manager, artifact_manager, webhook_notifier, config=None, coop_dir=".coop", project_root=None):
+    def __init__(self, db, job_manager, host_manager, artifact_manager, webhook_notifier, config=None, coop_dir=".coop", project_root=None, trace_emitter=None):
         self.db = db
         self.jobs = job_manager
         self.hosts = host_manager
@@ -30,12 +33,18 @@ class AcpxExecutor:
         self.config = config
         self.project_root = Path(project_root) if project_root else Path(__file__).resolve().parents[1]
         self.coop_dir = str(self._resolve_project_path(coop_dir))
+        self._trace = trace_emitter
         self._state_machine = None
         self._tasks = {}  # job_id -> asyncio.Task
         self._resources = {}  # job_id -> {"stderr_fh": fh, "ssh_conn": conn}
 
     def set_state_machine(self, sm):
         self._state_machine = sm
+
+    async def _trace_event(self, event_type, payload=None, level="info", error_detail=None, duration_ms=None):
+        if self._trace:
+            await self._trace.emit(event_type, payload, level=level, error_detail=error_detail,
+                                   duration_ms=duration_ms, source="acpx")
 
     async def _notify_job_status_changed(self, run_id, job_id, status):
         if not self._state_machine:
@@ -51,6 +60,8 @@ class AcpxExecutor:
             await self._notify_job_status_changed(run_id, job_id, status)
         except Exception as exc:
             logger.error(f"Job status callback failed for {run_id}/{job_id} -> {status}: {exc}")
+            await self._trace_event("job.callback_failed", {"run_id": run_id, "job_id": job_id, "status": status},
+                                    level="error", error_detail=format_error(exc))
 
     # ------------------------------------------------------------------
     # Helpers
@@ -374,6 +385,8 @@ class AcpxExecutor:
                     "agent_type": agent_type,
                     "timeout_sec": ensure_timeout,
                 })
+                await self._trace_event("session.ensure_timeout", {"job_id": job_id, "session_name": session_name},
+                                        level="error", error_detail=f"Timeout after {ensure_timeout}s")
                 await self._notify_job_status_changed_safely(run_id, job_id, "timeout")
                 return
 
@@ -396,9 +409,11 @@ class AcpxExecutor:
                     process = await self._start_local(prompt_cmd, worktree, job_id)
                 else:
                     process = await self._start_ssh(host, prompt_cmd, job_id)
-            except Exception:
+            except Exception as exc:
                 now = datetime.now(timezone.utc).isoformat()
                 await self.jobs.update_status(job_id, "failed", ended_at=now)
+                await self._trace_event("session.ensure_failed", {"job_id": job_id, "run_id": run_id},
+                                        level="error", error_detail=format_error(exc))
                 await self._notify_job_status_changed_safely(run_id, job_id, "failed")
                 logger.exception(f"Failed to start prompt process for {run_id}/{job_id}")
                 return
@@ -724,6 +739,8 @@ class AcpxExecutor:
             now = datetime.now(timezone.utc).isoformat()
             await self.jobs.update_status(job_id, "failed", ended_at=now)
             await self._emit_event(run_id, "job.error", {"job_id": job_id, "error": str(e)})
+            await self._trace_event("job.error", {"job_id": job_id, "run_id": run_id},
+                                    level="error", error_detail=format_error(e))
         finally:
             await self.hosts.decrement_load(host_id)
             self._tasks.pop(job_id, None)
