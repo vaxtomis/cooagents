@@ -78,6 +78,15 @@ class AcpxExecutor:
             return 60
         return getattr(timeout_cfg, "dispatch_ensure", 60)
 
+    def _output_read_chunk_size(self):
+        return 8192
+
+    def _output_line_limit_bytes(self):
+        cfg = self._acpx_cfg()
+        if not cfg:
+            return 65536
+        return max(1024, int(getattr(cfg, "output_line_limit_bytes", 65536)))
+
     def _session_reconcile_attempts(self):
         timeout_cfg = getattr(self.config, "timeouts", None) if self.config else None
         if not timeout_cfg:
@@ -144,6 +153,19 @@ class AcpxExecutor:
         if job.get("events_file"):
             return job["events_file"]
         return str(Path(self.coop_dir) / "jobs" / job["id"] / "events.jsonl")
+
+    def _decode_output_text(self, data: bytes) -> str:
+        if not data:
+            return ""
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode("utf-8", errors="replace")
+
+    def _truncate_output_text(self, data: bytes, limit: int) -> str:
+        if len(data) <= limit:
+            return self._decode_output_text(data)
+        return self._decode_output_text(data[:limit])
 
     def _finalize_terminal_status(self, status, events_file):
         if status != "completed" and self._events_file_has_stop_reason(events_file, "end_turn"):
@@ -277,7 +299,7 @@ class AcpxExecutor:
     # ------------------------------------------------------------------
 
     async def start_session(self, run_id, host, agent_type, task_file, worktree, timeout_sec, revision=None) -> str:
-        """Create an acpx session and send the initial prompt. Returns job_id."""
+        """Create an acpx session bootstrap task and return the job id immediately."""
         from src.git_utils import get_head_commit
         base_commit = await get_head_commit(worktree)
 
@@ -295,53 +317,102 @@ class AcpxExecutor:
             session_name=session_name,
         )
 
-        # Ensure session exists
-        ensure_cmd = self._build_acpx_ensure_cmd(agent_type, session_name, worktree)
-        try:
-            ensure_timeout = self._dispatch_ensure_timeout()
-            if host["host"] == "local":
-                _, _, rc = await asyncio.wait_for(
-                    self._run_cmd(ensure_cmd, worktree),
-                    timeout=ensure_timeout,
-                )
-            else:
-                _, _, rc = await asyncio.wait_for(
-                    self._run_ssh_cmd(host, ensure_cmd),
-                    timeout=ensure_timeout,
-                )
-        except asyncio.TimeoutError:
-            now = datetime.now(timezone.utc).isoformat()
-            await self.jobs.update_status(job_id, "timeout", ended_at=now)
-            raise
-
-        if rc != 0:
-            now = datetime.now(timezone.utc).isoformat()
-            await self.jobs.update_status(job_id, "failed", ended_at=now)
-            raise RuntimeError(f"acpx ensure failed for {session_name}")
-
-        # Send initial prompt
-        prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, task_file)
-
-        try:
-            if host["host"] == "local":
-                process = await self._start_local(prompt_cmd, worktree, job_id)
-            else:
-                process = await self._start_ssh(host, prompt_cmd, job_id)
-        except Exception:
-            now = datetime.now(timezone.utc).isoformat()
-            await self.jobs.update_status(job_id, "failed", ended_at=now)
-            await self._notify_job_status_changed_safely(run_id, job_id, "failed")
-            raise
-
-        await self.jobs.mark_running(job_id)
-        await self.hosts.increment_load(host["id"])
-        await self._emit_event(run_id, "session.created", {"session_name": session_name, "agent_type": agent_type})
-        await self._notify_job_status_changed_safely(run_id, job_id, "running")
-
-        task = asyncio.create_task(self._watch(job_id, process, run_id, host["id"], session_name))
-        self._tasks[job_id] = task
-
+        bootstrap_task = asyncio.create_task(
+            self._bootstrap_session_start(
+                job_id,
+                run_id,
+                host,
+                agent_type,
+                task_file,
+                worktree,
+                timeout_sec,
+                session_name,
+            )
+        )
+        self._tasks[job_id] = bootstrap_task
         return job_id
+
+    async def _bootstrap_session_start(
+        self,
+        job_id,
+        run_id,
+        host,
+        agent_type,
+        task_file,
+        worktree,
+        timeout_sec,
+        session_name,
+    ) -> None:
+        """Ensure the session exists, then start the prompt process in the background."""
+        current_task = asyncio.current_task()
+        try:
+            ensure_cmd = self._build_acpx_ensure_cmd(agent_type, session_name, worktree)
+            ensure_timeout = self._dispatch_ensure_timeout()
+            await self._emit_event(run_id, "session.ensure_started", {
+                "job_id": job_id,
+                "session_name": session_name,
+                "agent_type": agent_type,
+                "timeout_sec": ensure_timeout,
+            })
+            try:
+                if host["host"] == "local":
+                    _, _, rc = await asyncio.wait_for(
+                        self._run_cmd(ensure_cmd, worktree),
+                        timeout=ensure_timeout,
+                    )
+                else:
+                    _, _, rc = await asyncio.wait_for(
+                        self._run_ssh_cmd(host, ensure_cmd),
+                        timeout=ensure_timeout,
+                    )
+            except asyncio.TimeoutError:
+                now = datetime.now(timezone.utc).isoformat()
+                await self.jobs.update_status(job_id, "timeout", ended_at=now)
+                await self._emit_event(run_id, "session.ensure_timeout", {
+                    "job_id": job_id,
+                    "session_name": session_name,
+                    "agent_type": agent_type,
+                    "timeout_sec": ensure_timeout,
+                })
+                await self._notify_job_status_changed_safely(run_id, job_id, "timeout")
+                return
+
+            if rc != 0:
+                now = datetime.now(timezone.utc).isoformat()
+                await self.jobs.update_status(job_id, "failed", ended_at=now)
+                await self._emit_event(run_id, "session.ensure_failed", {
+                    "job_id": job_id,
+                    "session_name": session_name,
+                    "agent_type": agent_type,
+                    "exit_code": rc,
+                })
+                await self._notify_job_status_changed_safely(run_id, job_id, "failed")
+                logger.error(f"acpx ensure failed for {session_name}")
+                return
+
+            prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, task_file)
+            try:
+                if host["host"] == "local":
+                    process = await self._start_local(prompt_cmd, worktree, job_id)
+                else:
+                    process = await self._start_ssh(host, prompt_cmd, job_id)
+            except Exception:
+                now = datetime.now(timezone.utc).isoformat()
+                await self.jobs.update_status(job_id, "failed", ended_at=now)
+                await self._notify_job_status_changed_safely(run_id, job_id, "failed")
+                logger.exception(f"Failed to start prompt process for {run_id}/{job_id}")
+                return
+
+            await self.jobs.mark_running(job_id)
+            await self.hosts.increment_load(host["id"])
+            await self._emit_event(run_id, "session.created", {"session_name": session_name, "agent_type": agent_type})
+            await self._notify_job_status_changed_safely(run_id, job_id, "running")
+
+            watch_task = asyncio.create_task(self._watch(job_id, process, run_id, host["id"], session_name))
+            self._tasks[job_id] = watch_task
+        finally:
+            if self._tasks.get(job_id) is current_task:
+                self._tasks.pop(job_id, None)
 
     async def send_followup(self, run_id, agent_type, prompt_file, worktree, timeout_sec) -> None:
         """Send a followup prompt to an existing session (non-blocking)."""
@@ -619,7 +690,7 @@ class AcpxExecutor:
             log_dir.mkdir(parents=True, exist_ok=True)
             events_file = log_dir / "events.jsonl"
 
-            await self._parse_ndjson_stream(process, job_id, events_file)
+            await self._parse_ndjson_stream(process, job_id, run_id, events_file)
             await process.wait()
             rc = process.returncode
             now = datetime.now(timezone.utc).isoformat()
@@ -674,20 +745,97 @@ class AcpxExecutor:
             except Exception:
                 pass
 
-    async def _parse_ndjson_stream(self, process, job_id, events_file):
+    async def _emit_output_warning(self, run_id, job_id, chunk_size, chunk_limit, separator):
+        await self._emit_event(run_id, "job.output.warning", {
+            "job_id": job_id,
+            "stream": "stdout",
+            "reason": "chunk_limit_exceeded",
+            "chunk_size": chunk_size,
+            "chunk_limit": chunk_limit,
+            "separator": separator,
+            "truncated": True,
+        })
+
+    async def _write_output_record(self, handle, run_id, job_id, line_bytes, chunk_limit, separator):
+        normalized = line_bytes.rstrip(b"\r")
+        line_text = self._decode_output_text(normalized)
+        if not line_text.strip():
+            return
+
+        if len(normalized) > chunk_limit:
+            record = {
+                "raw": self._truncate_output_text(normalized, chunk_limit),
+                "stream": "stdout",
+                "reason": "chunk_limit_exceeded",
+                "chunk_size": len(normalized),
+                "chunk_limit": chunk_limit,
+                "separator": separator,
+                "truncated": True,
+            }
+            handle.write(json.dumps(record) + "\n")
+            handle.flush()
+            await self._emit_output_warning(run_id, job_id, len(normalized), chunk_limit, separator)
+            return
+
+        try:
+            msg = json.loads(line_text)
+            handle.write(json.dumps(msg) + "\n")
+        except json.JSONDecodeError:
+            handle.write(json.dumps({"raw": line_text}) + "\n")
+        handle.flush()
+
+    async def _parse_ndjson_stream(self, process, job_id, run_id, events_file):
         """Parse NDJSON lines from process stdout, append to events file."""
-        with open(events_file, "a", encoding="utf-8") as f:
-            async for line in process.stdout:
-                line = line.decode().strip() if isinstance(line, bytes) else line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                    f.write(json.dumps(msg) + "\n")
-                    f.flush()
-                except json.JSONDecodeError:
-                    f.write(json.dumps({"raw": line}) + "\n")
-                    f.flush()
+        stdout = getattr(process, "stdout", None)
+        if stdout is None:
+            return
+
+        chunk_limit = self._output_line_limit_bytes()
+        read_size = self._output_read_chunk_size()
+        pending = b""
+
+        with open(events_file, "a", encoding="utf-8") as handle:
+            while True:
+                chunk = await stdout.read(read_size)
+                if not chunk:
+                    break
+                pending += chunk
+
+                while True:
+                    newline_at = pending.find(b"\n")
+                    if newline_at == -1:
+                        break
+                    line_bytes = pending[:newline_at]
+                    pending = pending[newline_at + 1:]
+                    await self._write_output_record(
+                        handle,
+                        run_id,
+                        job_id,
+                        line_bytes,
+                        chunk_limit,
+                        "\n",
+                    )
+
+                if len(pending) > chunk_limit:
+                    await self._write_output_record(
+                        handle,
+                        run_id,
+                        job_id,
+                        pending,
+                        chunk_limit,
+                        None,
+                    )
+                    pending = b""
+
+            if pending:
+                await self._write_output_record(
+                    handle,
+                    run_id,
+                    job_id,
+                    pending,
+                    chunk_limit,
+                    None,
+                )
 
     async def _emit_event(self, run_id, event_type, payload):
         now = datetime.now(timezone.utc).isoformat()

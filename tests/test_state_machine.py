@@ -205,6 +205,106 @@ async def test_design_queued_keeps_stage_when_start_session_times_out(sm, mocks,
     assert run["status"] == "running"
 
 
+async def test_design_queued_advances_to_dispatched_while_ensure_is_still_pending(db, tmp_path):
+    from src.acpx_executor import AcpxExecutor
+
+    (tmp_path / ".git").mkdir()
+
+    webhook = AsyncMock()
+    webhook.notify = AsyncMock()
+    host_mgr = AsyncMock()
+    host_mgr.select_host = AsyncMock(return_value={"id": "local", "host": "local"})
+    merge_mgr = AsyncMock()
+    artifacts = ArtifactManager(db)
+    artifacts.render_task = AsyncMock(return_value="task-path")
+    jobs = JobManager(db)
+    executor = AcpxExecutor(db, jobs, host_mgr, artifacts, webhook, coop_dir=str(tmp_path / ".coop"))
+
+    async def _fake_ensure_worktree(repo_path, ticket, phase):
+        branch = f"feat/{ticket}-{phase}"
+        wt = str(tmp_path / f".worktrees/{ticket}-{phase}")
+        return branch, wt
+
+    machine = StateMachine(
+        db,
+        artifacts,
+        host_mgr,
+        executor,
+        webhook,
+        merge_mgr,
+        str(tmp_path),
+        ensure_worktree_fn=_fake_ensure_worktree,
+        job_manager=jobs,
+    )
+    executor.set_state_machine(machine)
+
+    run = await machine.create_run("T-NONBLOCK", str(tmp_path))
+    rid = run["run_id"]
+    await machine.submit_requirement(rid, "# Req")
+    await machine.approve(rid, "req", "user1")
+
+    ensure_started = asyncio.Event()
+    ensure_gate = asyncio.Event()
+
+    async def _blocked_run_cmd(cmd, cwd):
+        ensure_started.set()
+        await ensure_gate.wait()
+        return "", "", 0
+
+    executor._run_cmd = AsyncMock(side_effect=_blocked_run_cmd)
+    executor._start_local = AsyncMock(return_value=MagicMock())
+    executor._emit_event = AsyncMock()
+    executor._watch = AsyncMock(return_value=None)
+
+    with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
+        tick_task = asyncio.create_task(machine.tick(rid))
+        try:
+            await asyncio.wait_for(ensure_started.wait(), timeout=0.5)
+            for _ in range(50):
+                await asyncio.sleep(0)
+                run = await machine._get_run(rid)
+                if run["current_stage"] == "DESIGN_DISPATCHED":
+                    break
+            assert run["current_stage"] == "DESIGN_DISPATCHED"
+        finally:
+            ensure_gate.set()
+            await tick_task
+
+
+async def test_on_job_status_changed_fails_queued_run_when_dispatched_job_times_out(sm, db, tmp_path):
+    from datetime import datetime, timezone
+
+    run = await sm.create_run("T-DISPATCH-TIMEOUT", str(tmp_path))
+    rid = run["run_id"]
+    await sm.submit_requirement(rid, "# Req")
+    await sm.approve(rid, "req", "user1")
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at,ended_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "job-dispatch-timeout",
+            rid,
+            "local",
+            "claude",
+            "DESIGN_DISPATCHED",
+            "timeout",
+            "/t.md",
+            str(tmp_path),
+            "run-dispatch-timeout-design",
+            now,
+            now,
+        ),
+    )
+
+    result = await sm.on_job_status_changed(rid, "job-dispatch-timeout", "timeout")
+
+    assert result["status"] == "failed"
+    assert result["current_stage"] == "FAILED"
+    assert result["failed_at_stage"] == "DESIGN_DISPATCHED"
+
+
 @pytest.mark.parametrize(
     "start_stage,job_stage,agent_type,expected_stage",
     [

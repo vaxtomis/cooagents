@@ -1,11 +1,22 @@
 import os
 import asyncio
+from pathlib import Path
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.database import Database
 from src.job_manager import JobManager
 from src.config import Settings
+
+
+async def _wait_for_job_status(db, job_id, expected_status, attempts=50):
+    job = None
+    for _ in range(attempts):
+        job = await db.fetchone("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job and job["status"] == expected_status:
+            return job
+        await asyncio.sleep(0)
+    return job
 
 
 @pytest.fixture
@@ -365,7 +376,7 @@ async def test_start_session_records_dispatched_stage_for_queued_runs(
     with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
         job_id = await executor.start_session("run-stage", host, agent_type, "/task.md", "/wt", 120)
 
-    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", (job_id,))
+    job = await _wait_for_job_status(db, job_id, "running")
 
     assert job["stage"] == expected_stage
     assert job["status"] == "running"
@@ -403,9 +414,9 @@ async def test_start_session_notifies_state_machine_when_job_enters_running(
     with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
         job_id = await executor.start_session("run-running-event", host, agent_type, "/task.md", "/wt", 120)
 
-    state_machine.on_job_status_changed.assert_awaited_once_with("run-running-event", job_id, "running")
+    job = await _wait_for_job_status(db, job_id, "running")
 
-    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", (job_id,))
+    state_machine.on_job_status_changed.assert_awaited_once_with("run-running-event", job_id, "running")
     assert job["stage"] == expected_stage
     assert job["status"] == "running"
 
@@ -427,13 +438,12 @@ async def test_start_session_does_not_emit_running_before_process_starts(executo
     executor.set_state_machine(state_machine)
 
     with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
-        with pytest.raises(RuntimeError, match="spawn failed"):
-            await executor.start_session("run-running-start-fail", host, "claude", "/task.md", "/wt", 120)
+        job_id = await executor.start_session("run-running-start-fail", host, "claude", "/task.md", "/wt", 120)
 
-    job = await db.fetchone("SELECT * FROM jobs ORDER BY started_at DESC LIMIT 1")
+    job = await _wait_for_job_status(db, job_id, "failed")
     state_machine.on_job_status_changed.assert_awaited_once_with(
         "run-running-start-fail",
-        job["id"],
+        job_id,
         "failed",
     )
     assert job["status"] == "failed"
@@ -463,16 +473,62 @@ async def test_start_session_times_out_stuck_ensure(executor, db):
     executor._run_cmd = AsyncMock(side_effect=_slow_run_cmd)
     executor._start_local = AsyncMock()
     executor._emit_event = AsyncMock()
+    state_machine = AsyncMock()
+    executor.set_state_machine(state_machine)
 
     with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
-        with pytest.raises(asyncio.TimeoutError):
-            await executor.start_session("run-stuck-ensure", host, "claude", "/task.md", "/wt", 120)
+        job_id = await asyncio.wait_for(
+            executor.start_session("run-stuck-ensure", host, "claude", "/task.md", "/wt", 120),
+            timeout=0.1,
+        )
 
-    job = await db.fetchone("SELECT * FROM jobs WHERE run_id=?", ("run-stuck-ensure",))
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", (job_id,))
+    assert job["status"] == "starting"
+
+    await asyncio.sleep(0.05)
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", (job_id,))
 
     assert job["status"] == "timeout"
     assert job["ended_at"] is not None
     executor._start_local.assert_not_called()
+    state_machine.on_job_status_changed.assert_awaited_once_with("run-stuck-ensure", job_id, "timeout")
+
+
+async def test_start_session_emits_ensure_events(executor, db):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-ensure-events", "T-ENS-EVT", "/repo", "running", "DESIGN_QUEUED", now, now),
+    )
+
+    class FakeConfig:
+        class timeouts:
+            dispatch_ensure = 0.01
+
+    executor.config = FakeConfig()
+
+    async def _slow_run_cmd(cmd, cwd):
+        await asyncio.sleep(0.05)
+        return "", "", 0
+
+    host = {"id": "local", "host": "local"}
+    executor._run_cmd = AsyncMock(side_effect=_slow_run_cmd)
+    executor._start_local = AsyncMock()
+
+    with patch("src.git_utils.get_head_commit", new_callable=AsyncMock, return_value="abc123"):
+        job_id = await executor.start_session("run-ensure-events", host, "claude", "/task.md", "/wt", 120)
+
+    await asyncio.sleep(0.05)
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", (job_id,))
+    events = await db.fetchall("SELECT event_type FROM events WHERE run_id=? ORDER BY id", ("run-ensure-events",))
+    event_types = [row["event_type"] for row in events]
+
+    assert job["status"] == "timeout"
+    assert "session.ensure_started" in event_types
+    assert "session.ensure_timeout" in event_types
+    assert "session.created" not in event_types
 
 
 # ------------------------------------------------------------------
@@ -653,10 +709,37 @@ class _FakeStdout:
         except StopIteration:
             raise StopAsyncIteration
 
+    async def read(self, _size=-1):
+        try:
+            return next(self._lines)
+        except StopIteration:
+            return b""
+
+
+class _ChunkedFakeStdout:
+    def __init__(self, chunks, iter_error=None):
+        self._chunks = list(chunks)
+        self._iter_error = iter_error
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._iter_error is not None:
+            raise self._iter_error
+        if not self._chunks:
+            raise StopAsyncIteration
+        return self._chunks.pop(0)
+
+    async def read(self, _size=-1):
+        if not self._chunks:
+            return b""
+        return self._chunks.pop(0)
+
 
 class _FakeProcess:
-    def __init__(self, lines, returncode):
-        self.stdout = _FakeStdout(lines)
+    def __init__(self, stdout, returncode):
+        self.stdout = stdout if hasattr(stdout, "read") else _FakeStdout(stdout)
         self.returncode = returncode
 
     async def wait(self):
@@ -753,4 +836,59 @@ async def test_watch_notifies_state_machine_about_terminal_job_status(executor, 
         "run-watch-terminal",
         "job-watch-terminal",
         expected_status,
+    )
+
+
+async def test_watch_keeps_job_running_flow_on_oversized_stdout_line(executor, db):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("run-watch-overflow", "T-OVF", "/repo", "running", "DEV_RUNNING", now, now),
+    )
+    await db.execute(
+        "INSERT INTO jobs(id,run_id,host_id,agent_type,stage,status,task_file,worktree,session_name,started_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            "job-watch-overflow",
+            "run-watch-overflow",
+            "local",
+            "codex",
+            "DEV_RUNNING",
+            "running",
+            "/t.md",
+            "/wt",
+            "run-watch-overflow-dev",
+            now,
+        ),
+    )
+
+    state_machine = AsyncMock()
+    executor.set_state_machine(state_machine)
+
+    oversized_line = b'{"event":"token","text":"' + (b"x" * 70000) + b'"}\n'
+    process = _FakeProcess(
+        _ChunkedFakeStdout(
+            [oversized_line],
+            iter_error=ValueError("Separator is found, but chunk is longer than limit"),
+        ),
+        0,
+    )
+
+    await executor._watch("job-watch-overflow", process, "run-watch-overflow", "local", "run-watch-overflow-dev")
+
+    job = await db.fetchone("SELECT * FROM jobs WHERE id=?", ("job-watch-overflow",))
+    warning_event = await db.fetchone(
+        "SELECT * FROM events WHERE run_id=? AND event_type='job.output.warning' ORDER BY id DESC LIMIT 1",
+        ("run-watch-overflow",),
+    )
+    events_text = Path(job["events_file"]).read_text(encoding="utf-8")
+
+    assert job["status"] == "completed"
+    assert warning_event is not None
+    assert '"truncated": true' in events_text
+    state_machine.on_job_status_changed.assert_awaited_once_with(
+        "run-watch-overflow",
+        "job-watch-overflow",
+        "completed",
     )

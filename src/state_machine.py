@@ -222,6 +222,8 @@ class StateMachine:
                     return run
                 await self.tick(run_id)
             elif status in {"failed", "timeout", "interrupted"}:
+                run = await self._advance_queued_run_to_dispatched_job_stage(run, job_stage)
+                current_stage = run["current_stage"]
                 if not self._stage_matches_terminal_failure_event(current_stage, job_stage):
                     return run
                 await self.tick(run_id)
@@ -392,27 +394,30 @@ class StateMachine:
         """No-op: waits for :meth:`approve` or :meth:`reject`."""
 
     async def _advance_dispatched_run_on_running_event(self, run: dict, job: dict) -> None:
-        queued_to_dispatched = {
-            "DESIGN_QUEUED": "DESIGN_DISPATCHED",
-            "DEV_QUEUED": "DEV_DISPATCHED",
-        }
         dispatched_to_running = {
             "DESIGN_DISPATCHED": "DESIGN_RUNNING",
             "DEV_DISPATCHED": "DEV_RUNNING",
         }
 
-        current_stage = run["current_stage"]
         job_stage = job.get("stage")
-
-        expected_dispatched = queued_to_dispatched.get(current_stage)
-        if expected_dispatched and expected_dispatched == job_stage:
-            await self._update_stage(run["id"], current_stage, expected_dispatched)
-            run = await self._get_run(run["id"])
-            current_stage = run["current_stage"]
+        run = await self._advance_queued_run_to_dispatched_job_stage(run, job_stage)
+        current_stage = run["current_stage"]
 
         target_stage = dispatched_to_running.get(current_stage)
         if target_stage and job_stage == current_stage:
             await self._update_stage(run["id"], current_stage, target_stage)
+
+    async def _advance_queued_run_to_dispatched_job_stage(self, run: dict, job_stage: str | None) -> dict:
+        queued_to_dispatched = {
+            "DESIGN_QUEUED": "DESIGN_DISPATCHED",
+            "DEV_QUEUED": "DEV_DISPATCHED",
+        }
+        current_stage = run["current_stage"]
+        expected_dispatched = queued_to_dispatched.get(current_stage)
+        if expected_dispatched and expected_dispatched == job_stage:
+            await self._update_stage(run["id"], current_stage, expected_dispatched)
+            return await self._get_run(run["id"])
+        return run
 
     def _stage_matches_running_event(self, current_stage: str, job_stage: str) -> bool:
         allowed = {
