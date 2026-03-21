@@ -65,3 +65,41 @@ async def test_retry_locked_operation_retries_until_success(db):
     assert result == "ok"
     assert attempts == 2
     sleep_mock.assert_awaited_once()
+
+
+async def test_events_table_has_trace_columns(db):
+    """After connect, events table should have tracing columns."""
+    row = await db.fetchone(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='events'"
+    )
+    sql = row["sql"]
+    assert "trace_id" in sql
+    assert "job_id" in sql
+    assert "span_type" in sql
+    assert "level" in sql
+    assert "duration_ms" in sql
+    assert "error_detail" in sql
+    assert "source" in sql
+
+
+async def test_events_run_id_nullable(db):
+    """run_id should be nullable for request-level events."""
+    await db.execute(
+        "INSERT INTO events(run_id,event_type,payload_json,created_at,trace_id,span_type,level,source) "
+        "VALUES(NULL,'request.received',NULL,datetime('now'),'abc123','request','info','middleware')"
+    )
+    row = await db.fetchone("SELECT * FROM events WHERE trace_id='abc123'")
+    assert row is not None
+    assert row["run_id"] is None
+
+
+async def test_database_on_trace_event_callback(db):
+    """Database should accept and call on_trace_event callback."""
+    calls = []
+    def on_event(event_type, payload, level, error_detail):
+        calls.append((event_type, payload, level, error_detail))
+
+    db2 = Database(db_path=db._db_path, schema_path="db/schema.sql", on_trace_event=on_event)
+    await db2.connect()
+    assert db2._on_trace_event is on_event
+    await db2.close()

@@ -31,13 +31,20 @@ CREATE TABLE IF NOT EXISTS steps (
   created_at   TEXT NOT NULL
 );
 
--- 3. events — audit log
+-- 3. events — audit log with tracing support
 CREATE TABLE IF NOT EXISTS events (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id       TEXT NOT NULL REFERENCES runs(id),
+  run_id       TEXT REFERENCES runs(id),
   event_type   TEXT NOT NULL,
   payload_json TEXT,
-  created_at   TEXT NOT NULL
+  created_at   TEXT NOT NULL,
+  trace_id     TEXT,
+  job_id       TEXT,
+  span_type    TEXT DEFAULT 'system',
+  level        TEXT DEFAULT 'info',
+  duration_ms  INTEGER,
+  error_detail TEXT,
+  source       TEXT
 );
 
 -- 4. approvals — gate approvals/rejections
@@ -147,6 +154,10 @@ CREATE INDEX IF NOT EXISTS idx_turns_job ON turns(job_id);
 CREATE INDEX IF NOT EXISTS idx_runs_status   ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_ticket   ON runs(ticket);
 CREATE INDEX IF NOT EXISTS idx_events_run    ON events(run_id);
+CREATE INDEX IF NOT EXISTS idx_events_trace  ON events(trace_id);
+CREATE INDEX IF NOT EXISTS idx_events_job    ON events(job_id);
+CREATE INDEX IF NOT EXISTS idx_events_level  ON events(level);
+CREATE INDEX IF NOT EXISTS idx_events_span   ON events(span_type);
 CREATE INDEX IF NOT EXISTS idx_jobs_run      ON jobs(run_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status   ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id);

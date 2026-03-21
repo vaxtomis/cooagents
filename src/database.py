@@ -22,7 +22,7 @@ class Database:
     _LOCK_RETRY_ATTEMPTS = 3
     _LOCK_RETRY_BASE_DELAY_SEC = 0.1
 
-    def __init__(self, db_path: str | Path, schema_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, schema_path: str | Path, on_trace_event=None) -> None:
         db = Path(db_path)
         if not db.is_absolute():
             db = ROOT / db
@@ -35,6 +35,7 @@ class Database:
         self._conn: aiosqlite.Connection | None = None
         # Track whether we are inside a manual transaction block
         self._in_transaction: bool = False
+        self._on_trace_event = on_trace_event
 
     async def connect(self) -> None:
         """Open the aiosqlite connection, apply schema, and enable WAL mode."""
@@ -75,6 +76,62 @@ class Database:
         if not await self._column_exists("jobs", "running_started_at"):
             await conn.execute("ALTER TABLE jobs ADD COLUMN running_started_at TEXT")
 
+        # Tracing columns migration
+        trace_cols = {
+            "trace_id": "TEXT",
+            "job_id": "TEXT",
+            "span_type": "TEXT DEFAULT 'system'",
+            "level": "TEXT DEFAULT 'info'",
+            "duration_ms": "INTEGER",
+            "error_detail": "TEXT",
+            "source": "TEXT",
+        }
+        for col, col_type in trace_cols.items():
+            if not await self._column_exists("events", col):
+                await conn.execute(f"ALTER TABLE events ADD COLUMN {col} {col_type}")
+
+        # Make run_id nullable: check notnull flag via PRAGMA
+        async with conn.execute("PRAGMA table_info(events)") as cursor:
+            rows = await cursor.fetchall()
+        for row in rows:
+            if row["name"] == "run_id" and row["notnull"] == 1:
+                await self._migrate_events_nullable_run_id(conn)
+                break
+
+        # Ensure tracing indexes exist
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_trace ON events(trace_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_job ON events(job_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_span ON events(span_type)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_level ON events(level)")
+
+    async def _migrate_events_nullable_run_id(self, conn) -> None:
+        """Rebuild events table to make run_id nullable."""
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS events_new (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id       TEXT REFERENCES runs(id),
+                event_type   TEXT NOT NULL,
+                payload_json TEXT,
+                created_at   TEXT NOT NULL,
+                trace_id     TEXT,
+                job_id       TEXT,
+                span_type    TEXT DEFAULT 'system',
+                level        TEXT DEFAULT 'info',
+                duration_ms  INTEGER,
+                error_detail TEXT,
+                source       TEXT
+            )
+        """)
+        existing_cols = ["id", "run_id", "event_type", "payload_json", "created_at"]
+        for col in ["trace_id", "job_id", "span_type", "level", "duration_ms", "error_detail", "source"]:
+            if await self._column_exists("events", col):
+                existing_cols.append(col)
+        cols = ", ".join(existing_cols)
+        await conn.execute(f"INSERT INTO events_new ({cols}) SELECT {cols} FROM events")
+        await conn.execute("DROP TABLE events")
+        await conn.execute("ALTER TABLE events_new RENAME TO events")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id)")
+
     def _is_locked_error(self, exc: sqlite3.OperationalError) -> bool:
         message = str(exc).lower()
         return "database is locked" in message or "database table is locked" in message
@@ -87,6 +144,13 @@ class Database:
             except sqlite3.OperationalError as exc:
                 if attempt == attempts - 1 or not self._is_locked_error(exc):
                     raise
+                if self._on_trace_event:
+                    self._on_trace_event(
+                        "db.lock_retry",
+                        {"attempt": attempt + 1, "max_attempts": attempts},
+                        "warning",
+                        str(exc),
+                    )
                 await asyncio.sleep(self._LOCK_RETRY_BASE_DELAY_SEC * (2 ** attempt))
 
     async def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> int | None:
