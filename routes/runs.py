@@ -3,7 +3,8 @@ from src.models import (
     CreateRunRequest, ApproveRequest, RejectRequest, RetryRequest,
     RecoverRequest, SubmitRequirementRequest, ResolveConflictRequest,
 )
-from src.exceptions import NotFoundError, ConflictError
+from src.exceptions import NotFoundError, ConflictError, BadRequestError
+from src.run_brief import build_brief, resolve_run_by_ticket
 
 router = APIRouter(tags=["runs"])
 
@@ -33,6 +34,20 @@ async def list_runs(request: Request, status: str = None, limit: int = 20, offse
     return [dict(r) for r in rows]
 
 
+@router.get("/runs/brief")
+async def get_run_brief_by_ticket(request: Request, ticket: str = None):
+    if not ticket:
+        raise BadRequestError("Query parameter 'ticket' is required")
+    db = request.app.state.db
+    run_id = await resolve_run_by_ticket(db, ticket)
+    if not run_id:
+        raise NotFoundError(f"No run found for ticket {ticket}")
+    brief = await build_brief(db, run_id)
+    if not brief:
+        raise NotFoundError(f"Run {run_id} not found")
+    return brief
+
+
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, request: Request):
     db = request.app.state.db
@@ -53,6 +68,15 @@ async def get_run(run_id: str, request: Request):
     run["recent_events"] = [dict(e) for e in events]
     run["artifacts"] = [dict(a) for a in artifacts]
     return run
+
+
+@router.get("/runs/{run_id}/brief")
+async def get_run_brief(run_id: str, request: Request):
+    db = request.app.state.db
+    brief = await build_brief(db, run_id)
+    if not brief:
+        raise NotFoundError(f"Run {run_id} not found")
+    return brief
 
 
 @router.post("/runs/{run_id}/tick")

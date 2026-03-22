@@ -118,3 +118,81 @@ async def test_resolve_ticket_not_found(db):
     """resolve_run_by_ticket returns None for unknown ticket."""
     result = await resolve_run_by_ticket(db, "NOPE-999")
     assert result is None
+
+
+# --- HTTP-level tests ---
+
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from httpx import AsyncClient, ASGITransport
+from src.exceptions import NotFoundError, BadRequestError
+
+
+@pytest.fixture
+async def client(db):
+    from routes.runs import router
+    app = FastAPI()
+    app.state.db = db
+
+    @app.exception_handler(NotFoundError)
+    async def _nf(request, exc):
+        return JSONResponse(status_code=404, content={"error": "not_found", "message": str(exc)})
+
+    @app.exception_handler(BadRequestError)
+    async def _br(request, exc):
+        return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(exc)})
+
+    app.include_router(router, prefix="/api/v1")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+async def test_brief_by_run_id(db, client):
+    """GET /runs/{run_id}/brief returns 200 with brief data."""
+    t = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?,?)",
+        ("run-http", "PROJ-HTTP", "/repo", "running", "DESIGN_RUNNING", t, t),
+    )
+    resp = await client.get("/api/v1/runs/run-http/brief")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["run_id"] == "run-http"
+    assert data["current"]["stage"] == "DESIGN_RUNNING"
+    assert "previous" in data
+    assert "progress" in data
+
+
+async def test_brief_by_run_id_404(client):
+    """GET /runs/{run_id}/brief returns 404 for unknown run."""
+    resp = await client.get("/api/v1/runs/nope/brief")
+    assert resp.status_code == 404
+
+
+async def test_brief_by_ticket(db, client):
+    """GET /runs/brief?ticket=X returns brief for the most recent active run."""
+    t = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?,?)",
+        ("run-tk", "PROJ-TK", "/repo", "running", "REQ_REVIEW", t, t),
+    )
+    resp = await client.get("/api/v1/runs/brief", params={"ticket": "PROJ-TK"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ticket"] == "PROJ-TK"
+    assert data["run_id"] == "run-tk"
+
+
+async def test_brief_by_ticket_404(client):
+    """GET /runs/brief?ticket=X returns 404 for unknown ticket."""
+    resp = await client.get("/api/v1/runs/brief", params={"ticket": "NOPE-999"})
+    assert resp.status_code == 404
+
+
+async def test_brief_by_ticket_missing_param(client):
+    """GET /runs/brief without ticket param returns 400."""
+    resp = await client.get("/api/v1/runs/brief")
+    assert resp.status_code == 400
