@@ -196,3 +196,49 @@ async def test_brief_by_ticket_missing_param(client):
     """GET /runs/brief without ticket param returns 400."""
     resp = await client.get("/api/v1/runs/brief")
     assert resp.status_code == 400
+
+
+async def test_brief_previous_shows_approval(db):
+    """When previous stage was a gate that was approved, brief shows the approval."""
+    t = datetime.now(timezone.utc).isoformat()
+    t_prev = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?,?)",
+        ("run-appr", "PROJ-A", "/repo", "running", "DESIGN_QUEUED", t, t),
+    )
+    await db.execute(
+        "INSERT INTO steps(run_id,from_stage,to_stage,triggered_by,created_at) VALUES(?,?,?,?,?)",
+        ("run-appr", "REQ_REVIEW", "DESIGN_QUEUED", "system", t),
+    )
+    await db.execute(
+        "INSERT INTO approvals(run_id,gate,decision,by,comment,created_at) VALUES(?,?,?,?,?,?)",
+        ("run-appr", "req", "approved", "alice", "需求清晰", t_prev),
+    )
+
+    brief = await build_brief(db, "run-appr")
+    p = brief["previous"]
+    assert p["stage"] == "REQ_REVIEW"
+    assert p["result"] == "approved"
+    assert p["by"] == "alice"
+
+
+async def test_brief_failed_run(db):
+    """Brief for a FAILED run shows failed_at_stage context."""
+    t = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,failed_at_stage,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        ("run-fail", "PROJ-F", "/repo", "failed", "FAILED", "DEV_RUNNING", t, t),
+    )
+    await db.execute(
+        "INSERT INTO steps(run_id,from_stage,to_stage,triggered_by,created_at) VALUES(?,?,?,?,?)",
+        ("run-fail", "DEV_RUNNING", "FAILED", "system", t),
+    )
+
+    brief = await build_brief(db, "run-fail")
+    assert brief["status"] == "failed"
+    assert brief["current"]["stage"] == "FAILED"
+    p = brief["previous"]
+    assert p["stage"] == "DEV_RUNNING"
