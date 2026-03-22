@@ -30,7 +30,8 @@ metadata:
 
 收到任务相关消息或 webhook 事件后：
 
-1. 获取当前状态：exec curl GET /api/v1/runs/{run_id}
+1. 获取当前状态：exec curl GET /api/v1/runs/brief?ticket={ticket}
+   （也可使用 GET /api/v1/runs/{run_id}/brief；如需完整数据则 GET /api/v1/runs/{run_id}）
 2. 根据 current_stage 执行对应动作：
 
 ┌─────────────────────┬──────────┬─────────────────────────────────────────┐

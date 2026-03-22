@@ -63,6 +63,63 @@ curl -s http://127.0.0.1:8321/api/v1/runs
 }
 ```
 
+### 2b. 查询任务简要（推荐）
+
+当只需要了解当前进展和上一步结果时，使用 brief 接口代替完整查询：
+
+```bash
+# 按 ticket 查询（推荐 — 无需记住 run_id）
+curl -s "http://127.0.0.1:8321/api/v1/runs/brief?ticket=PROJ-123"
+
+# 按 run_id 查询
+curl -s http://127.0.0.1:8321/api/v1/runs/<run_id>/brief
+```
+
+两个接口返回相同的响应结构。按 ticket 查询时自动选择最近的活跃 run（优先 running > failed > completed > cancelled）。
+
+**预期响应：**
+```json
+{
+  "run_id": "<run_id>",
+  "ticket": "PROJ-123",
+  "status": "running",
+  "created_at": "2026-03-22T10:00:00Z",
+  "current": {
+    "stage": "DEV_RUNNING",
+    "description": "开发 Agent 执行中",
+    "action_type": "automatic",
+    "since": "2026-03-22T10:30:00Z",
+    "elapsed_sec": 1200,
+    "summary": "codex 正在 host-2.local 上执行，已完成 3/5 轮",
+    "job_id": "job-xxx",
+    "job_status": "running",
+    "agent_type": "codex",
+    "turn_count": 3,
+    "host": "host-2.local"
+  },
+  "previous": {
+    "stage": "DEV_REVIEW",
+    "result": "rejected",
+    "reason": "测试覆盖率不足",
+    "by": "reviewer",
+    "at": "2026-03-22T10:29:00Z"
+  },
+  "progress": {
+    "gates_passed": ["req", "design"],
+    "gates_remaining": ["dev"],
+    "artifacts_count": 4
+  }
+}
+```
+
+**字段说明：**
+- `current.description` — 阶段的中文描述
+- `current.action_type` — `automatic`（自动推进）/ `gate`（需审批）/ `manual`（需人工操作）/ `terminal`（终态）
+- `current.summary` — 一句话概括当前正在发生什么
+- `previous` — 上一个有意义的阶段（审批门/人工操作/终态），含审批结果与原因（无历史时为 null）
+- `progress.gates_passed` — 已通过的审批门
+- `progress.gates_remaining` — 尚未通过的审批门
+
 ---
 
 ## 3. 审批通过
