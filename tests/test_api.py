@@ -141,11 +141,82 @@ async def test_create_run(client, test_repo):
     assert data["current_stage"] == "REQ_COLLECTING"
 
 
-async def test_list_runs(client, test_repo):
-    await client.post("/api/v1/runs", json={"ticket": "T-list", "repo_path": test_repo})
-    resp = await client.get("/api/v1/runs")
+async def _seed_list_runs(client, test_repo):
+    app = client._transport.app
+    db = app.state.db
+
+    rows = [
+        ("run-a", "T-alpha-match", "DESIGN_QUEUED", "2026-03-18T00:00:01Z"),
+        ("run-b", "T-beta-match", "REQ_COLLECTING", "2026-03-18T00:00:02Z"),
+        ("run-c", "T-gamma-match", "DESIGN_QUEUED", "2026-03-18T00:00:04Z"),
+        ("run-d", "T-delta", "DESIGN_QUEUED", "2026-03-18T00:00:03Z"),
+    ]
+    for run_id, ticket, current_stage, created_at in rows:
+        await db.execute(
+            "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (run_id, ticket, test_repo, "running", current_stage, created_at, created_at),
+        )
+
+
+async def test_list_runs_filters_ticket_and_current_stage(client, test_repo):
+    await _seed_list_runs(client, test_repo)
+
+    resp = await client.get(
+        "/api/v1/runs",
+        params={
+            "ticket": "match",
+            "current_stage": "DESIGN_QUEUED",
+            "limit": 10,
+            "offset": 0,
+        },
+    )
     assert resp.status_code == 200
-    assert len(resp.json()) >= 1
+    assert len(resp.json()) == 2
+    assert {row["ticket"] for row in resp.json()} == {"T-alpha-match", "T-gamma-match"}
+    assert all(row["current_stage"] == "DESIGN_QUEUED" for row in resp.json())
+
+
+async def test_list_runs_sorts_ticket_ascending(client, test_repo):
+    await _seed_list_runs(client, test_repo)
+
+    resp = await client.get(
+        "/api/v1/runs",
+        params={
+            "ticket": "match",
+            "sort_by": "ticket",
+            "sort_order": "asc",
+            "limit": 3,
+            "offset": 0,
+        },
+    )
+    assert resp.status_code == 200
+    assert [row["ticket"] for row in resp.json()] == [
+        "T-alpha-match",
+        "T-beta-match",
+        "T-gamma-match",
+    ]
+
+
+async def test_list_runs_returns_total_count_for_paginated_results(client, test_repo):
+    await _seed_list_runs(client, test_repo)
+
+    resp = await client.get(
+        "/api/v1/runs",
+        params={
+            "ticket": "match",
+            "current_stage": "DESIGN_QUEUED",
+            "sort_by": "ticket",
+            "sort_order": "asc",
+            "limit": 1,
+            "offset": 1,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["x-total-count"] == "2"
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["ticket"] == "T-gamma-match"
+    assert resp.json()[0]["current_stage"] == "DESIGN_QUEUED"
 
 
 async def test_get_run_not_found(client):
