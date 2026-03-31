@@ -227,6 +227,17 @@ export interface AgentHost {
   updated_at: string;
 }
 
+export interface MergeQueueItem {
+  id: number;
+  run_id: string;
+  branch: string;
+  priority: number;
+  status: string;
+  conflict_files: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EventsIndexResponse {
   events: EventRecord[];
   pagination: Pagination;
