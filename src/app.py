@@ -136,6 +136,7 @@ from routes.artifacts import router as artifacts_router
 from routes.agent_hosts import router as hosts_router
 from routes.webhooks import router as webhooks_router
 from routes.repos import router as repos_router
+from routes.events import create_events_router
 from routes.diagnostics import create_diagnostics_router
 
 app.include_router(runs_router, prefix="/api/v1")
@@ -143,4 +144,5 @@ app.include_router(artifacts_router, prefix="/api/v1")
 app.include_router(hosts_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(repos_router, prefix="/api/v1")
+app.include_router(create_events_router(), prefix="/api/v1")
 app.include_router(create_diagnostics_router(), prefix="/api/v1")
