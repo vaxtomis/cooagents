@@ -34,3 +34,17 @@ export async function skipMergeRun(runId: string): Promise<{ status: string }> {
     method: "POST",
   });
 }
+
+export async function getRunConflicts(runId: string): Promise<{ conflicts: string[] }> {
+  return apiFetch<{ conflicts: string[] }>(`/runs/${runId}/conflicts`);
+}
+
+export async function resolveRunConflict(
+  runId: string,
+  by: string,
+): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/runs/${runId}/resolve-conflict`, {
+    body: { by },
+    method: "POST",
+  });
+}
