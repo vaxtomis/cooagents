@@ -41,6 +41,7 @@ async def setup(tmp_path):
     executor = AcpxExecutor(db, jobs, hosts, artifacts, webhooks, coop_dir=coop)
     executor.close_session = AsyncMock()
     executor.send_followup = AsyncMock()
+    executor.get_session_status = AsyncMock(return_value={"status": "alive"})
 
     # Fake worktree function — avoids needing a real git repo in e2e tests
     async def fake_ensure_worktree(repo_path, ticket, phase, run_suffix=""):
