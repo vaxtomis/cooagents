@@ -31,7 +31,7 @@ function renderPage() {
 }
 
 describe("AgentHostsPage", () => {
-  it("loads hosts and supports check, edit, create, and delete actions", async () => {
+  it("prioritizes host configuration details while preserving check, edit, create, and delete actions", async () => {
     const now = new Date().toISOString();
     let hostsState = [
       {
@@ -56,7 +56,7 @@ describe("AgentHostsPage", () => {
         labels: ["east"],
         labels_json: "[\"east\"]",
         max_concurrent: 3,
-        ssh_key: null,
+        ssh_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQ",
         status: "active",
         updated_at: now,
       },
@@ -106,6 +106,13 @@ describe("AgentHostsPage", () => {
 
     expect(await screen.findByText("local-box")).toBeInTheDocument();
     expect(screen.getByText("queue-box")).toBeInTheDocument();
+    expect(screen.getAllByText("Agent type").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Max concurrent").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("SSH key").length).toBeGreaterThan(0);
+    expect(screen.getByText("Missing")).toBeInTheDocument();
+    expect(screen.getByText("Configured")).toBeInTheDocument();
+    expect(screen.getByText("runner")).toBeInTheDocument();
+    expect(screen.getByText("west")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Check local-box" }));
     await waitFor(() => {

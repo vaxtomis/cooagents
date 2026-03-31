@@ -55,9 +55,26 @@ function LoadingSkeleton() {
   return (
     <div className="space-y-3">
       {Array.from({ length: 3 }, (_, index) => (
-        <div key={index} className="h-32 animate-pulse rounded-[24px] border border-white/6 bg-panel-strong/70" />
+        <div key={index} className="h-48 animate-pulse rounded-[24px] border border-white/6 bg-panel-strong/70" />
       ))}
     </div>
+  );
+}
+
+function ConfigBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[20px] border border-white/6 bg-black/18 px-4 py-3">
+      <p className="text-[11px] uppercase tracking-[0.24em] text-muted/70">{label}</p>
+      <p className="mt-2 text-sm font-medium text-white">{value}</p>
+    </div>
+  );
+}
+
+function HostTag({ label }: { label: string }) {
+  return (
+    <span className="rounded-full border border-white/8 bg-white/4 px-3 py-1 text-xs text-white/85">
+      {label}
+    </span>
   );
 }
 
@@ -151,12 +168,13 @@ export function AgentHostsPage() {
         await updateAgentHost(selectedHost.id, payload);
         setActionMessage(`Saved ${selectedHost.id}`);
       } else {
+        const hostId = form.id.trim();
         await createAgentHost({
           ...payload,
-          id: form.id.trim(),
+          id: hostId,
         });
-        setSelectedHostId(form.id.trim());
-        setActionMessage(`Created ${form.id.trim()}`);
+        setSelectedHostId(hostId);
+        setActionMessage(`Created ${hostId}`);
       }
       await refreshHosts();
     } catch (error) {
@@ -198,11 +216,11 @@ export function AgentHostsPage() {
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <SectionPanel kicker="Pool Inventory" title="Agent host fleet">
+      <SectionPanel kicker="Host Registry" title="Agent host configuration">
         {hostsQuery.error ? (
           <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
             <h3 className="text-base font-semibold text-white">Host inventory failed to load</h3>
-            <p className="mt-2 text-sm text-muted">Retry the host query to restore the fleet view.</p>
+            <p className="mt-2 text-sm text-muted">Retry the host query to restore the registry.</p>
             <button className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black" onClick={() => void refreshHosts()} type="button">
               Retry
             </button>
@@ -212,28 +230,48 @@ export function AgentHostsPage() {
         ) : hosts.length === 0 ? (
           <EmptyState copy="No agent hosts are registered yet." />
         ) : (
-          <div className="space-y-3">
+          <div className="grid gap-3 lg:grid-cols-2">
             {hosts.map((host) => {
               const isSelected = host.id === selectedHostId;
               const pendingState = rowPending[host.id];
 
               return (
                 <article
-                  className={`rounded-[24px] border bg-panel-strong/80 p-4 transition ${
+                  className={`rounded-[24px] border bg-panel-strong/80 p-5 transition ${
                     isSelected ? "border-accent/30 shadow-[0_0_0_1px_rgba(168,85,247,0.22)]" : "border-white/6"
                   }`}
                   key={host.id}
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                      <p className="font-mono text-sm text-white">{host.id}</p>
+                      <p className="text-[11px] uppercase tracking-[0.28em] text-muted/70">Host configuration</p>
+                      <p className="mt-2 font-mono text-sm text-white">{host.id}</p>
                       <p className="mt-1 text-sm text-muted">{host.host}</p>
-                      <p className="mt-2 text-xs text-muted">
-                        {host.agent_type} · {host.current_load}/{host.max_concurrent}
-                      </p>
-                      {host.labels.length > 0 ? <p className="mt-2 text-xs text-muted">{host.labels.join(" · ")}</p> : null}
                     </div>
                     <StatusBadge status={host.status} />
+                  </div>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <ConfigBlock label="Agent type" value={host.agent_type} />
+                    <ConfigBlock label="Max concurrent" value={String(host.max_concurrent)} />
+                    <ConfigBlock label="SSH key" value={host.ssh_key ? "Configured" : "Missing"} />
+                    <ConfigBlock
+                      label="Current load"
+                      value={`${host.current_load}/${host.max_concurrent} in use`}
+                    />
+                  </div>
+
+                  <div className="mt-4 rounded-[20px] border border-white/6 bg-black/18 px-4 py-3">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-muted/70">Labels</p>
+                    {host.labels.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {host.labels.map((label) => (
+                          <HostTag key={`${host.id}-${label}`} label={label} />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-muted">No labels configured</p>
+                    )}
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -254,7 +292,7 @@ export function AgentHostsPage() {
                       onClick={() => void handleCheck(host.id)}
                       type="button"
                     >
-                      {pendingState === "check" ? "Checking…" : `Check ${host.id}`}
+                      {pendingState === "check" ? "Checking..." : `Check ${host.id}`}
                     </button>
                     <button
                       className="rounded-full bg-danger px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -262,7 +300,7 @@ export function AgentHostsPage() {
                       onClick={() => void handleDelete(host.id)}
                       type="button"
                     >
-                      {pendingState === "delete" ? "Deleting…" : `Delete ${host.id}`}
+                      {pendingState === "delete" ? "Deleting..." : `Delete ${host.id}`}
                     </button>
                   </div>
                 </article>
@@ -358,7 +396,7 @@ export function AgentHostsPage() {
             disabled={formPending}
             type="submit"
           >
-            {formPending ? "Saving…" : "Save host"}
+            {formPending ? "Saving..." : "Save host"}
           </button>
         </form>
       </SectionPanel>
