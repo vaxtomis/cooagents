@@ -17,6 +17,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { AgentHostsPage } from "./pages/AgentHostsPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { EventLogPage } from "./pages/EventLogPage";
 import { MergeQueuePage } from "./pages/MergeQueuePage";
 
@@ -406,7 +407,7 @@ const routes = [
     path: "/",
     element: <ShellLayout />,
     children: [
-      { index: true, element: <OverviewShellPage /> },
+      { index: true, element: <DashboardPage /> },
       { path: "runs", element: <RunsShellPage /> },
       { path: "runs/:runId", element: <RunDetailShellPage /> },
       { path: "agent-hosts", element: <AgentHostsPage /> },
@@ -424,6 +425,4 @@ export function createAppRouter(initialEntries?: string[]) {
 }
 
 export const appRouter = createAppRouter();
-
-
 
