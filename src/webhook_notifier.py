@@ -163,7 +163,7 @@ class WebhookNotifier:
         payload.update(failure or {})
         await self.db.execute(
             "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-            (run_id or "system", "openclaw.hooks.delivery_failed", json.dumps(payload), now)
+            (run_id, "openclaw.hooks.delivery_failed", json.dumps(payload), now)
         )
 
     async def _deliver_with_retry(self, webhook, event_type, payload):
@@ -177,7 +177,7 @@ class WebhookNotifier:
         now = datetime.now(timezone.utc).isoformat()
         await self.db.execute(
             "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-            (payload.get("run_id", "system"), "webhook.delivery_failed",
+            (payload.get("run_id"), "webhook.delivery_failed",
              json.dumps({"webhook_id": webhook["id"], "event_type": event_type}), now)
         )
 

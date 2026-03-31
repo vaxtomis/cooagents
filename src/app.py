@@ -3,8 +3,8 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 
 from src.acpx_executor import AcpxExecutor
 from src.artifact_manager import ArtifactManager
@@ -123,6 +123,42 @@ async def lifespan(app: FastAPI):
     await db.close()
 
 
+def mount_dashboard_spa(app: FastAPI, project_root: Path | None = None) -> None:
+    root = Path(project_root) if project_root is not None else Path(__file__).resolve().parents[1]
+    dist_dir = root / "web" / "dist"
+    index_file = dist_dir / "index.html"
+    if not index_file.exists():
+        return
+
+    dist_root = dist_dir.resolve()
+
+    def _resolve_asset(full_path: str) -> Path | None:
+        candidate = (dist_root / full_path).resolve()
+        try:
+            candidate.relative_to(dist_root)
+        except ValueError:
+            return None
+        return candidate
+
+    @app.get("/", include_in_schema=False)
+    async def spa_index():
+        return FileResponse(index_file)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+
+        candidate = _resolve_asset(full_path) if full_path else index_file
+        if candidate and candidate.is_file():
+            return FileResponse(candidate)
+
+        if Path(full_path).suffix:
+            raise HTTPException(status_code=404)
+
+        return FileResponse(index_file)
+
+
 app = FastAPI(title="cooagents", version="0.2.0", lifespan=lifespan)
 app.add_middleware(TraceMiddleware)
 
@@ -173,3 +209,4 @@ app.include_router(repos_router, prefix="/api/v1")
 app.include_router(create_events_router(), prefix="/api/v1")
 app.include_router(create_sse_router(), prefix="/api/v1")
 app.include_router(create_diagnostics_router(), prefix="/api/v1")
+mount_dashboard_spa(app)

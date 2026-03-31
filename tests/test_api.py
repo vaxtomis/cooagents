@@ -248,17 +248,17 @@ async def test_webhook_deliveries_include_openclaw_and_filter_webhook_id(client)
 
     await db.execute(
         "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-        ("system", "webhook.delivery_failed",
+        (None, "webhook.delivery_failed",
          json.dumps({"webhook_id": wid, "event_type": "gate.waiting"}), "2026-03-18T00:00:01Z"),
     )
     await db.execute(
         "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-        ("system", "webhook.delivery_failed",
+        (None, "webhook.delivery_failed",
          json.dumps({"webhook_id": wid + 1, "event_type": "run.completed"}), "2026-03-18T00:00:02Z"),
     )
     await db.execute(
         "INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-        ("system", "openclaw.hooks.delivery_failed",
+        (None, "openclaw.hooks.delivery_failed",
          json.dumps({"event_type": "job.failed", "status_code": 502}), "2026-03-18T00:00:03Z"),
     )
 
@@ -324,3 +324,62 @@ async def test_create_run_with_repo_url(client, tmp_path):
     run_id = data.get("run_id") or data.get("id")
     resp2 = await client.get(f"/api/v1/runs/{run_id}")
     assert resp2.json().get("repo_url") == "git@github.com:user/project.git"
+
+
+def _make_spa_app(project_root: Path):
+    from fastapi import FastAPI
+    from src.app import mount_dashboard_spa
+
+    app = FastAPI()
+
+    @app.get("/api/v1/ping")
+    async def ping():
+        return {"ok": True}
+
+    mount_dashboard_spa(app, project_root=project_root)
+    return app
+
+
+async def test_api_routes_still_resolve_when_spa_mounted(tmp_path):
+    project_root = tmp_path / "spa-project"
+    dist_dir = project_root / "web" / "dist"
+    dist_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text("<html><body>dashboard shell</body></html>", encoding="utf-8")
+
+    app = _make_spa_app(project_root)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/v1/ping")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
+async def test_spa_fallback_serves_index_html_for_non_api_routes(tmp_path):
+    project_root = tmp_path / "spa-project"
+    dist_dir = project_root / "web" / "dist"
+    dist_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text("<html><body>dashboard shell</body></html>", encoding="utf-8")
+
+    app = _make_spa_app(project_root)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/runs/run-123")
+
+    assert resp.status_code == 200
+    assert "dashboard shell" in resp.text
+    assert resp.headers["content-type"].startswith("text/html")
+
+
+async def test_spa_serves_static_assets_from_dist(tmp_path):
+    project_root = tmp_path / "spa-project"
+    dist_dir = project_root / "web" / "dist"
+    asset_dir = dist_dir / "assets"
+    asset_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text("<html><body>dashboard shell</body></html>", encoding="utf-8")
+    (asset_dir / "app.js").write_text("console.log('dashboard');", encoding="utf-8")
+
+    app = _make_spa_app(project_root)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/assets/app.js")
+
+    assert resp.status_code == 200
+    assert resp.text == "console.log('dashboard');"
