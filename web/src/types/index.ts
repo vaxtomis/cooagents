@@ -213,6 +213,44 @@ export interface RunTraceResponse {
   pagination: Pagination;
 }
 
+export interface JobDiagnosisResponse {
+  job_id: string;
+  run_id?: string | null;
+  host_id?: string | null;
+  agent_type: string;
+  stage: DashboardStage | string;
+  status: JobStatus;
+  session_name?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  diagnosis: {
+    duration_ms?: number | null;
+    turn_count?: number | null;
+    error_summary?: string | null;
+    error_detail?: string | null;
+    last_output_excerpt?: string | null;
+    failure_context: {
+      stage_at_failure?: string | null;
+      host_status_at_failure?: string | null;
+      retry_count?: number | null;
+    };
+  };
+  events: EventRecord[];
+  turns: Array<Record<string, unknown>>;
+}
+
+export interface TraceLookupResponse {
+  trace_id: string;
+  origin: string;
+  first_seen?: string | null;
+  last_seen?: string | null;
+  total_duration_ms?: number | null;
+  affected_runs: string[];
+  affected_jobs: string[];
+  error_count: number;
+  events: EventRecord[];
+}
+
 export interface AgentHost {
   id: string;
   host: string;

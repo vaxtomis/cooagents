@@ -1,4 +1,4 @@
-import type { RunTraceResponse } from "../types";
+import type { JobDiagnosisResponse, RunTraceResponse, TraceLookupResponse } from "../types";
 import { apiFetch } from "./client";
 
 export interface RunTraceParams {
@@ -16,5 +16,18 @@ export async function getRunTrace(runId: string, params: RunTraceParams = {}): P
       limit: params.limit,
       offset: params.offset,
     },
+  });
+}
+
+export async function getJobDiagnosis(jobId: string): Promise<JobDiagnosisResponse> {
+  return apiFetch<JobDiagnosisResponse>(`/jobs/${jobId}/diagnosis`);
+}
+
+export async function getTraceLookup(
+  traceId: string,
+  level: "debug" | "info" | "warning" | "error" = "info",
+): Promise<TraceLookupResponse> {
+  return apiFetch<TraceLookupResponse>(`/traces/${traceId}`, {
+    query: { level },
   });
 }
