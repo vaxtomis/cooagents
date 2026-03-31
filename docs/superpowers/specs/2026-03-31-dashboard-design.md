@@ -1,357 +1,438 @@
-# Cooagents Dashboard 设计文档
+﻿# Cooagents Dashboard 当前实现规格
+
+> 更新时间：2026-04-01
+> 本文档描述 `main` 分支当前已经落地的 Dashboard 实现，而不是最初的目标草案。
 
 ## 概述
 
-为 cooagents 多 Agent 协作编排系统构建一个全功能 Web Dashboard，以**项目管理者**为主视角，兼顾运维与开发者需求。用户可通过 Dashboard 一览全局状态、跟踪任务进度、执行审批操作、查看 Agent 输出、监控主机健康、排查错误。
+Cooagents Dashboard 是 cooagents 多 Agent 协作编排系统的 Web 控制台，面向项目管理者、运维和开发者。
+当前实现已经覆盖 6 个真实页面：概览、Runs、Run 详情、Agent Hosts、Merge Queue、Event Log，并由 FastAPI 提供同源 API 与静态资源挂载。
 
 ## 技术栈
 
-| 层 | 选型 |
-|---|------|
-| 前端框架 | Vue 3 (Composition API + `<script setup>`) |
+| 层 | 当前实现 |
+|---|---|
+| 前端框架 | React 18 |
 | 语言 | TypeScript |
-| 组件库 | Naive UI |
-| 构建工具 | Vite |
-| HTTP 客户端 | axios |
-| 路由 | Vue Router 4 |
-| 实时通信 | SSE (Server-Sent Events) |
-| 后端 | FastAPI (已有) |
-| 部署 | 生产时打包嵌入 FastAPI 静态文件服务 |
+| 路由 | React Router DOM 6.30 |
+| 数据获取 | 原生 `fetch` 封装 + SWR |
+| 样式 | Tailwind CSS v4 |
+| 主题 tokens | `web/src/index.css` 中的 `@theme` 变量 |
+| UI 辅助库 | Headless UI、Lucide React |
+| 构建工具 | Vite 6 |
+| 实时通信 | SSE |
+| 后端 | FastAPI |
+| 部署 | 前端打包到 `web/dist`，由 FastAPI 提供静态文件 |
 
 ## 项目结构
 
-```
+```text
 cooagents/
-├── web/                          # Vue 3 前端项目
+├── web/
 │   ├── package.json
 │   ├── vite.config.ts
-│   ├── tsconfig.json
 │   ├── index.html
 │   └── src/
-│       ├── main.ts               # 入口，挂载 NaiveUI
-│       ├── App.vue               # 根组件 + NaiveUI Provider + Router
-│       ├── router/
-│       │   └── index.ts          # Vue Router 路由定义
-│       ├── api/                   # API 调用层
-│       │   ├── client.ts         # axios 实例 + 基础配置
-│       │   ├── runs.ts           # /runs 相关接口
-│       │   ├── agents.ts         # /agent-hosts 相关接口
-│       │   ├── merge.ts          # merge-queue 相关接口
-│       │   └── diagnostics.ts    # /trace /events 相关接口
-│       ├── composables/           # 可复用逻辑
-│       │   ├── usePolling.ts     # 轮询 hook (列表页，默认 15s)
-│       │   └── useSSE.ts         # SSE 连接 hook (详情页，自动重连)
-│       ├── layouts/
-│       │   └── MainLayout.vue    # 左侧导航 + 内容区
-│       ├── views/                 # 页面组件
-│       │   ├── DashboardView.vue # 概览页
-│       │   ├── RunsListView.vue  # Runs 列表
-│       │   ├── RunDetailView.vue # Run 详情
-│       │   ├── AgentHostsView.vue# Agent 主机
-│       │   ├── MergeQueueView.vue# Merge 队列
-│       │   └── EventLogView.vue  # 事件日志
-│       ├── components/            # 共享组件
-│       │   ├── StageProgress.vue # 15 阶段进度条
-│       │   ├── RunCard.vue       # Run 摘要卡片
-│       │   ├── ApprovalAction.vue# 审批操作按钮
-│       │   └── StatusBadge.vue   # 状态标签
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── index.css
+│       ├── router.tsx
+│       ├── api/
+│       │   ├── client.ts
+│       │   ├── runs.ts
+│       │   ├── agents.ts
+│       │   ├── repos.ts
+│       │   ├── events.ts
+│       │   └── diagnostics.ts
+│       ├── hooks/
+│       │   ├── usePolling.ts
+│       │   └── useSSE.ts
+│       ├── components/
+│       │   ├── ApprovalAction.tsx
+│       │   ├── RunCard.tsx
+│       │   ├── StageProgress.tsx
+│       │   ├── StatCard.tsx
+│       │   └── StatusBadge.tsx
+│       ├── pages/
+│       │   ├── DashboardPage.tsx
+│       │   ├── RunsListPage.tsx
+│       │   ├── RunDetailPage.tsx
+│       │   ├── AgentHostsPage.tsx
+│       │   ├── MergeQueuePage.tsx
+│       │   └── EventLogPage.tsx
 │       └── types/
-│           └── index.ts          # TypeScript 类型定义
-├── src/
-│   ├── app.py                    # 修改: 挂载 Vue dist 静态文件
-│   └── sse.py                    # 新增: SSE 广播器
-└── routes/
-    └── sse.py                    # 新增: SSE 路由
+│           └── index.ts
+├── routes/
+│   ├── agent_hosts.py
+│   ├── artifacts.py
+│   ├── diagnostics.py
+│   ├── events.py
+│   ├── repos.py
+│   ├── runs.py
+│   └── sse.py
+└── src/
+    ├── app.py
+    └── sse.py
 ```
 
-## 页面设计
+## 前端壳层
 
-### 1. 概览页 (DashboardView)
+### 路由与布局
 
-**路由:** `/`
+- 路由定义在 `web/src/router.tsx`
+- 页面壳层不是单独的 `MainLayout.tsx`，而是 `router.tsx` 内的 `ShellLayout`
+- 当前路由：
+  - `/`
+  - `/runs`
+  - `/runs/:runId`
+  - `/agent-hosts`
+  - `/merge-queue`
+  - `/events`
 
-**布局:**
-- 顶部：5 个统计卡片 — 运行中、待审批、合并中、失败、已完成
-- 左下：活跃任务列表 — 每个 Run 显示 ticket、描述、当前阶段、Agent/轮次、迷你进度条
-- 右下上：待审批列表 — 可直接操作通过/驳回
-- 右下下：Agent 主机状态摘要 — 在线状态 + 负载
+### 主题与样式
 
-**数据来源:**
-- 统计卡片 → `GET /api/v1/runs` 按 status 聚合计数
-- 活跃任务 → `GET /api/v1/runs?status=running`，结合 `GET /api/v1/runs/{id}/brief` 获取摘要
-- 待审批 → 过滤 `current_stage` 为 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW` 的 run
-- Agent 主机 → `GET /api/v1/agent-hosts`
+主题变量定义在 `web/src/index.css` 的 `@theme` 中，当前核心 tokens 包括：
 
-**刷新策略:** 轮询，15 秒间隔
+- 字体
+  - `--font-sans: Geist, Segoe UI, sans-serif`
+  - `--font-mono: Geist Mono, SFMono-Regular, monospace`
+- 颜色
+  - `--color-void`
+  - `--color-panel`
+  - `--color-panel-strong`
+  - `--color-copy`
+  - `--color-muted`
+  - `--color-accent`
+  - `--color-success`
+  - `--color-warning`
+  - `--color-danger`
+- 阴影
+  - `--shadow-shell`
+  - `--shadow-panel`
 
-### 2. Runs 列表页 (RunsListView)
+当前实现没有 `web/tailwind.config.ts`；主题通过 Tailwind v4 的 CSS-first 方式管理。
 
-**路由:** `/runs`
+## 数据层
 
-**功能:**
-- 表格展示所有 Run，列：Ticket、描述、当前阶段（彩色标签）、状态、轮次、创建时间
-- 筛选：按 status 下拉筛选（running / completed / failed / cancelled / 全部）
-- 搜索：按 ticket 关键字搜索
-- 排序：按创建时间倒序（默认），可按列排序
-- 分页：Naive UI 分页组件
-- 点击行跳转到 Run 详情页
+### `web/src/api/client.ts`
 
-**数据来源:** `GET /api/v1/runs`（支持 status 查询参数）
+- 统一前缀：`/api/v1`
+- 使用 `apiRequest` / `apiFetch` 封装请求
+- 查询参数由 `apiPath()` 统一拼接
+- 非 2xx 响应抛出 `ApiError(status, message, data)`
 
-**刷新策略:** 轮询，15 秒间隔
+### `web/src/hooks/usePolling.ts`
 
-### 3. Run 详情页 (RunDetailView)
+- 基于 SWR 配置对象返回轮询策略
+- 默认轮询间隔：15 秒
+- `revalidateOnFocus` 关闭
+- `revalidateOnReconnect` 开启
+- `keepPreviousData` 开启
 
-**路由:** `/runs/:runId`
+### `web/src/hooks/useSSE.ts`
 
-**布局:**
-- 面包屑导航：Runs / {ticket}
-- 标题区：ticket + 描述 + repo + 创建时间 + 操作按钮（取消 Run）
-- **15 阶段进度条** — 已完成阶段绿色，当前阶段发光高亮，未到达灰色。鼠标悬停显示阶段名
-- 左列：当前状态卡片 — 阶段（中文描述）、Agent 类型 + 主机、轮次、耗时、Job ID
-- 右列：审批记录卡片 — req / design / dev 三个 Gate 的状态（approved / rejected / 未到达）
-- 底部 Tab 切换：
-  - **Artifacts** — 产物表格（类型标签、路径、版本、状态），可查看内容和 diff
-  - **Agent 输出** — 当前/历史 Job 的执行输出文本（`GET /runs/{run_id}/jobs/{job_id}/output`）
-  - **事件追踪** — 该 Run 的事件流，SSE 实时推送（`GET /runs/{run_id}/trace`）
-  - **Stage 历史** — 阶段转换时间线，展示 steps 表数据
+- 基于 `EventSource`
+- 返回 `{ state, isLive }`
+- 当前状态枚举：`idle / connecting / live / reconnecting / offline`
+- 默认监听事件类型：
+  - `stage.changed`
+  - `approval.changed`
+  - `artifact.created`
+  - `artifact.updated`
+  - `job.updated`
+  - `job.completed`
+  - `job.failed`
+  - `run.completed`
+  - `run.failed`
+  - `run.cancelled`
 
-**审批操作:**
-- 当 `current_stage` 为 `*_REVIEW` 时，显示「通过」和「驳回」按钮
-- 通过 → `POST /api/v1/runs/{run_id}/approve`
-- 驳回 → `POST /api/v1/runs/{run_id}/reject`（带 reason 输入框）
+## 页面规格
 
-**数据来源:**
-- 基础信息 → `GET /api/v1/runs/{run_id}`（返回 steps、approvals、events、artifacts）
-- 摘要 → `GET /api/v1/runs/{run_id}/brief`
-- Artifacts → `GET /api/v1/runs/{run_id}/artifacts`
-- Artifact 内容 → `GET /api/v1/runs/{run_id}/artifacts/{id}/content`
-- Artifact Diff → `GET /api/v1/runs/{run_id}/artifacts/{id}/diff`
-- Job 输出 → `GET /api/v1/runs/{run_id}/jobs/{job_id}/output`
-- 事件 → `GET /api/v1/runs/{run_id}/trace`
+### 1. Dashboard
 
-**刷新策略:** SSE 实时推送（`GET /api/v1/runs/{run_id}/events/stream`），自动重连
+**路由：** `/`
 
-### 4. Agent 主机页 (AgentHostsView)
+**当前实现：**
+- 顶部 5 个 KPI 卡片：
+  - 运行中
+  - 待审批
+  - 合并中
+  - 失败
+  - 已完成
+- 左侧主区展示活跃 Run 列表
+- 右侧展示：
+  - 待审批列表，可直接 approve / reject
+  - Agent 主机摘要
+- 页面以 15 秒轮询刷新 Runs 与 Hosts 数据
 
-**路由:** `/agent-hosts`
+**主要数据来源：**
+- `GET /api/v1/runs`
+- `GET /api/v1/runs?status=running`
+- `GET /api/v1/agent-hosts`
+- `POST /api/v1/runs/{run_id}/approve`
+- `POST /api/v1/runs/{run_id}/reject`
 
-**布局:**
-- 右上角「+ 注册主机」按钮，弹出表单
-- 卡片网格（2 列），每个主机一张卡片：
-  - 标题 + 状态标签（active 绿 / draining 黄 / offline 红）
-  - 属性：类型（claude / codex / both）、地址、并发负载（当前/最大）
-  - 负载进度条
-  - 操作按钮：健康检查、编辑、停用/删除
+### 2. Runs List
 
-**数据来源:**
-- 列表 → `GET /api/v1/agent-hosts`
-- 注册 → `POST /api/v1/agent-hosts`
-- 编辑 → `PUT /api/v1/agent-hosts/{host_id}`
-- 删除 → `DELETE /api/v1/agent-hosts/{host_id}`
-- 健康检查 → `POST /api/v1/agent-hosts/{host_id}/check`
+**路由：** `/runs`
 
-**刷新策略:** 轮询，30 秒间隔
+**当前实现：**
+- 服务端搜索、筛选、排序、分页
+- 支持筛选参数：
+  - `status`
+  - `ticket`
+  - `current_stage`
+- 支持排序参数：
+  - `created_at`
+  - `updated_at`
+  - `ticket`
+  - `status`
+  - `current_stage`
+- 列表行可跳转到 Run 详情页
+- 通过响应头 `X-Total-Count` 计算分页总数
 
-### 5. Merge 队列页 (MergeQueueView)
+**主要数据来源：**
+- `GET /api/v1/runs`
 
-**路由:** `/merge-queue`
+### 3. Run Detail
 
-**功能:**
-- 表格展示队列，列：优先级、Ticket、分支名、状态、冲突文件数、操作
-- 状态：merging（蓝）、waiting（灰）、merged（绿）、conflict（红）、skipped（灰）
-- conflict 项显示冲突文件数，可点击查看冲突详情
-- 操作：跳过合并（`POST /runs/{run_id}/merge-skip`）
+**路由：** `/runs/:runId`
 
-**数据来源:**
-- 队列 → `GET /api/v1/repos/merge-queue`
-- 冲突详情 → `GET /api/v1/runs/{run_id}/conflicts`
-- 跳过 → `POST /api/v1/runs/{run_id}/merge-skip`
+**当前实现：**
+- 顶部展示：
+  - Ticket
+  - Current stage
+  - Status
+  - Repo
+  - 14 阶段进度条
+- 执行上下文卡片：
+  - 当前 action
+  - elapsed
+  - artifacts 数量
+  - 当前描述
+  - 上一阶段结果
+- 右侧展示：
+  - SSE 连接状态
+  - Approval history
+  - Operator controls
+- 详情主体使用真实 tab，而不是纵向堆叠：
+  - `Artifacts`
+  - `Agent输出`
+  - `事件追踪`
+  - `Stage历史`
+- 支持动作：
+  - 审批通过 / 驳回
+  - Cancel run
+  - 查看 artifact content / diff
+  - 加载 job output
+- 收到 SSE 事件后会节流刷新 Run 详情数据
 
-**刷新策略:** 轮询，15 秒间隔
+**主要数据来源：**
+- `GET /api/v1/runs/{run_id}`
+- `GET /api/v1/runs/{run_id}/brief`
+- `GET /api/v1/runs/{run_id}/artifacts`
+- `GET /api/v1/runs/{run_id}/artifacts/{artifact_id}/content`
+- `GET /api/v1/runs/{run_id}/artifacts/{artifact_id}/diff`
+- `GET /api/v1/runs/{run_id}/jobs`
+- `GET /api/v1/runs/{run_id}/jobs/{job_id}/output`
+- `GET /api/v1/runs/{run_id}/trace`
+- `GET /api/v1/runs/{run_id}/events/stream`
+- `POST /api/v1/runs/{run_id}/approve`
+- `POST /api/v1/runs/{run_id}/reject`
+- `DELETE /api/v1/runs/{run_id}`
 
-### 6. 事件日志页 (EventLogView)
+### 4. Agent Hosts
 
-**路由:** `/events`
+**路由：** `/agent-hosts`
 
-**布局:**
-- 顶部过滤栏：Level 下拉、Span type 下拉、Run 下拉、trace_id 搜索框
-- 终端风格日志列表（等宽字体），每行：时间、Level（颜色编码）、Run ticket、Span type、事件描述
-- Level 颜色：INFO 绿、WARN 黄、ERROR 红、DEBUG 灰
-- 点击 Run ticket 跳转到 Run 详情
+**当前实现：**
+- 页面采用“配置优先”卡片布局，而不是纯运维面板
+- 每张卡片展示：
+  - host id
+  - host address
+  - agent type
+  - max concurrent
+  - SSH key 是否配置
+  - labels
+  - status
+  - current load
+- 右侧保留表单区，支持：
+  - create
+  - edit
+- 卡片动作保留：
+  - check
+  - delete
 
-**数据来源:**
-- 全局事件 → `GET /api/v1/events`（新增端点，支持 level、span_type、run_id 查询参数，按时间倒序分页）
-- Trace 查找 → `GET /api/v1/traces/{trace_id}`
+**主要数据来源：**
+- `GET /api/v1/agent-hosts`
+- `POST /api/v1/agent-hosts`
+- `PUT /api/v1/agent-hosts/{host_id}`
+- `DELETE /api/v1/agent-hosts/{host_id}`
+- `POST /api/v1/agent-hosts/{host_id}/check`
 
-**刷新策略:** 轮询，10 秒间隔
+### 5. Merge Queue
 
-## 后端新增
+**路由：** `/merge-queue`
 
-### SSE 端点
+**当前实现：**
+- 左侧展示 merge queue 列表
+- 前端会对每个 queue item 的 `run_id` 再拉 `GET /runs/{id}` 做 enrich
+- 行级操作：
+  - merge
+  - skip
+- 右侧详情区展示：
+  - selected queue item
+  - run id / repo / stage / updated
+  - merge priority
+- 当状态为 `conflict` 时：
+  - 拉取冲突文件列表
+  - 失败时回退到 queue item 自带的 `conflict_files`
+  - 支持 `Resolve and requeue`
 
-**路由:** `GET /api/v1/runs/{run_id}/events/stream`
+**主要数据来源：**
+- `GET /api/v1/repos/merge-queue`
+- `GET /api/v1/runs/{run_id}`
+- `POST /api/v1/runs/{run_id}/merge`
+- `POST /api/v1/runs/{run_id}/merge-skip`
+- `GET /api/v1/runs/{run_id}/conflicts`
+- `POST /api/v1/runs/{run_id}/resolve-conflict`
 
-**实现:**
-- 新增 `src/sse.py` — `SSEBroadcaster` 类
-  - 维护 `dict[str, list[asyncio.Queue]]`，key 为 run_id
-  - `subscribe(run_id)` → 创建 Queue 并注册
-  - `unsubscribe(run_id, queue)` → 移除 Queue
-  - `broadcast(run_id, event_type, data)` → 向该 run 的所有 Queue 推送
-- 在 `TraceEmitter.emit()` 中调用 `SSEBroadcaster.broadcast()`
-- 新增 `routes/sse.py` — SSE 路由
-  - 使用 `StreamingResponse` + `text/event-stream`
-  - 连接时注册 Queue，断开时清理
+### 6. Event Log
 
-### 全局事件查询端点
+**路由：** `/events`
 
-**路由:** `GET /api/v1/events`
+**当前实现分两种模式：**
 
-**查询参数:**
-- `level` — 过滤 level（debug / info / warning / error）
-- `span_type` — 过滤 span_type（system / user）
-- `run_id` — 过滤特定 run
-- `limit` — 返回条数（默认 100）
-- `offset` — 分页偏移
+#### Global mode
+- 当 URL 没有 `runId` 时生效
+- 提供全局浏览能力
+- 当前筛选项：
+  - `runId`
+  - `level`
+  - `spanType`
+  - `page`
+- 支持分页、payload 展开、跳转到 `/runs/:runId`
 
-**实现:** 直接查询 `events` 表，按 `created_at` 倒序，JOIN `runs` 表获取 ticket。新增 `routes/events.py`。
+#### Run diagnostic mode
+- 当 URL 带 `runId` 时生效
+- 页面切换为 run-first 故障排查视图
+- 顶部诊断摘要展示：
+  - status
+  - failed_at_stage
+  - errors
+  - warnings
+  - suspicious jobs
+  - last event
+- 主区展示“异常优先时间线”
+- 支持进一步筛选：
+  - `jobId`
+  - `eventType`
+  - `traceId`
+- 支持：
+  - Job diagnosis 面板
+  - Trace lookup 面板
 
-**推送事件类型:**
-- `stage_changed` — 阶段变化
-- `job_updated` — Job 状态/轮次更新
-- `approval_changed` — 审批状态变化
-- `artifact_created` — 新产物生成
-- `run_completed` — Run 完成/失败
+**主要数据来源：**
+- `GET /api/v1/events`
+- `GET /api/v1/runs/{run_id}/trace`
+- `GET /api/v1/jobs/{job_id}/diagnosis`
+- `GET /api/v1/traces/{trace_id}`
 
-**事件格式:**
-```
-event: stage_changed
-data: {"run_id":"...","stage":"DESIGN_RUNNING","previous":"DESIGN_DISPATCHED","timestamp":"..."}
+## 后端接口规格
 
-event: job_updated
-data: {"run_id":"...","job_id":"...","status":"running","turn_count":2,"agent_type":"claude"}
+### Runs
+- `POST /api/v1/runs`
+- `GET /api/v1/runs`
+- `GET /api/v1/runs/brief?ticket=...`
+- `GET /api/v1/runs/{run_id}`
+- `GET /api/v1/runs/{run_id}/brief`
+- `POST /api/v1/runs/{run_id}/approve`
+- `POST /api/v1/runs/{run_id}/reject`
+- `POST /api/v1/runs/{run_id}/retry`
+- `POST /api/v1/runs/{run_id}/recover`
+- `POST /api/v1/runs/{run_id}/submit-requirement`
+- `POST /api/v1/runs/{run_id}/resolve-conflict`
+- `DELETE /api/v1/runs/{run_id}`
 
-event: approval_changed
-data: {"run_id":"...","gate":"design","decision":"approved","by":"admin","timestamp":"..."}
-```
+### Jobs / Artifacts / Merge
+- `GET /api/v1/runs/{run_id}/jobs`
+- `GET /api/v1/runs/{run_id}/jobs/{job_id}/output`
+- `GET /api/v1/runs/{run_id}/artifacts`
+- `GET /api/v1/runs/{run_id}/artifacts/{artifact_id}/content`
+- `GET /api/v1/runs/{run_id}/artifacts/{artifact_id}/diff`
+- `GET /api/v1/runs/{run_id}/conflicts`
+- `POST /api/v1/runs/{run_id}/merge`
+- `POST /api/v1/runs/{run_id}/merge-skip`
+- `GET /api/v1/repos/merge-queue`
+- `POST /api/v1/repos/ensure`
 
-### 静态文件服务
+### Hosts
+- `GET /api/v1/agent-hosts`
+- `POST /api/v1/agent-hosts`
+- `PUT /api/v1/agent-hosts/{host_id}`
+- `DELETE /api/v1/agent-hosts/{host_id}`
+- `POST /api/v1/agent-hosts/{host_id}/check`
 
-修改 `src/app.py`：
-- 检测 `web/dist/` 目录是否存在
-- 存在则使用 `StaticFiles(directory="web/dist", html=True)` 挂载到 `/`
-- API 路由 `/api/v1/*` 优先级高于静态文件
-- 所有非 API、非静态文件请求 fallback 到 `index.html`（SPA 路由支持）
-- 开发模式下不挂载，由 Vite dev server 处理
+### Diagnostics / Events / SSE
+- `GET /api/v1/events`
+- `GET /api/v1/runs/{run_id}/trace`
+- `GET /api/v1/jobs/{job_id}/diagnosis`
+- `GET /api/v1/traces/{trace_id}`
+- `GET /api/v1/runs/{run_id}/events/stream`
 
-## 前端数据层
+## SSE 实现
 
-### API Client (`api/client.ts`)
-- axios 实例，baseURL: 开发时 `http://localhost:8321/api/v1`，生产时 `/api/v1`
-- 统一错误处理拦截器
+- 广播器实现位于 `src/sse.py`
+- SSE 路由位于 `routes/sse.py`
+- `GET /api/v1/runs/{run_id}/events/stream` 会：
+  - 校验 run 是否存在
+  - 为该 run 建立订阅队列
+  - 返回 `text/event-stream`
+  - 连接断开时自动取消订阅
 
-### Composables
+## 静态资源挂载
 
-**`usePolling(fetchFn, intervalMs)`**
-- 定时调用 fetchFn 获取数据
-- 返回 `{ data, loading, error, refresh() }`
-- 组件卸载时自动清理 interval
-- 页面不可见时暂停轮询（`visibilitychange` 事件）
+`src/app.py` 中的 `mount_dashboard_spa(app)` 当前行为如下：
 
-**`useSSE(url)`**
-- 建立 SSE 连接
-- 返回 `{ events, connected, error }`
-- 断开自动重连（指数退避，最大 30 秒）
-- 组件卸载时自动关闭连接
+- 检测 `web/dist/index.html` 是否存在
+- 若存在：
+  - `/` 返回 `index.html`
+  - `/{full_path}` 优先返回真实静态资源文件
+  - 非 `api/` 且不是静态资源的路径 fallback 到 `index.html`
+- 若不存在：
+  - 不挂载 SPA
 
-## 共享组件
+## 开发与构建
 
-### StageProgress
-- 输入：`currentStage: string`，`steps: Step[]`
-- 展示 15 阶段的水平进度条
-- 已完成阶段绿色，当前阶段发光高亮，未到达灰色
-- 鼠标悬停 tooltip 显示阶段中文名和时间
+### 当前前端脚本
 
-### StatusBadge
-- 输入：`status: string`（running / completed / failed / cancelled 等）
-- 对应颜色的 Naive UI Tag 组件
-
-### RunCard
-- 输入：`run: RunBrief`
-- 概览页使用，展示 ticket、描述、阶段、Agent 信息、迷你进度条
-
-### ApprovalAction
-- 输入：`runId: string`，`gate: string`
-- 「通过」和「驳回」按钮
-- 驳回时弹出输入框填写 reason
-
-## 路由配置
-
-```typescript
-const routes = [
-  {
-    path: '/',
-    component: MainLayout,
-    children: [
-      { path: '', name: 'dashboard', component: DashboardView },
-      { path: 'runs', name: 'runs', component: RunsListView },
-      { path: 'runs/:runId', name: 'run-detail', component: RunDetailView },
-      { path: 'agent-hosts', name: 'agent-hosts', component: AgentHostsView },
-      { path: 'merge-queue', name: 'merge-queue', component: MergeQueueView },
-      { path: 'events', name: 'events', component: EventLogView },
-    ]
-  }
-]
-```
-
-## 开发与部署
-
-### 开发模式
 ```bash
-# 终端 1: 启动 FastAPI
+cd web
+npm run dev
+npm run test
+npm run build
+```
+
+### 当前 Vite 配置
+
+- 使用 `@vitejs/plugin-react`
+- 使用 `@tailwindcss/vite`
+- dev server 监听 `127.0.0.1:4173`
+- 当前没有配置 `/api` 代理
+
+### 后端启动
+
+```bash
 python -m uvicorn src.app:app --reload --port 8321
-
-# 终端 2: 启动 Vite dev server
-cd web && npm run dev
 ```
 
-Vite 配置 API 代理：
-```typescript
-// vite.config.ts
-export default defineConfig({
-  server: {
-    proxy: {
-      '/api': 'http://localhost:8321'
-    }
-  }
-})
-```
+## 当前约束
 
-### 生产构建
-```bash
-cd web && npm run build
-# 输出到 web/dist/，FastAPI 自动挂载
-```
+以下内容是当前实现的真实边界，文档需要明确保留：
 
-## 阶段定义与颜色
-
-进度条展示正常流程的 14 个阶段（INIT → MERGED）。FAILED 和 MERGE_CONFLICT 是异常终态，不在进度条中显示，而是通过状态标签（StatusBadge）体现。
-
-| 阶段 | 中文 | 类型 | 颜色 |
-|------|------|------|------|
-| INIT | 初始化 | automatic | gray |
-| REQ_COLLECTING | 等待需求提交 | manual | blue |
-| REQ_REVIEW | 需求审批中 | gate | orange |
-| DESIGN_QUEUED | 设计任务排队中 | automatic | blue |
-| DESIGN_DISPATCHED | 设计 Agent 启动中 | automatic | blue |
-| DESIGN_RUNNING | 设计 Agent 执行中 | automatic | green |
-| DESIGN_REVIEW | 设计审批中 | gate | orange |
-| DEV_QUEUED | 开发任务排队中 | automatic | blue |
-| DEV_DISPATCHED | 开发 Agent 启动中 | automatic | blue |
-| DEV_RUNNING | 开发 Agent 执行中 | automatic | green |
-| DEV_REVIEW | 开发审批中 | gate | orange |
-| MERGE_QUEUED | 合并排队中 | automatic | blue |
-| MERGING | 合并执行中 | automatic | blue |
-| MERGED | 已合并完成 | terminal | green |
-| FAILED | 执行失败 | terminal | red |
-| MERGE_CONFLICT | 合并冲突待解决 | manual | red |
+1. 当前路由库是 React Router 6，不是 React Router 7。
+2. 当前没有 `web/tailwind.config.ts`，主题定义在 `web/src/index.css`。
+3. 当前没有独立的 `layouts/MainLayout.tsx`，页面壳层在 `web/src/router.tsx` 中实现。
+4. 全局 `Event Log` 模式目前不支持 `trace_id` 作为 `/api/v1/events` 查询参数；`traceId` 只在 run diagnosis 模式下用于 trace drilldown。
+5. `/api/v1/events` 返回的分页信息是 `limit / offset / has_more`，没有后端 `total` 字段。
+6. `Agent Hosts` 页面当前是“配置展示优先 + 运维操作保留”的实现，而不是单独的重运维控制台。
