@@ -1,4 +1,4 @@
-import useSWR from "swr";
+锘縤mport useSWR from "swr";
 import { listAgentHosts } from "../api/agents";
 import { listRuns } from "../api/runs";
 import { ApprovalAction } from "../components/ApprovalAction";
@@ -13,6 +13,15 @@ const GATE_BY_STAGE: Record<string, GateName> = {
   DESIGN_REVIEW: "design",
   DEV_REVIEW: "dev",
 };
+
+const RUNNING_LABEL = "\u8FD0\u884C\u4E2D";
+const PENDING_APPROVAL_LABEL = "\u5F85\u5BA1\u6279";
+const MERGING_LABEL = "\u5408\u5E76\u4E2D";
+const FAILED_LABEL = "\u5931\u8D25";
+const COMPLETED_LABEL = "\u5DF2\u5B8C\u6210";
+const ACTIVE_RUNS_TITLE = "\u6D3B\u8DC3\u4EFB\u52A1";
+const APPROVALS_TITLE = "\u5F85\u5BA1\u6279";
+const HOSTS_TITLE = "Agent \u4E3B\u673A";
 
 function SectionPanel({
   title,
@@ -36,13 +45,20 @@ function EmptyState({ copy }: { copy: string }) {
   return <p className="rounded-2xl border border-dashed border-white/8 bg-white/3 px-4 py-6 text-sm text-muted">{copy}</p>;
 }
 
-function calculateRecentRuns(runs: RunRecord[]) {
-  const threshold = Date.now() - 24 * 60 * 60 * 1000;
-  return runs.filter((run) => Date.parse(run.created_at) >= threshold).length;
-}
-
 function getPendingApprovals(runs: RunRecord[]) {
   return runs.filter((run) => run.status === "running" && run.current_stage in GATE_BY_STAGE);
+}
+
+function getRunningRuns(runs: RunRecord[]) {
+  return runs.filter((run) => run.status === "running");
+}
+
+function getMergingRuns(runs: RunRecord[]) {
+  return runs.filter((run) => run.status === "running" && (run.current_stage === "MERGE_QUEUED" || run.current_stage === "MERGING"));
+}
+
+function getCompletedRuns(runs: RunRecord[]) {
+  return runs.filter((run) => run.status === "completed" || run.current_stage === "MERGED");
 }
 
 function getGate(stage: string): GateName {
@@ -58,8 +74,11 @@ export function DashboardPage() {
   const allRuns = overview.data?.items ?? [];
   const activeRuns = active.data?.items ?? [];
   const hostItems = hosts.data ?? [];
+  const runningRuns = getRunningRuns(allRuns);
   const pendingApprovals = getPendingApprovals(allRuns);
+  const mergingRuns = getMergingRuns(allRuns);
   const failedRuns = allRuns.filter((run) => run.status === "failed");
+  const completedRuns = getCompletedRuns(allRuns);
   const refreshAll = async () => {
     await Promise.all([overview.mutate(), active.mutate(), hosts.mutate()]);
   };
@@ -99,15 +118,15 @@ export function DashboardPage() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-5">
-        <StatCard title="运行中" value={activeRuns.length.toString().padStart(2, "0")} />
-        <StatCard title="待审批" value={pendingApprovals.length.toString().padStart(2, "0")} />
-        <StatCard title="失败中" value={failedRuns.length.toString().padStart(2, "0")} />
-        <StatCard title="主机" value={hostItems.length.toString().padStart(2, "0")} />
-        <StatCard title="最近 24h" value={calculateRecentRuns(allRuns).toString().padStart(2, "0")} />
+        <StatCard title={RUNNING_LABEL} value={runningRuns.length.toString().padStart(2, "0")} />
+        <StatCard title={PENDING_APPROVAL_LABEL} value={pendingApprovals.length.toString().padStart(2, "0")} />
+        <StatCard title={MERGING_LABEL} value={mergingRuns.length.toString().padStart(2, "0")} />
+        <StatCard title={FAILED_LABEL} value={failedRuns.length.toString().padStart(2, "0")} />
+        <StatCard title={COMPLETED_LABEL} value={completedRuns.length.toString().padStart(2, "0")} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <SectionPanel kicker="Queue Snapshot" title="活跃任务">
+        <SectionPanel kicker="Queue Snapshot" title={ACTIVE_RUNS_TITLE}>
           {activeRuns.length === 0 ? (
             <EmptyState copy="No active runs are available right now." />
           ) : (
@@ -127,7 +146,7 @@ export function DashboardPage() {
         </SectionPanel>
 
         <div className="space-y-4">
-          <SectionPanel kicker="Action Queue" title="待审批">
+          <SectionPanel kicker="Action Queue" title={APPROVALS_TITLE}>
             {pendingApprovals.length === 0 ? (
               <EmptyState copy="No review gates are waiting for approval." />
             ) : (
@@ -156,7 +175,7 @@ export function DashboardPage() {
             )}
           </SectionPanel>
 
-          <SectionPanel kicker="Pool Health" title="Agent 主机">
+          <SectionPanel kicker="Pool Health" title={HOSTS_TITLE}>
             {hostItems.length === 0 ? (
               <EmptyState copy="No registered hosts are available yet." />
             ) : (
@@ -180,9 +199,9 @@ function HostSummaryCard({ host }: { host: AgentHost }) {
         <div>
           <p className="text-sm font-medium text-white">{host.host}</p>
           <p className="mt-1 text-xs text-muted">
-            {host.agent_type} · {host.current_load}/{host.max_concurrent}
+            {host.agent_type} 路 {host.current_load}/{host.max_concurrent}
           </p>
-          {host.labels.length > 0 ? <p className="mt-2 text-xs text-muted">{host.labels.join(" · ")}</p> : null}
+          {host.labels.length > 0 ? <p className="mt-2 text-xs text-muted">{host.labels.join(" 路 ")}</p> : null}
         </div>
         <StatusBadge status={host.status} />
       </div>

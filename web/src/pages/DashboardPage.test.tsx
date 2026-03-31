@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+ï»¿import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listAgentHosts } from "../api/agents";
@@ -31,10 +31,15 @@ function renderPage() {
   );
 }
 
+function expectStatCard(title: string, value: string) {
+  const card = screen.getAllByText(title)[0]?.closest("section");
+  expect(card).not.toBeNull();
+  expect(within(card as HTMLElement).getByText(value)).toBeInTheDocument();
+}
+
 describe("DashboardPage", () => {
-  it("renders stats, active runs, pending approvals, host summary, and refreshes after approval", async () => {
+  it("renders spec-aligned stats, active runs, pending approvals, host summary, and refreshes after approval", async () => {
     const now = new Date().toISOString();
-    const older = new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString();
     let approvalComplete = false;
 
     vi.mocked(listRuns).mockImplementation(async (params = {}) => {
@@ -50,6 +55,26 @@ describe("DashboardPage", () => {
                   repo_path: "C:/repo/project",
                   status: "running",
                   ticket: "PROJ-100",
+                  updated_at: now,
+                },
+                {
+                  created_at: now,
+                  current_stage: "DEV_RUNNING",
+                  description: "Requirement brief approved",
+                  id: "run-2",
+                  repo_path: "C:/repo/project",
+                  status: "running",
+                  ticket: "PROJ-101",
+                  updated_at: now,
+                },
+                {
+                  created_at: now,
+                  current_stage: "MERGING",
+                  description: "Merge execution in progress",
+                  id: "run-4",
+                  repo_path: "C:/repo/project",
+                  status: "running",
+                  ticket: "PROJ-102",
                   updated_at: now,
                 },
               ]
@@ -74,10 +99,20 @@ describe("DashboardPage", () => {
                   ticket: "PROJ-101",
                   updated_at: now,
                 },
+                {
+                  created_at: now,
+                  current_stage: "MERGING",
+                  description: "Merge execution in progress",
+                  id: "run-4",
+                  repo_path: "C:/repo/project",
+                  status: "running",
+                  ticket: "PROJ-102",
+                  updated_at: now,
+                },
               ],
           limit: 20,
           offset: 0,
-          total: approvalComplete ? 1 : 2,
+          total: 3,
         };
       }
 
@@ -95,7 +130,17 @@ describe("DashboardPage", () => {
                 updated_at: now,
               },
               {
-                created_at: older,
+                created_at: now,
+                current_stage: "DEV_RUNNING",
+                description: "Requirement brief approved",
+                id: "run-2",
+                repo_path: "C:/repo/project",
+                status: "running",
+                ticket: "PROJ-101",
+                updated_at: now,
+              },
+              {
+                created_at: now,
                 current_stage: "FAILED",
                 description: "Broken merge recovery",
                 failed_at_stage: "DEV_RUNNING",
@@ -103,6 +148,26 @@ describe("DashboardPage", () => {
                 repo_path: "C:/repo/project",
                 status: "failed",
                 ticket: "PROJ-099",
+                updated_at: now,
+              },
+              {
+                created_at: now,
+                current_stage: "MERGING",
+                description: "Merge execution in progress",
+                id: "run-4",
+                repo_path: "C:/repo/project",
+                status: "running",
+                ticket: "PROJ-102",
+                updated_at: now,
+              },
+              {
+                created_at: now,
+                current_stage: "MERGED",
+                description: "Completed and merged",
+                id: "run-5",
+                repo_path: "C:/repo/project",
+                status: "completed",
+                ticket: "PROJ-103",
                 updated_at: now,
               },
             ]
@@ -128,7 +193,7 @@ describe("DashboardPage", () => {
                 updated_at: now,
               },
               {
-                created_at: older,
+                created_at: now,
                 current_stage: "FAILED",
                 description: "Broken merge recovery",
                 failed_at_stage: "DEV_RUNNING",
@@ -138,10 +203,30 @@ describe("DashboardPage", () => {
                 ticket: "PROJ-099",
                 updated_at: now,
               },
+              {
+                created_at: now,
+                current_stage: "MERGING",
+                description: "Merge execution in progress",
+                id: "run-4",
+                repo_path: "C:/repo/project",
+                status: "running",
+                ticket: "PROJ-102",
+                updated_at: now,
+              },
+              {
+                created_at: now,
+                current_stage: "MERGED",
+                description: "Completed and merged",
+                id: "run-5",
+                repo_path: "C:/repo/project",
+                status: "completed",
+                ticket: "PROJ-103",
+                updated_at: now,
+              },
             ],
         limit: 100,
         offset: 0,
-        total: approvalComplete ? 2 : 3,
+        total: 5,
       };
     });
 
@@ -180,13 +265,15 @@ describe("DashboardPage", () => {
 
     renderPage();
 
-    expect((await screen.findAllByText("ÔËÐÐÖÐ")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("´ýÉóÅú").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Ê§°ÜÖÐ").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Ö÷»ú").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("×î½ü 24h").length).toBeGreaterThan(0);
+    await screen.findByText("è¿è¡Œä¸­");
+    expectStatCard("è¿è¡Œä¸­", "03");
+    expectStatCard("å¾…å®¡æ‰¹", "01");
+    expectStatCard("åˆå¹¶ä¸­", "01");
+    expectStatCard("å¤±è´¥", "01");
+    expectStatCard("å·²å®Œæˆ", "01");
     expect(screen.getAllByText("PROJ-100").length).toBeGreaterThan(0);
     expect(screen.getAllByText("PROJ-101").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("PROJ-102").length).toBeGreaterThan(0);
     expect(screen.getByText("codex-worker-01")).toBeInTheDocument();
     expect(screen.getByText("claude-host-02")).toBeInTheDocument();
 
@@ -205,7 +292,8 @@ describe("DashboardPage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryAllByText("PROJ-101")).toHaveLength(0);
+      expectStatCard("å¾…å®¡æ‰¹", "00");
+      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     });
   });
 });

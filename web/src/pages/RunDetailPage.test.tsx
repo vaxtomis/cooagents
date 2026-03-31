@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+﻿import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RouterProvider, createMemoryRouter } from "react-router-dom";
@@ -82,10 +82,27 @@ function renderPage(initialEntry = "/runs/run-210") {
 }
 
 describe("RunDetailPage", () => {
-  it("loads run detail data, exposes live actions, and revalidates on SSE events", async () => {
+  it("renders approval history, tabbed detail surfaces, and revalidates on SSE events", async () => {
     const now = new Date().toISOString();
     vi.mocked(getRun).mockResolvedValue({
-      approvals: [],
+      approvals: [
+        {
+          by: "alice",
+          comment: "Req sign-off complete",
+          created_at: now,
+          decision: "approved",
+          gate: "req",
+          run_id: "run-210",
+        },
+        {
+          by: "bob",
+          comment: "Design sign-off complete",
+          created_at: now,
+          decision: "approved",
+          gate: "design",
+          run_id: "run-210",
+        },
+      ],
       artifacts: [],
       created_at: now,
       current_stage: "DEV_REVIEW",
@@ -94,7 +111,22 @@ describe("RunDetailPage", () => {
       recent_events: [],
       repo_path: "C:/repo/project",
       status: "running",
-      steps: [],
+      steps: [
+        {
+          created_at: now,
+          from_stage: "REQ_COLLECTING",
+          run_id: "run-210",
+          to_stage: "REQ_REVIEW",
+          triggered_by: "scheduler",
+        },
+        {
+          created_at: now,
+          from_stage: "REQ_REVIEW",
+          run_id: "run-210",
+          to_stage: "DESIGN_RUNNING",
+          triggered_by: "alice",
+        },
+      ],
       ticket: "PROJ-210",
       updated_at: now,
     });
@@ -194,6 +226,10 @@ describe("RunDetailPage", () => {
     expect(await screen.findByText("PROJ-210")).toBeInTheDocument();
     expect(screen.getByText("Development output is ready for review.")).toBeInTheDocument();
     expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.getByText("Approval history")).toBeInTheDocument();
+    expect(screen.getByText("Req sign-off complete")).toBeInTheDocument();
+    expect(screen.getByText("Design sign-off complete")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting decision")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(getRun).toHaveBeenCalledWith("run-210");
@@ -207,12 +243,25 @@ describe("RunDetailPage", () => {
     expect(useSSE).toHaveBeenCalled();
     expect(sseState.lastCall?.url).toBe("/api/v1/runs/run-210/events/stream");
 
+    expect(screen.getByRole("tab", { name: "Artifacts" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Agent输出" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "事件追踪" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Stage历史" })).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "Inspect docs/plan.md" }));
     expect(await screen.findByText((_, element) => element?.textContent === "# Plan\nship it")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "@@ -1 +1 @@\n- old\n+ new")).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("tab", { name: "Agent输出" }));
     fireEvent.click(screen.getByRole("button", { name: "Load output job-dev-1" }));
     expect(await screen.findByText("build ok")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "事件追踪" }));
+    expect(screen.getByText("stage.changed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Stage历史" }));
+    expect(screen.getByText("REQ_COLLECTING -> REQ_REVIEW")).toBeInTheDocument();
+    expect(screen.getByText("REQ_REVIEW -> DESIGN_RUNNING")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel run" }));
     await waitFor(() => {
@@ -229,5 +278,3 @@ describe("RunDetailPage", () => {
     });
   });
 });
-
-

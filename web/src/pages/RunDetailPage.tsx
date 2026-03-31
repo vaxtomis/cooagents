@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+锘縤mport { useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import useSWR from "swr";
 import { getRunTrace } from "../api/diagnostics";
@@ -17,13 +17,28 @@ import { ApprovalAction } from "../components/ApprovalAction";
 import { StageProgress } from "../components/StageProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { useSSE, type SseConnectionState } from "../hooks/useSSE";
-import type { ArtifactRecord, GateName, JobRecord, RunTraceResponse } from "../types";
+import { DASHBOARD_STAGE_FLOW, type ArtifactRecord, type GateName, type JobRecord, type RunTraceResponse, type ApprovalRecord, type StepRecord } from "../types";
 
 const REVIEW_GATE_BY_STAGE: Record<string, GateName> = {
   REQ_REVIEW: "req",
   DESIGN_REVIEW: "design",
   DEV_REVIEW: "dev",
 };
+
+const GATE_DEFINITIONS: Array<{ gate: GateName; label: string; reviewStage: string }> = [
+  { gate: "req", label: "REQ", reviewStage: "REQ_REVIEW" },
+  { gate: "design", label: "DESIGN", reviewStage: "DESIGN_REVIEW" },
+  { gate: "dev", label: "DEV", reviewStage: "DEV_REVIEW" },
+];
+
+const DETAIL_TABS = [
+  { id: "artifacts", label: "Artifacts" },
+  { id: "jobs", label: "Agent\u8F93\u51FA" },
+  { id: "trace", label: "\u4E8B\u4EF6\u8FFD\u8E2A" },
+  { id: "history", label: "Stage\u5386\u53F2" },
+] as const;
+
+type DetailTabId = (typeof DETAIL_TABS)[number]["id"];
 
 function SectionPanel({
   title,
@@ -111,9 +126,248 @@ function resolveConnectionLabel(state: SseConnectionState) {
   }
 }
 
+function getStageOrder(stage: string) {
+  const index = DASHBOARD_STAGE_FLOW.indexOf(stage as (typeof DASHBOARD_STAGE_FLOW)[number]);
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+function getLatestApproval(approvals: ApprovalRecord[] | undefined, gate: GateName) {
+  return [...(approvals ?? [])]
+    .filter((approval) => approval.gate === gate)
+    .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0];
+}
+
+function resolveApprovalState({
+  approvals,
+  currentStage,
+  gate,
+  reviewStage,
+}: {
+  approvals: ApprovalRecord[] | undefined;
+  currentStage: string;
+  gate: GateName;
+  reviewStage: string;
+}) {
+  const record = getLatestApproval(approvals, gate);
+  if (record) {
+    return {
+      byline: `${record.by} 路 ${formatTimestamp(record.created_at)}`,
+      comment: record.comment,
+      label: record.decision,
+      status: record.decision,
+    };
+  }
+
+  if (currentStage === reviewStage) {
+    return {
+      byline: `${gate.toUpperCase()} gate is active now.`,
+      comment: null,
+      label: "Awaiting decision",
+      status: "review",
+    };
+  }
+
+  if (getStageOrder(currentStage) < getStageOrder(reviewStage)) {
+    return {
+      byline: "Gate has not been reached yet.",
+      comment: null,
+      label: "Not reached",
+      status: "muted",
+    };
+  }
+
+  return {
+    byline: "Gate was passed without a stored approval record.",
+    comment: null,
+    label: "No record",
+    status: "muted",
+  };
+}
+
+function ApprovalHistory({ approvals, currentStage }: { approvals: ApprovalRecord[] | undefined; currentStage: string }) {
+  return (
+    <div className="space-y-3">
+      {GATE_DEFINITIONS.map((definition) => {
+        const state = resolveApprovalState({
+          approvals,
+          currentStage,
+          gate: definition.gate,
+          reviewStage: definition.reviewStage,
+        });
+
+        return (
+          <article className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4" key={definition.gate}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-white">{definition.label}</p>
+                <p className="mt-2 text-xs text-muted">{state.byline}</p>
+              </div>
+              <StatusBadge label={state.label} status={state.status} />
+            </div>
+            {state.comment ? <p className="mt-3 text-sm text-muted">{state.comment}</p> : null}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function ArtifactsPanel({
+  artifacts,
+  artifactState,
+  onInspect,
+}: {
+  artifacts: ArtifactRecord[];
+  artifactState: {
+    artifactId: number | null;
+    content: string;
+    diff: string;
+    error: string | null;
+    loading: boolean;
+    path: string;
+  };
+  onInspect: (artifact: ArtifactRecord) => void | Promise<void>;
+}) {
+  return (
+    <div>
+      {artifacts.length === 0 ? (
+        <EmptyState copy="No artifacts are available for this run yet." />
+      ) : (
+        <div className="space-y-3">
+          {artifacts.map((artifact) => (
+            <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={artifact.id}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-mono text-sm text-white">{artifact.path}</p>
+                  <p className="mt-1 text-xs text-muted">
+                    {artifact.kind} 路 v{artifact.version} 路 {artifact.status}
+                  </p>
+                </div>
+                <button
+                  className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+                  onClick={() => void onInspect(artifact)}
+                  type="button"
+                >
+                  {`Inspect ${artifact.path}`}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {artifactState.artifactId !== null ? (
+        <div className="mt-4 rounded-[24px] border border-white/6 bg-black/20 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-white">{artifactState.path}</p>
+            {artifactState.loading ? <span className="text-xs text-muted">Loading...</span> : null}
+          </div>
+          {artifactState.error ? <p className="mt-3 text-sm text-danger">{artifactState.error}</p> : null}
+          {artifactState.content ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.content}</pre> : null}
+          {artifactState.diff ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.diff}</pre> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function JobsPanel({
+  jobs,
+  jobOutputs,
+  onLoadOutput,
+}: {
+  jobs: JobRecord[];
+  jobOutputs: Record<string, { error?: string; loading?: boolean; output?: string }>;
+  onLoadOutput: (job: JobRecord) => void | Promise<void>;
+}) {
+  if (jobs.length === 0) {
+    return <EmptyState copy="No jobs have been registered for this run yet." />;
+  }
+
+  return (
+    <div className="space-y-3">
+      {jobs.map((job) => {
+        const outputState = jobOutputs[job.id] ?? {};
+        return (
+          <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={job.id}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-mono text-sm text-white">{job.id}</p>
+                <p className="mt-1 text-xs text-muted">
+                  {job.agent_type} 路 {job.stage} 路 {job.status}
+                </p>
+              </div>
+              <button
+                className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+                onClick={() => void onLoadOutput(job)}
+                type="button"
+              >
+                {`Load output ${job.id}`}
+              </button>
+            </div>
+            {outputState.loading ? <p className="mt-3 text-sm text-muted">Loading output...</p> : null}
+            {outputState.error ? <p className="mt-3 text-sm text-danger">{outputState.error}</p> : null}
+            {outputState.output ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{outputState.output}</pre> : null}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function TraceEvents({ trace }: { trace: RunTraceResponse }) {
+  if (trace.events.length === 0) {
+    return <EmptyState copy="No trace events were returned for this run." />;
+  }
+
+  return (
+    <div className="space-y-3">
+      {trace.events.map((event, index) => (
+        <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={`${event.event_type}-${event.created_at}-${index}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-white">{event.event_type}</p>
+              <p className="mt-1 text-xs text-muted">
+                {event.source ?? "engine"} 路 {event.level ?? "info"}
+              </p>
+            </div>
+            <span className="text-xs text-muted">{formatTimestamp(event.created_at)}</span>
+          </div>
+          {event.payload ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{JSON.stringify(event.payload, null, 2)}</pre> : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function StageHistoryPanel({ steps }: { steps: StepRecord[] | undefined }) {
+  const orderedSteps = [...(steps ?? [])].sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at));
+
+  if (orderedSteps.length === 0) {
+    return <EmptyState copy="No stage transitions have been recorded for this run." />;
+  }
+
+  return (
+    <div className="space-y-3">
+      {orderedSteps.map((step, index) => (
+        <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={`${step.from_stage}-${step.to_stage}-${step.created_at}-${index}`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-white">{`${step.from_stage} -> ${step.to_stage}`}</p>
+              <p className="mt-2 text-xs text-muted">Triggered by {step.triggered_by ?? "system"}</p>
+            </div>
+            <span className="text-xs text-muted">{formatTimestamp(step.created_at)}</span>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export function RunDetailPage() {
   const { runId } = useParams();
   const refreshTimer = useRef<number | null>(null);
+  const [activeTab, setActiveTab] = useState<DetailTabId>("artifacts");
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelMessage, setCancelMessage] = useState<string | null>(null);
   const [artifactState, setArtifactState] = useState<{
@@ -254,6 +508,8 @@ export function RunDetailPage() {
     }
   }
 
+  const activeTabMeta = DETAIL_TABS.find((tab) => tab.id === activeTab) ?? DETAIL_TABS[0];
+
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-4">
@@ -297,82 +553,36 @@ export function RunDetailPage() {
           </div>
         </SectionPanel>
 
-        <SectionPanel kicker="Artifacts" title="Generated outputs">
-          {artifacts.data.length === 0 ? (
-            <EmptyState copy="No artifacts are available for this run yet." />
-          ) : (
-            <div className="space-y-3">
-              {artifacts.data.map((artifact) => (
-                <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={artifact.id}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-mono text-sm text-white">{artifact.path}</p>
-                      <p className="mt-1 text-xs text-muted">
-                        {artifact.kind} · v{artifact.version} · {artifact.status}
-                      </p>
-                    </div>
-                    <button
-                      className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
-                      onClick={() => void handleInspectArtifact(artifact)}
-                      type="button"
-                    >
-                      {`Inspect ${artifact.path}`}
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
+        <SectionPanel kicker="Detail Surface" title={activeTabMeta.label}>
+          <div aria-label="Run detail tabs" className="flex flex-wrap gap-2" role="tablist">
+            {DETAIL_TABS.map((tab) => {
+              const selected = tab.id === activeTab;
+              return (
+                <button
+                  aria-controls={`run-detail-panel-${tab.id}`}
+                  aria-selected={selected}
+                  className={[
+                    "rounded-full border px-4 py-2 text-sm font-medium transition",
+                    selected ? "border-accent/30 bg-accent/15 text-white" : "border-white/10 bg-white/4 text-muted hover:border-white/20 hover:bg-white/8 hover:text-white",
+                  ].join(" ")}
+                  id={`run-detail-tab-${tab.id}`}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  role="tab"
+                  type="button"
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
 
-          {artifactState.artifactId !== null ? (
-            <div className="mt-4 rounded-[24px] border border-white/6 bg-black/20 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-white">{artifactState.path}</p>
-                {artifactState.loading ? <span className="text-xs text-muted">Loading…</span> : null}
-              </div>
-              {artifactState.error ? <p className="mt-3 text-sm text-danger">{artifactState.error}</p> : null}
-              {artifactState.content ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.content}</pre> : null}
-              {artifactState.diff ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.diff}</pre> : null}
-            </div>
-          ) : null}
-        </SectionPanel>
-
-        <SectionPanel kicker="Execution Jobs" title="Agent activity">
-          {jobs.data.length === 0 ? (
-            <EmptyState copy="No jobs have been registered for this run yet." />
-          ) : (
-            <div className="space-y-3">
-              {jobs.data.map((job) => {
-                const outputState = jobOutputs[job.id] ?? {};
-                return (
-                  <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={job.id}>
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="font-mono text-sm text-white">{job.id}</p>
-                        <p className="mt-1 text-xs text-muted">
-                          {job.agent_type} · {job.stage} · {job.status}
-                        </p>
-                      </div>
-                      <button
-                        className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
-                        onClick={() => void handleLoadOutput(job)}
-                        type="button"
-                      >
-                        {`Load output ${job.id}`}
-                      </button>
-                    </div>
-                    {outputState.loading ? <p className="mt-3 text-sm text-muted">Loading output…</p> : null}
-                    {outputState.error ? <p className="mt-3 text-sm text-danger">{outputState.error}</p> : null}
-                    {outputState.output ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{outputState.output}</pre> : null}
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </SectionPanel>
-
-        <SectionPanel kicker="Trace Timeline" title="Recent events">
-          <TraceEvents trace={trace.data} />
+          <div aria-labelledby={`run-detail-tab-${activeTab}`} className="mt-5" id={`run-detail-panel-${activeTab}`} role="tabpanel">
+            {activeTab === "artifacts" ? <ArtifactsPanel artifactState={artifactState} artifacts={artifacts.data} onInspect={handleInspectArtifact} /> : null}
+            {activeTab === "jobs" ? <JobsPanel jobOutputs={jobOutputs} jobs={jobs.data} onLoadOutput={handleLoadOutput} /> : null}
+            {activeTab === "trace" ? <TraceEvents trace={trace.data} /> : null}
+            {activeTab === "history" ? <StageHistoryPanel steps={runData.steps} /> : null}
+          </div>
         </SectionPanel>
       </div>
 
@@ -385,6 +595,10 @@ export function RunDetailPage() {
             </div>
             <p className="mt-3 text-sm text-muted">Relevant run events trigger a throttled detail refresh so artifacts, jobs, and trace stay current without maintaining a separate client state machine.</p>
           </div>
+        </SectionPanel>
+
+        <SectionPanel kicker="Gate Status" title="Approval history">
+          <ApprovalHistory approvals={runData.approvals} currentStage={runData.current_stage} />
         </SectionPanel>
 
         <SectionPanel kicker="Actions" title="Operator controls">
@@ -408,7 +622,7 @@ export function RunDetailPage() {
                 onClick={() => void handleCancelRun()}
                 type="button"
               >
-                {cancelPending ? "Cancelling…" : "Cancel run"}
+                {cancelPending ? "Cancelling..." : "Cancel run"}
               </button>
               {cancelMessage ? <p className="mt-3 text-sm text-muted">{cancelMessage}</p> : null}
             </div>
@@ -418,30 +632,3 @@ export function RunDetailPage() {
     </div>
   );
 }
-
-function TraceEvents({ trace }: { trace: RunTraceResponse }) {
-  if (trace.events.length === 0) {
-    return <EmptyState copy="No trace events were returned for this run." />;
-  }
-
-  return (
-    <div className="space-y-3">
-      {trace.events.map((event, index) => (
-        <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={`${event.event_type}-${event.created_at}-${index}`}>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-white">{event.event_type}</p>
-              <p className="mt-1 text-xs text-muted">
-                {event.source ?? "engine"} · {event.level ?? "info"}
-              </p>
-            </div>
-            <span className="text-xs text-muted">{formatTimestamp(event.created_at)}</span>
-          </div>
-          {event.payload ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{JSON.stringify(event.payload, null, 2)}</pre> : null}
-        </article>
-      ))}
-    </div>
-  );
-}
-
-
