@@ -20,6 +20,7 @@ import { AgentHostsPage } from "./pages/AgentHostsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EventLogPage } from "./pages/EventLogPage";
 import { MergeQueuePage } from "./pages/MergeQueuePage";
+import { RunDetailPage } from "./pages/RunDetailPage";
 import { RunsListPage } from "./pages/RunsListPage";
 
 type NavItem = {
@@ -410,7 +411,7 @@ const routes = [
     children: [
       { index: true, element: <DashboardPage /> },
       { path: "runs", element: <RunsListPage /> },
-      { path: "runs/:runId", element: <RunDetailShellPage /> },
+      { path: "runs/:runId", element: <RunDetailPage /> },
       { path: "agent-hosts", element: <AgentHostsPage /> },
       { path: "merge-queue", element: <MergeQueuePage /> },
       { path: "events", element: <EventLogPage /> },
@@ -426,5 +427,6 @@ export function createAppRouter(initialEntries?: string[]) {
 }
 
 export const appRouter = createAppRouter();
+
 
 
