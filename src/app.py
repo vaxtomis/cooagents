@@ -2,21 +2,24 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from src.config import load_settings, load_agent_hosts
-from src.database import Database
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+
+from src.acpx_executor import AcpxExecutor
 from src.artifact_manager import ArtifactManager
+from src.config import load_agent_hosts, load_settings
+from src.database import Database
+from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.host_manager import HostManager
 from src.job_manager import JobManager
-from src.acpx_executor import AcpxExecutor
-from src.webhook_notifier import WebhookNotifier
 from src.merge_manager import MergeManager
+from src.skill_deployer import deploy_skills
+from src.sse import SSEBroadcaster
 from src.state_machine import StateMachine
 from src.trace_emitter import TraceEmitter
 from src.trace_middleware import TraceMiddleware
-from src.exceptions import NotFoundError, ConflictError, BadRequestError
-from src.skill_deployer import deploy_skills
+from src.webhook_notifier import WebhookNotifier
 
 
 @asynccontextmanager
@@ -26,8 +29,8 @@ async def lifespan(app: FastAPI):
     settings = load_settings()
     await deploy_skills(settings)
 
-    # Tracing infrastructure — create emitter first (no DB yet)
-    trace_emitter = TraceEmitter(enabled=settings.tracing.enabled)
+    sse_broadcaster = SSEBroadcaster()
+    trace_emitter = TraceEmitter(enabled=settings.tracing.enabled, broadcaster=sse_broadcaster)
 
     db = Database(
         db_path=settings.database.path,
@@ -36,7 +39,6 @@ async def lifespan(app: FastAPI):
     )
     await db.connect()
 
-    # Wire DB into emitter after connect
     trace_emitter.set_db(db)
     consumer_task = asyncio.create_task(trace_emitter.start_consumer()) if settings.tracing.enabled else None
 
@@ -51,13 +53,27 @@ async def lifespan(app: FastAPI):
     merger = MergeManager(db, webhooks)
 
     executor = AcpxExecutor(
-        db, jobs, hosts, artifacts, webhooks,
-        config=settings, coop_dir=coop_dir, project_root=project_root,
+        db,
+        jobs,
+        hosts,
+        artifacts,
+        webhooks,
+        config=settings,
+        coop_dir=coop_dir,
+        project_root=project_root,
         trace_emitter=trace_emitter,
     )
     sm = StateMachine(
-        db, artifacts, hosts, executor, webhooks, merger,
-        coop_dir=coop_dir, config=settings, job_manager=jobs, project_root=project_root,
+        db,
+        artifacts,
+        hosts,
+        executor,
+        webhooks,
+        merger,
+        coop_dir=coop_dir,
+        config=settings,
+        job_manager=jobs,
+        project_root=project_root,
         trace_emitter=trace_emitter,
     )
     executor.set_state_machine(sm)
@@ -66,10 +82,18 @@ async def lifespan(app: FastAPI):
     await hosts.load_from_config(agent_config)
     await executor.restore_on_startup()
 
-    # Background scheduler
     from src.scheduler import Scheduler
-    scheduler = Scheduler(db, hosts, jobs, executor, webhooks, settings, state_machine=sm,
-                          trace_emitter=trace_emitter)
+
+    scheduler = Scheduler(
+        db,
+        hosts,
+        jobs,
+        executor,
+        webhooks,
+        settings,
+        state_machine=sm,
+        trace_emitter=trace_emitter,
+    )
     await scheduler.start()
 
     app.state.db = db
@@ -83,6 +107,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.scheduler = scheduler
     app.state.trace_emitter = trace_emitter
+    app.state.sse_broadcaster = sse_broadcaster
     app.state.start_time = time.time()
 
     yield
@@ -98,8 +123,44 @@ async def lifespan(app: FastAPI):
     await db.close()
 
 
+def mount_dashboard_spa(app: FastAPI, project_root: Path | None = None) -> None:
+    root = Path(project_root) if project_root is not None else Path(__file__).resolve().parents[1]
+    dist_dir = root / "web" / "dist"
+    index_file = dist_dir / "index.html"
+    if not index_file.exists():
+        return
+
+    dist_root = dist_dir.resolve()
+
+    def _resolve_asset(full_path: str) -> Path | None:
+        candidate = (dist_root / full_path).resolve()
+        try:
+            candidate.relative_to(dist_root)
+        except ValueError:
+            return None
+        return candidate
+
+    @app.get("/", include_in_schema=False)
+    async def spa_index():
+        return FileResponse(index_file)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+
+        candidate = _resolve_asset(full_path) if full_path else index_file
+        if candidate and candidate.is_file():
+            return FileResponse(candidate)
+
+        if Path(full_path).suffix:
+            raise HTTPException(status_code=404)
+
+        return FileResponse(index_file)
+
+
 app = FastAPI(title="cooagents", version="0.2.0", lifespan=lifespan)
-app.add_middleware(TraceMiddleware)  # emitter resolved lazily from app.state
+app.add_middleware(TraceMiddleware)
 
 
 @app.exception_handler(NotFoundError)
@@ -131,16 +192,21 @@ async def health(request: Request):
     }
 
 
-from routes.runs import router as runs_router
-from routes.artifacts import router as artifacts_router
 from routes.agent_hosts import router as hosts_router
-from routes.webhooks import router as webhooks_router
-from routes.repos import router as repos_router
+from routes.artifacts import router as artifacts_router
 from routes.diagnostics import create_diagnostics_router
+from routes.events import create_events_router
+from routes.repos import router as repos_router
+from routes.runs import router as runs_router
+from routes.sse import create_sse_router
+from routes.webhooks import router as webhooks_router
 
 app.include_router(runs_router, prefix="/api/v1")
 app.include_router(artifacts_router, prefix="/api/v1")
 app.include_router(hosts_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(repos_router, prefix="/api/v1")
+app.include_router(create_events_router(), prefix="/api/v1")
+app.include_router(create_sse_router(), prefix="/api/v1")
 app.include_router(create_diagnostics_router(), prefix="/api/v1")
+mount_dashboard_spa(app)

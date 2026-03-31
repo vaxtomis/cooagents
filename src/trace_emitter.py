@@ -24,9 +24,10 @@ def format_error(exc: Exception, max_lines: int = 10) -> str:
 class TraceEmitter:
     """Manages trace event emission and background consumption."""
 
-    def __init__(self, db=None, enabled: bool = True):
+    def __init__(self, db=None, enabled: bool = True, broadcaster=None):
         self._db = db
         self._enabled = enabled
+        self._broadcaster = broadcaster
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=2048)
         self._running = False
 
@@ -120,21 +121,43 @@ class TraceEmitter:
         now = datetime.now(timezone.utc).isoformat()
         for item in batch:
             event_type, ctx, payload, level, error_detail, duration_ms, source = item
+            run_id = ctx.get("run_id")
+            trace_id = ctx.get("trace_id")
+            job_id = ctx.get("job_id")
+            span_type = ctx.get("span_type", "system")
             await self._db.execute(
                 "INSERT INTO events (run_id, event_type, payload_json, created_at, "
                 "trace_id, job_id, span_type, level, duration_ms, error_detail, source) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    ctx.get("run_id"),
+                    run_id,
                     event_type,
-                    json.dumps(payload) if payload else None,
+                    json.dumps(payload) if payload is not None else None,
                     now,
-                    ctx.get("trace_id"),
-                    ctx.get("job_id"),
-                    ctx.get("span_type", "system"),
+                    trace_id,
+                    job_id,
+                    span_type,
                     level,
                     duration_ms,
                     error_detail,
                     source,
                 ),
             )
+            if self._broadcaster:
+                await self._broadcaster.broadcast(
+                    run_id,
+                    event_type,
+                    {
+                        "run_id": run_id,
+                        "event_type": event_type,
+                        "payload": payload,
+                        "created_at": now,
+                        "trace_id": trace_id,
+                        "job_id": job_id,
+                        "span_type": span_type,
+                        "level": level,
+                        "duration_ms": duration_ms,
+                        "error_detail": error_detail,
+                        "source": source,
+                    },
+                )

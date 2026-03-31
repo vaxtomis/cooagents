@@ -1,0 +1,447 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useParams } from "react-router-dom";
+import useSWR from "swr";
+import { getRunTrace } from "../api/diagnostics";
+import {
+  cancelRun,
+  getArtifactContent,
+  getArtifactDiff,
+  getJobOutput,
+  getRun,
+  getRunBrief,
+  getRunEventsStreamUrl,
+  listArtifacts,
+  listJobs,
+} from "../api/runs";
+import { ApprovalAction } from "../components/ApprovalAction";
+import { StageProgress } from "../components/StageProgress";
+import { StatusBadge } from "../components/StatusBadge";
+import { useSSE, type SseConnectionState } from "../hooks/useSSE";
+import type { ArtifactRecord, GateName, JobRecord, RunTraceResponse } from "../types";
+
+const REVIEW_GATE_BY_STAGE: Record<string, GateName> = {
+  REQ_REVIEW: "req",
+  DESIGN_REVIEW: "design",
+  DEV_REVIEW: "dev",
+};
+
+function SectionPanel({
+  title,
+  kicker,
+  children,
+}: {
+  title: string;
+  kicker: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-[28px] border border-white/6 bg-panel p-6 shadow-panel">
+      <p className="text-[11px] uppercase tracking-[0.3em] text-muted/75">{kicker}</p>
+      <h2 className="mt-2 text-lg font-semibold text-white">{title}</h2>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
+      <p className="text-xs uppercase tracking-[0.24em] text-muted/75">{label}</p>
+      <p className="mt-3 break-all font-mono text-sm text-white">{value}</p>
+    </div>
+  );
+}
+
+function EmptyState({ copy }: { copy: string }) {
+  return <p className="rounded-2xl border border-dashed border-white/8 bg-white/3 px-4 py-6 text-sm text-muted">{copy}</p>;
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="h-[180px] animate-pulse rounded-[28px] border border-white/6 bg-panel" />
+      <div className="h-[220px] animate-pulse rounded-[28px] border border-white/6 bg-panel" />
+      <div className="h-[220px] animate-pulse rounded-[28px] border border-white/6 bg-panel" />
+    </div>
+  );
+}
+
+function formatTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+  }).format(date);
+}
+
+function formatDuration(seconds: number | null | undefined) {
+  if (seconds == null || Number.isNaN(seconds)) {
+    return "-";
+  }
+
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
+}
+
+function resolveConnectionLabel(state: SseConnectionState) {
+  switch (state) {
+    case "live":
+      return { label: "Live", tone: "success" as const };
+    case "reconnecting":
+      return { label: "Reconnecting", tone: "warning" as const };
+    case "offline":
+      return { label: "Offline", tone: "danger" as const };
+    default:
+      return { label: "Connecting", tone: "muted" as const };
+  }
+}
+
+export function RunDetailPage() {
+  const { runId } = useParams();
+  const refreshTimer = useRef<number | null>(null);
+  const [cancelPending, setCancelPending] = useState(false);
+  const [cancelMessage, setCancelMessage] = useState<string | null>(null);
+  const [artifactState, setArtifactState] = useState<{
+    artifactId: number | null;
+    content: string;
+    diff: string;
+    error: string | null;
+    loading: boolean;
+    path: string;
+  }>({ artifactId: null, content: "", diff: "", error: null, loading: false, path: "" });
+  const [jobOutputs, setJobOutputs] = useState<Record<string, { error?: string; loading?: boolean; output?: string }>>({});
+
+  const run = useSWR(runId ? ["run", runId] : null, () => getRun(runId!), { revalidateOnFocus: false });
+  const brief = useSWR(runId ? ["run-brief", runId] : null, () => getRunBrief(runId!), { revalidateOnFocus: false });
+  const jobs = useSWR(runId ? ["run-jobs", runId] : null, () => listJobs(runId!), { revalidateOnFocus: false });
+  const artifacts = useSWR(runId ? ["run-artifacts", runId] : null, () => listArtifacts(runId!), { revalidateOnFocus: false });
+  const trace = useSWR(runId ? ["run-trace", runId] : null, () => getRunTrace(runId!, { limit: 50 }), { revalidateOnFocus: false });
+
+  async function refreshAll() {
+    await Promise.all([run.mutate(), brief.mutate(), jobs.mutate(), artifacts.mutate(), trace.mutate()]);
+  }
+
+  function scheduleRefresh() {
+    if (typeof window === "undefined") {
+      void refreshAll();
+      return;
+    }
+
+    if (refreshTimer.current !== null) {
+      window.clearTimeout(refreshTimer.current);
+    }
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = null;
+      void refreshAll();
+    }, 120);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && refreshTimer.current !== null) {
+        window.clearTimeout(refreshTimer.current);
+      }
+    };
+  }, []);
+
+  const sse = useSSE(runId ? getRunEventsStreamUrl(runId) : null, {
+    enabled: Boolean(runId),
+    onEvent: () => {
+      scheduleRefresh();
+    },
+  });
+
+  if (!runId) {
+    return (
+      <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
+        <h2 className="text-lg font-semibold text-white">Run id is missing</h2>
+        <p className="mt-2 text-sm text-muted">Open this page from the dashboard or runs list to inspect a specific run.</p>
+      </section>
+    );
+  }
+
+  const error = run.error ?? brief.error ?? jobs.error ?? artifacts.error ?? trace.error;
+  if (error) {
+    return (
+      <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
+        <h2 className="text-lg font-semibold text-white">Run detail failed to load</h2>
+        <p className="mt-2 text-sm text-muted">Retry the run detail queries to restore artifacts, jobs, and trace data.</p>
+        <button className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black" onClick={() => void refreshAll()} type="button">
+          Retry
+        </button>
+      </section>
+    );
+  }
+
+  if (!run.data || !brief.data || !jobs.data || !artifacts.data || !trace.data) {
+    return <LoadingSkeleton />;
+  }
+
+  const resolvedRunId = runId;
+  const runData = run.data;
+  const briefData = brief.data;
+  const connection = resolveConnectionLabel(sse.state);
+  const activeGate = REVIEW_GATE_BY_STAGE[runData.current_stage];
+
+  async function handleInspectArtifact(artifact: ArtifactRecord) {
+    setArtifactState({ artifactId: artifact.id, content: "", diff: "", error: null, loading: true, path: artifact.path });
+    try {
+      const [content, diff] = await Promise.all([
+        getArtifactContent(resolvedRunId, artifact.id),
+        getArtifactDiff(resolvedRunId, artifact.id),
+      ]);
+      setArtifactState({
+        artifactId: artifact.id,
+        content: content.content,
+        diff: diff.diff,
+        error: null,
+        loading: false,
+        path: artifact.path,
+      });
+    } catch (loadError) {
+      setArtifactState({
+        artifactId: artifact.id,
+        content: "",
+        diff: "",
+        error: loadError instanceof Error ? loadError.message : "Artifact detail failed to load",
+        loading: false,
+        path: artifact.path,
+      });
+    }
+  }
+
+  async function handleLoadOutput(job: JobRecord) {
+    setJobOutputs((current) => ({ ...current, [job.id]: { loading: true } }));
+    try {
+      const response = await getJobOutput(resolvedRunId, job.id);
+      setJobOutputs((current) => ({ ...current, [job.id]: { loading: false, output: response.output } }));
+    } catch (loadError) {
+      setJobOutputs((current) => ({
+        ...current,
+        [job.id]: {
+          error: loadError instanceof Error ? loadError.message : "Job output failed to load",
+          loading: false,
+        },
+      }));
+    }
+  }
+
+  async function handleCancelRun() {
+    setCancelPending(true);
+    setCancelMessage(null);
+    try {
+      await cancelRun(resolvedRunId, false);
+      setCancelMessage("Cancellation requested. Waiting for the run stream to confirm the terminal state.");
+    } catch (cancelError) {
+      setCancelMessage(cancelError instanceof Error ? cancelError.message : "Cancel request failed");
+    } finally {
+      setCancelPending(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="space-y-4">
+        <SectionPanel kicker="Primary Context" title="Run summary">
+          <div className="grid gap-3 md:grid-cols-4">
+            <MetricCard label="Ticket" value={runData.ticket} />
+            <MetricCard label="Current stage" value={runData.current_stage} />
+            <MetricCard label="Status" value={runData.status} />
+            <MetricCard label="Repo" value={runData.repo_path} />
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <StatusBadge status={runData.status} />
+            <StatusBadge label={runData.current_stage} status={activeGate ? "review" : runData.status} />
+            <span className="text-sm text-muted">Updated {formatTimestamp(runData.updated_at)}</span>
+          </div>
+
+          <p className="mt-5 text-sm leading-6 text-muted">{briefData.current.summary || runData.description || "No summary provided for this run."}</p>
+
+          <div className="mt-5">
+            <StageProgress failedAtStage={runData.failed_at_stage} stage={runData.current_stage} />
+          </div>
+        </SectionPanel>
+
+        <SectionPanel kicker="Current Step" title="Execution context">
+          <div className="grid gap-3 md:grid-cols-3">
+            <MetricCard label="Action" value={briefData.current.action_type} />
+            <MetricCard label="Elapsed" value={formatDuration(briefData.current.elapsed_sec)} />
+            <MetricCard label="Artifacts" value={String(briefData.progress.artifacts_count)} />
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-muted/75">Current description</p>
+              <p className="mt-3 text-sm text-muted">{briefData.current.description}</p>
+            </div>
+            <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-muted/75">Previous stage</p>
+              <p className="mt-3 text-sm text-white">{briefData.previous?.stage ?? "-"}</p>
+              <p className="mt-2 text-xs text-muted">{briefData.previous?.result ?? "No prior transition recorded."}</p>
+            </div>
+          </div>
+        </SectionPanel>
+
+        <SectionPanel kicker="Artifacts" title="Generated outputs">
+          {artifacts.data.length === 0 ? (
+            <EmptyState copy="No artifacts are available for this run yet." />
+          ) : (
+            <div className="space-y-3">
+              {artifacts.data.map((artifact) => (
+                <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={artifact.id}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-sm text-white">{artifact.path}</p>
+                      <p className="mt-1 text-xs text-muted">
+                        {artifact.kind} ¡¤ v{artifact.version} ¡¤ {artifact.status}
+                      </p>
+                    </div>
+                    <button
+                      className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+                      onClick={() => void handleInspectArtifact(artifact)}
+                      type="button"
+                    >
+                      {`Inspect ${artifact.path}`}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {artifactState.artifactId !== null ? (
+            <div className="mt-4 rounded-[24px] border border-white/6 bg-black/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-white">{artifactState.path}</p>
+                {artifactState.loading ? <span className="text-xs text-muted">Loading¡­</span> : null}
+              </div>
+              {artifactState.error ? <p className="mt-3 text-sm text-danger">{artifactState.error}</p> : null}
+              {artifactState.content ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.content}</pre> : null}
+              {artifactState.diff ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.diff}</pre> : null}
+            </div>
+          ) : null}
+        </SectionPanel>
+
+        <SectionPanel kicker="Execution Jobs" title="Agent activity">
+          {jobs.data.length === 0 ? (
+            <EmptyState copy="No jobs have been registered for this run yet." />
+          ) : (
+            <div className="space-y-3">
+              {jobs.data.map((job) => {
+                const outputState = jobOutputs[job.id] ?? {};
+                return (
+                  <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={job.id}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-mono text-sm text-white">{job.id}</p>
+                        <p className="mt-1 text-xs text-muted">
+                          {job.agent_type} ¡¤ {job.stage} ¡¤ {job.status}
+                        </p>
+                      </div>
+                      <button
+                        className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+                        onClick={() => void handleLoadOutput(job)}
+                        type="button"
+                      >
+                        {`Load output ${job.id}`}
+                      </button>
+                    </div>
+                    {outputState.loading ? <p className="mt-3 text-sm text-muted">Loading output¡­</p> : null}
+                    {outputState.error ? <p className="mt-3 text-sm text-danger">{outputState.error}</p> : null}
+                    {outputState.output ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{outputState.output}</pre> : null}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </SectionPanel>
+
+        <SectionPanel kicker="Trace Timeline" title="Recent events">
+          <TraceEvents trace={trace.data} />
+        </SectionPanel>
+      </div>
+
+      <div className="space-y-4">
+        <SectionPanel kicker="SSE Status" title="Live connection">
+          <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-white">Run events stream</span>
+              <StatusBadge label={connection.label} status={connection.tone} />
+            </div>
+            <p className="mt-3 text-sm text-muted">Relevant run events trigger a throttled detail refresh so artifacts, jobs, and trace stay current without maintaining a separate client state machine.</p>
+          </div>
+        </SectionPanel>
+
+        <SectionPanel kicker="Actions" title="Operator controls">
+          <div className="space-y-4">
+            {activeGate ? (
+              <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
+                <p className="text-sm text-white">Approval gate</p>
+                <p className="mt-2 text-sm text-muted">{runData.current_stage} is awaiting a decision.</p>
+                <div className="mt-4">
+                  <ApprovalAction by="detail" gate={activeGate} onComplete={refreshAll} runId={resolvedRunId} />
+                </div>
+              </div>
+            ) : null}
+
+            <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
+              <p className="text-sm text-white">Run termination</p>
+              <p className="mt-2 text-sm text-muted">Cancel the current run when you need to stop further work and wait for a terminal event.</p>
+              <button
+                className="mt-4 rounded-full bg-danger px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={cancelPending || runData.status !== "running"}
+                onClick={() => void handleCancelRun()}
+                type="button"
+              >
+                {cancelPending ? "Cancelling¡­" : "Cancel run"}
+              </button>
+              {cancelMessage ? <p className="mt-3 text-sm text-muted">{cancelMessage}</p> : null}
+            </div>
+          </div>
+        </SectionPanel>
+      </div>
+    </div>
+  );
+}
+
+function TraceEvents({ trace }: { trace: RunTraceResponse }) {
+  if (trace.events.length === 0) {
+    return <EmptyState copy="No trace events were returned for this run." />;
+  }
+
+  return (
+    <div className="space-y-3">
+      {trace.events.map((event, index) => (
+        <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={`${event.event_type}-${event.created_at}-${index}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-white">{event.event_type}</p>
+              <p className="mt-1 text-xs text-muted">
+                {event.source ?? "engine"} ¡¤ {event.level ?? "info"}
+              </p>
+            </div>
+            <span className="text-xs text-muted">{formatTimestamp(event.created_at)}</span>
+          </div>
+          {event.payload ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{JSON.stringify(event.payload, null, 2)}</pre> : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+

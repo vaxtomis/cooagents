@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, Response, HTTPException
 from src.models import (
     CreateRunRequest, ApproveRequest, RejectRequest, RetryRequest,
     RecoverRequest, SubmitRequirementRequest, ResolveConflictRequest,
@@ -21,16 +21,52 @@ async def create_run(req: CreateRunRequest, request: Request):
 
 
 @router.get("/runs")
-async def list_runs(request: Request, status: str = None, limit: int = 20, offset: int = 0):
+async def list_runs(
+    request: Request,
+    response: Response,
+    status: str = None,
+    ticket: str = None,
+    current_stage: str = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    limit: int = 20,
+    offset: int = 0,
+):
     db = request.app.state.db
-    sql = "SELECT * FROM runs"
+    where_clauses = []
     params = []
+
     if status:
-        sql += " WHERE status=?"
+        where_clauses.append("status=?")
         params.append(status)
-    sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
-    rows = await db.fetchall(sql, tuple(params))
+
+    if ticket:
+        where_clauses.append("ticket LIKE ?")
+        params.append(f"%{ticket}%")
+
+    if current_stage:
+        where_clauses.append("current_stage=?")
+        params.append(current_stage)
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = " WHERE " + " AND ".join(where_clauses)
+
+    total_row = await db.fetchone(f"SELECT COUNT(*) AS c FROM runs{where_sql}", tuple(params))
+    response.headers["X-Total-Count"] = str(total_row["c"] if total_row else 0)
+
+    sort_columns = {
+        "created_at": "created_at",
+        "updated_at": "updated_at",
+        "ticket": "ticket",
+        "status": "status",
+        "current_stage": "current_stage",
+    }
+    order_by = sort_columns.get(sort_by, "created_at")
+    order_direction = "ASC" if str(sort_order).lower() == "asc" else "DESC"
+
+    sql = f"SELECT * FROM runs{where_sql} ORDER BY {order_by} {order_direction} LIMIT ? OFFSET ?"
+    rows = await db.fetchall(sql, tuple(params + [limit, offset]))
     return [dict(r) for r in rows]
 
 
