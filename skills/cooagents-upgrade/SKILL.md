@@ -1,6 +1,6 @@
 ---
 name: cooagents-upgrade
-description: 升级 cooagents 服务 — 拉取最新代码、更新依赖、重启服务、验证健康状态。当用户提及升级、更新 cooagents 时触发。
+description: 升级 cooagents 服务，拉取最新代码、更新依赖、重新构建 Dashboard、重启服务并验证状态。当用户提及升级、更新 cooagents 时触发。
 user-invocable: true
 metadata:
   {
@@ -59,20 +59,28 @@ exec cd {repo_path} && git pull origin main
 
 - **Already up to date**：告知用户已是最新版本，无需升级，流程结束
 - **成功拉取**：继续下一阶段
-- **冲突**：告知用户存在本地修改冲突，需手动解决后重试
+- **冲突**：告知用户存在本地修改冲突，需要手动解决后重试
 
-### 阶段 ③ 更新依赖和数据库
+### 阶段 ③ 更新依赖、数据库和 Dashboard
 
 ```bash
 exec cd {repo_path} && bash scripts/bootstrap.sh
 ```
 
-bootstrap.sh 会自动完成：依赖更新、数据库迁移（含备份）。
+bootstrap.sh 会自动完成：
+- 依赖更新
+- `web/` 目录下的 `npm ci` 与 `npm run build`
+- `web/dist/index.html` 校验
+- 数据库初始化 / 迁移（含备份）
 
 - **退出码 0**：继续下一阶段
 - **非 0**：参考 troubleshooting.md 排查
 
-**记住脚本输出：** 关注 venv 状态（`venv + deps` 或 `deps (global)`），阶段 ④ 的重启命令取决于此。
+**记住脚本输出：**
+- 关注 venv 状态（`venv + deps` 或 `deps (global)`）
+- 确认输出包含 `web dashboard`，表示 Dashboard 已完成重建
+
+阶段 ④ 的重启命令取决于 venv 状态。
 
 ### 阶段 ④ 重启服务
 
@@ -102,7 +110,7 @@ exec uname -s 2>/dev/null || echo Windows
 
 **venv 创建成功时：**
 
-- **Linux / Darwin (macOS)：**
+- **Linux / Darwin（macOS）：**
   ```bash
   exec cd {repo_path} && nohup .venv/bin/uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &
   ```
@@ -111,7 +119,9 @@ exec uname -s 2>/dev/null || echo Windows
   exec cd {repo_path} && (.venv/Scripts/python -m uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &)
   ```
 
-**venv 未创建时：** 将 `.venv/bin/uvicorn` 替换为 `uvicorn`，`.venv/Scripts/python` 替换为 `python3`。
+**venv 未创建时：**
+- 将 `.venv/bin/uvicorn` 替换为 `uvicorn`
+- 将 `.venv/Scripts/python` 替换为 `python3`
 
 ### 阶段 ⑤ 验证升级
 
@@ -123,7 +133,15 @@ exec curl -s http://127.0.0.1:8321/health
 
 成功判定：返回 `"status": "ok"`。
 
-**5b. 确认版本已更新：**
+**5b. 验证 Dashboard 根路径：**
+
+```bash
+exec curl -s http://127.0.0.1:8321/
+```
+
+成功判定：响应内容包含 `<html`。如果 `/health` 正常但根路径没有返回 HTML，视为升级失败。
+
+**5c. 确认版本已更新：**
 
 ```bash
 exec cd {repo_path} && git log --oneline -1
@@ -131,7 +149,7 @@ exec cd {repo_path} && git log --oneline -1
 
 对比阶段 ① 记录的版本，确认 commit 已变更。
 
-如果健康检查失败，检查日志：
+如果健康检查或 Dashboard 校验失败，检查日志：
 
 ```bash
 exec cat {repo_path}/cooagents.log
@@ -147,6 +165,7 @@ exec cat {repo_path}/cooagents.log
 ✅ cooagents 已升级
 - 服务地址：http://127.0.0.1:8321
 - 健康状态：ok
+- Dashboard：http://127.0.0.1:8321/（返回 HTML）
 - 旧版本：{old_commit}
 - 新版本：{new_commit}
 - Skills：已随启动自动重新部署
@@ -157,13 +176,13 @@ exec cat {repo_path}/cooagents.log
 ## E. 参考文档
 
 遇到问题时使用 Read 工具按需读取：
-- 常见问题排查 → references/troubleshooting.md
+- 常见问题排查 → `references/troubleshooting.md`
 
 ## F. 操作原则
 
 - **顺序执行**：必须按 ①→⑤ 顺序，每阶段成功后才进入下一阶段
-- **状态追踪**：记住阶段 ① 的旧版本和阶段 ③ 的 venv 状态
+- **状态追踪**：记住阶段 ① 的旧版本、阶段 ③ 的 venv 状态，以及 Dashboard 是否完成重建
 - **运行中任务警告**：有活跃任务时必须警告用户并等待确认
-- **无变更即停**：git pull 无新内容时直接告知用户，不执行后续操作
+- **无变更即停**：`git pull` 无新内容时直接告知用户，不执行后续操作
 - **幂等安全**：重复执行不会破坏数据（DB 备份、bootstrap 幂等）
 - **最少交互**：仅在有运行中任务或遇到错误时询问用户

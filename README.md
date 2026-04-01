@@ -92,7 +92,7 @@ cd cooagents
 bash scripts/bootstrap.sh
 ```
 
-bootstrap 脚本会自动完成：Python ≥3.11 校验 → git/node 检查 → acpx 安装（已有则跳过）→ venv 创建 + 依赖安装 → 运行目录创建 → 数据库初始化。
+bootstrap 脚本会自动完成：Python ≥3.11 校验 → git/node/npm 检查 → acpx 安装（已有则跳过）→ venv 创建 + Python 依赖安装 → 在 `web/` 目录执行 `npm ci` 和 `npm run build` → 校验 `web/dist/index.html` → 运行目录创建 → 数据库初始化。
 
 ### 启动服务
 
@@ -104,6 +104,7 @@ uvicorn src.app:app --host 127.0.0.1 --port 8321
 
 | 地址 | 说明 |
 |------|------|
+| `http://127.0.0.1:8321/` | Dashboard（返回 HTML） |
 | `http://127.0.0.1:8321/docs` | Swagger UI（交互式） |
 | `http://127.0.0.1:8321/redoc` | ReDoc（阅读式） |
 | `http://127.0.0.1:8321/health` | 健康检查 |
@@ -485,15 +486,15 @@ skills/cooagents-setup/
     └── troubleshooting.md      # 10 类常见问题排查（按需 Read）
 ```
 
-Skill 调用 `scripts/bootstrap.sh` 完成环境检查和依赖安装，自身专注于编排和容错：
+Skill 调用 `scripts/bootstrap.sh` 完成环境检查、依赖安装和 Dashboard 本地构建，自身专注于编排和容错：
 
 **安装流程（4 阶段）：**
 
 | 阶段 | 动作 | 成功判定 |
 |------|------|----------|
 | ① 定位代码 | 检查 `repo_path` 或 `git clone` | `src/app.py` 和 `config/settings.yaml` 存在 |
-| ② 运行 bootstrap | `bash scripts/bootstrap.sh` | 退出码 0 |
-| ③ 启动服务 + 健康检查 | 平台相关启动命令 + 轮询 `/health` | 返回 `"status": "ok"` |
+| ② 运行 bootstrap | `bash scripts/bootstrap.sh` | 退出码 0，且 bootstrap 包含 `npm ci`、`npm run build` 并生成 `web/dist/index.html` |
+| ③ 启动服务 + 健康检查 | 平台相关启动命令 + 轮询 `/health` + 校验 `/` | 返回 `"status": "ok"`，且根路径返回 HTML |
 | ④ 注册 Agent 主机 | `POST /api/v1/agent-hosts` | 本地主机已注册 |
 
 安装完成后自动注册本地 Agent 主机（`agent_type: both`，并发上限 2）。
@@ -520,9 +521,9 @@ skills/cooagents-upgrade/
 |------|------|----------|
 | ① 检查当前状态 | 健康检查 + 活跃任务检测 + 记录旧版本 | 服务可达 |
 | ② 拉取最新代码 | `git pull origin main` | 无冲突，有新内容 |
-| ③ 更新依赖和数据库 | `bash scripts/bootstrap.sh` | 退出码 0 |
+| ③ 更新依赖和数据库 | `bash scripts/bootstrap.sh` | 退出码 0，且重新构建 Dashboard |
 | ④ 重启服务 | 停止旧进程 → 启动新进程 | 进程已启动 |
-| ⑤ 验证升级 | 健康检查 + 版本对比 | `"status": "ok"` 且 commit 已变更 |
+| ⑤ 验证升级 | 健康检查 + 根路径校验 + 版本对比 | `"status": "ok"`、根路径返回 HTML，且 commit 已变更 |
 
 **安全特性：** 升级前自动检查是否有运行中的任务并警告用户；无新代码时跳过后续步骤；DB 自动备份支持回退。
 

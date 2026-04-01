@@ -1,10 +1,10 @@
 # 升级常见问题排查
 
-本文件提供升级过程中常见问题的诊断和修复方法。
+本文档提供升级过程中的常见问题诊断与修复方法。
 
 ---
 
-## 1. git pull 冲突
+## 1. `git pull` 冲突
 
 **症状：** `CONFLICT (content): Merge conflict in ...`
 
@@ -12,7 +12,7 @@
 
 ```bash
 cd {repo_path}
-git status          # 查看冲突文件
+git status
 # 手动编辑解决冲突
 git add .
 git commit -m "resolve merge conflicts"
@@ -22,7 +22,7 @@ git commit -m "resolve merge conflicts"
 
 ---
 
-## 2. bootstrap.sh 失败
+## 2. `bootstrap.sh` 失败
 
 **症状：** `scripts/bootstrap.sh` 退出码非 0
 
@@ -31,14 +31,16 @@ git commit -m "resolve merge conflicts"
 | 原因 | 修复 |
 |------|------|
 | 新增了系统依赖 | 查看 bootstrap 输出中的 `ERROR:` 信息 |
-| pip 安装新包失败 | 参考 cooagents-setup 的 troubleshooting（pip install 失败） |
+| pip 安装失败 | 参考 cooagents-setup 的 troubleshooting（pip install 失败） |
+| `npm ci` 或 `npm run build` 失败 | 参考 cooagents-setup 的 troubleshooting（前端构建失败） |
+| `web/dist/index.html` 未生成 | 重新在 `web/` 目录执行构建并校验产物 |
 | DB schema 变更不兼容 | `.coop/state.db.bak` 已自动备份，可回退 |
 
 ---
 
 ## 3. 旧进程未完全退出
 
-**症状：** 重启后端口 8321 被占用：`Address already in use`
+**症状：** 重启后端口 8321 仍被占用：`Address already in use`
 
 **诊断：**
 
@@ -50,7 +52,7 @@ git commit -m "resolve merge conflicts"
 **修复：**
 
 ```bash
-# Linux/macOS — 强制终止
+# Linux/macOS
 kill -9 $(lsof -t -i :8321)
 
 # Windows
@@ -81,7 +83,33 @@ cat {repo_path}/cooagents.log
 
 ---
 
-## 5. 升级后任务状态异常
+## 5. Dashboard 根路径不返回 HTML
+
+**症状：**
+- `/health` 正常
+- `curl -s http://127.0.0.1:8321/` 不包含 `<html`
+
+**修复：**
+
+```bash
+cd {repo_path}/web
+npm ci
+npm run build
+ls dist/index.html
+```
+
+确认产物存在后，重新执行：
+
+```bash
+cd {repo_path}
+bash scripts/bootstrap.sh
+```
+
+如果根路径仍不返回 HTML，不要宣称升级成功。
+
+---
+
+## 6. 升级后任务状态异常
 
 **症状：** 之前运行中的任务状态不一致
 
@@ -99,7 +127,7 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/recover \
 
 ---
 
-## 6. 版本回退
+## 7. 版本回退
 
 **症状：** 升级后出现严重问题，需要回退
 
@@ -112,7 +140,7 @@ cd {repo_path}
 pkill -f "uvicorn src.app:app" || true
 
 # 2. 回退代码
-git log --oneline -5          # 找到要回退的 commit
+git log --oneline -5
 git reset --hard <old_commit>
 
 # 3. 恢复数据库（如需要）

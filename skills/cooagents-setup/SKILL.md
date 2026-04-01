@@ -1,6 +1,6 @@
 ---
 name: cooagents-setup
-description: 安装并启动 cooagents 服务 — 检测环境、安装依赖、启动服务器、注册本地 Agent 主机。当用户提及安装、部署、启动 cooagents 时触发。
+description: 安装并启动 cooagents 服务，检测环境、安装依赖、构建 Dashboard、启动服务并注册本地 Agent 主机。当用户提及安装、部署、启动 cooagents 时触发。
 user-invocable: true
 metadata:
   {
@@ -17,7 +17,7 @@ metadata:
 
 你是 cooagents 的安装向导。你通过 `exec` 工具执行 shell 命令，将 cooagents 服务部署到本机。
 
-安装逻辑由 `scripts/bootstrap.sh` 统一维护，你负责编排外围流程：定位代码 → 运行 bootstrap → 启动服务 → 健康检查 → 注册主机 →（可选）先配置同机 OpenClaw 自己的 hooks，再把 hooks 地址和专用 token 写回 cooagents。
+安装逻辑由 `scripts/bootstrap.sh` 统一维护，你负责编排外围流程：定位代码 → 运行 bootstrap → 启动服务 → 健康检查 → 校验 Dashboard 根路径 → 注册主机 →（可选）先配置同机 OpenClaw 自己的 hooks，再把 hooks 地址和专用 token 写回 cooagents。
 
 遇到问题时参考 `references/troubleshooting.md`（使用 Read 工具读取）。
 
@@ -52,12 +52,25 @@ exec ls {repo_path}/src/app.py {repo_path}/config/settings.yaml
 exec cd {repo_path} && bash scripts/bootstrap.sh
 ```
 
-脚本会依次完成：Python ≥3.11 校验、git/node 检查、acpx 安装、venv + pip 依赖、运行时目录创建、数据库初始化。
+脚本会依次完成：
+- Python ≥3.11 校验
+- git / node / npm 检查
+- acpx 安装（已有则跳过）
+- venv 创建 + `pip install -r requirements.txt`
+- 在 `web/` 目录执行 `npm ci` 与 `npm run build`
+- 校验 `web/dist/index.html` 已生成
+- 运行时目录创建
+- 数据库初始化
 
 - **退出码 0**：继续下一阶段
 - **非 0**：根据输出中的 `ERROR:` 或 `WARN:` 信息，参考 troubleshooting.md 排查
 
-**记住脚本输出：** 如果输出包含 `venv + deps`，说明 venv 创建成功；如果包含 `deps (global)`，说明回退到全局安装。阶段 ③ 的启动命令路径取决于此。
+**记住脚本输出：**
+- 如果输出包含 `venv + deps`，说明 venv 创建成功
+- 如果输出包含 `deps (global)`，说明回退到全局安装
+- 如果输出包含 `web dashboard`，说明 Dashboard 已完成构建
+
+阶段 ③ 的启动命令路径取决于 venv 是否成功。
 
 ### 阶段 ③ 启动服务
 
@@ -69,7 +82,7 @@ exec uname -s 2>/dev/null || echo Windows
 
 **venv 创建成功时：**
 
-- **Linux / Darwin (macOS)：**
+- **Linux / Darwin（macOS）：**
   ```bash
   exec cd {repo_path} && nohup .venv/bin/uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &
   ```
@@ -77,9 +90,12 @@ exec uname -s 2>/dev/null || echo Windows
   ```bash
   exec cd {repo_path} && (.venv/Scripts/python -m uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &)
   ```
-  如果使用 CMD 或 PowerShell，参考 troubleshooting.md 第 6 节。
 
-**venv 未创建（全局安装）时：** 将 `.venv/bin/uvicorn` 替换为 `uvicorn`，`.venv/Scripts/python` 替换为 `python3`。
+如果使用 CMD 或 PowerShell，参考 troubleshooting.md 的 Windows 启动章节。
+
+**venv 未创建时（全局安装）：**
+- 将 `.venv/bin/uvicorn` 替换为 `uvicorn`
+- 将 `.venv/Scripts/python` 替换为 `python3`
 
 然后轮询健康检查（最多 30 秒，每 3 秒一次）：
 
@@ -88,6 +104,14 @@ exec curl -s http://127.0.0.1:8321/health
 ```
 
 成功判定：返回的 JSON 中包含 `"status": "ok"`。
+
+然后验证 Dashboard 根路径：
+
+```bash
+exec curl -s http://127.0.0.1:8321/
+```
+
+成功判定：响应内容包含 `<html`。如果 `/health` 正常但根路径没有返回 HTML，视为安装失败，检查 bootstrap 输出和日志，并参考 troubleshooting.md。
 
 如果 30 秒内未就绪，检查日志：
 
@@ -113,7 +137,7 @@ exec curl -s -X POST http://127.0.0.1:8321/api/v1/agent-hosts \
 
 如果 POST 失败（如重复注册），视为已注册，继续。
 
-`agent_type: "both"` 表示该主机同时接受 claude 和 codex 两种 Agent 任务，共享 `max_concurrent: 2` 并发上限。
+`agent_type: "both"` 表示该主机同时接收 claude 和 codex 两种 Agent 任务，共享 `max_concurrent: 2` 并发上限。
 
 ### 阶段 ⑤（可选）配置同机 OpenClaw hooks
 
@@ -131,15 +155,15 @@ exec openclaw --version
 exec openclaw config file
 ```
 
-如果 `openclaw --version` 失败，告知用户“OpenClaw 未安装或不在 PATH 中”，然后跳过此阶段。
+如果 `openclaw --version` 失败，告知用户 “OpenClaw 未安装或不在 PATH 中”，然后跳过此阶段。
 
-生成 OpenClaw hooks 专用 token，并记住输出为 `{hooks_token}`：
+生成 OpenClaw hooks 专用 token，并记住输出值 `{hooks_token}`：
 
 ```bash
 exec python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-禁止复用 `gateway.auth.token`。新版本 OpenClaw 要求 `hooks.token` 和 `gateway.auth.token` 不能相同；不要读取或复制 Gateway 鉴权 token 作为 hooks token，必须单独生成一个新的专用值。
+禁止复用 `gateway.auth.token`。新版本 OpenClaw 要求 `hooks.token` 和 `gateway.auth.token` 不能相同，不要读取或复制 Gateway 鉴权 token 作为 hooks token，必须单独生成一个新的专用值。
 
 配置 OpenClaw hooks ingress：
 
@@ -173,7 +197,7 @@ exec curl -s -X POST http://127.0.0.1:{gateway_port}/hooks/agent \
 
 当阶段 ② 创建了 venv 时，使用对应 Python 解释器更新 `config/settings.yaml`：
 
-- **Linux / Darwin (macOS)：**
+- **Linux / Darwin（macOS）：**
   ```bash
   exec cd {repo_path} && .venv/bin/python -c "from pathlib import Path; import yaml; p=Path('config/settings.yaml'); data=yaml.safe_load(p.read_text(encoding='utf-8')); data.setdefault('openclaw', {}).setdefault('hooks', {}); data['openclaw']['hooks'].update({'enabled': True, 'url': 'http://127.0.0.1:{gateway_port}/hooks/agent', 'token': '{hooks_token}'}); p.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding='utf-8')"
   ```
@@ -204,6 +228,7 @@ exec cat {repo_path}/config/settings.yaml
 ✅ cooagents 已启动
 - 服务地址：http://127.0.0.1:8321
 - 健康状态：ok
+- Dashboard：http://127.0.0.1:8321/（返回 HTML）
 - 本地 Agent 主机：已注册（claude + codex, 共享并发上限 2）
 - API 文档：http://127.0.0.1:8321/docs
 - OpenClaw hooks：如已执行阶段 ⑤，则 OpenClaw 已先启用自己的 `/hooks/agent`，且 cooagents 已指向 http://127.0.0.1:{gateway_port}/hooks/agent
@@ -214,12 +239,12 @@ exec cat {repo_path}/config/settings.yaml
 ## E. 参考文档
 
 遇到问题时使用 Read 工具按需读取：
-- 常见问题排查 → references/troubleshooting.md
+- 常见问题排查 → `references/troubleshooting.md`
 
 ## F. 操作原则
 
 - **顺序执行**：必须按 ①→④ 顺序执行；阶段 ⑤ 仅在同机 OpenClaw 场景下作为可选收尾步骤
-- **状态追踪**：记住阶段 ② bootstrap 的输出（venv 是否成功），阶段 ③ 的启动命令路径取决于此
+- **状态追踪**：记住阶段 ② bootstrap 的输出（venv 是否成功、Dashboard 是否完成构建），阶段 ③ 的启动命令路径取决于此
 - **OpenClaw 先就绪**：阶段 ⑤ 必须先打开并验证 OpenClaw 自己的 `/hooks/agent`，再回写 cooagents 的 hooks 配置
 - **token 必须隔离**：`hooks.token` 必须单独生成，严禁与 `gateway.auth.token` 复用同一个值
 - **失败即停**：阶段失败时先查 troubleshooting.md 尝试修复，修不了就告知用户

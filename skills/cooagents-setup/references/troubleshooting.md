@@ -1,10 +1,10 @@
 # 常见问题排查
 
-本文件提供安装过程中常见问题的诊断和修复方法。Agent 在某个安装阶段失败时，按问题类型查找对应解决方案。
+本文档提供安装过程中的常见问题诊断与修复方法。Agent 在某个安装阶段失败时，按问题类型查找对应方案。
 
 ---
 
-## 1. python3 不存在
+## 1. `python3` 不存在
 
 **症状：** `python3: command not found`
 
@@ -24,11 +24,11 @@
 
 **症状：** `python3 --version` 返回 3.10 或更低
 
-**修复：** 提示用户升级 Python。不要尝试自动安装多版本管理器（pyenv 等），让用户选择适合的升级方式。
+**修复：** 提示用户升级 Python。不要尝试自动安装多版本管理器（如 pyenv），让用户选择适合的升级方式。
 
 ---
 
-## 3. node / npm 不存在
+## 3. `node` / `npm` 不存在
 
 **症状：** `node: command not found` 或 `npm: command not found`
 
@@ -44,7 +44,7 @@
 
 ---
 
-## 4. npm install -g 权限不足
+## 4. `npm install -g` 权限不足
 
 **症状：** `EACCES: permission denied` 或类似权限错误
 
@@ -52,11 +52,11 @@
 
 1. 使用 sudo：`sudo npm install -g acpx@latest`
 2. 不全局安装，运行时使用 npx 替代：`npx acpx@latest`
-   - 注意：如果选择 npx 方案，后续 cooagents 配置中 agent 执行器需确保 npx 可用
+   - 注意：如果选择 npx 方案，后续 cooagents 配置中的 agent 执行器需确保 npx 可用
 
 ---
 
-## 5. pip install 失败
+## 5. `pip install` 失败
 
 **症状：** `pip install -r requirements.txt` 报错
 
@@ -70,7 +70,52 @@
 
 ---
 
-## 6. nohup 不存在（Windows）
+## 6. `npm ci` 或 `npm run build` 失败
+
+**症状：**
+- `npm ci` 退出非 0
+- `npm run build` 退出非 0
+- bootstrap 输出没有 `web dashboard`
+
+**诊断：**
+
+```bash
+cd {repo_path}/web
+npm ci
+npm run build
+```
+
+**常见原因和修复：**
+
+| 原因 | 修复 |
+|------|------|
+| `package-lock.json` 与 `package.json` 不一致 | 重新生成 lockfile 后提交，再重试 |
+| Node 版本过旧 | 升级到当前 LTS 版本后重试 |
+| 前端依赖损坏 | 删除 `web/node_modules` 后重新执行 `npm ci` |
+| TypeScript / Vite 编译错误 | 根据编译输出修复前端代码，再重试 |
+
+---
+
+## 7. `web/dist/index.html` 缺失
+
+**症状：**
+- bootstrap 失败并提示 `web build did not produce web/dist/index.html`
+- `/health` 正常，但 `curl -s http://127.0.0.1:8321/` 不返回 HTML
+
+**修复：**
+
+```bash
+cd {repo_path}/web
+npm ci
+npm run build
+ls dist/index.html
+```
+
+如果 `dist/index.html` 不存在，视为前端构建失败，不要继续启动或汇报安装成功。
+
+---
+
+## 8. `nohup` 不存在（Windows）
 
 **症状：** `nohup: command not found`
 
@@ -88,7 +133,7 @@ Start-Process -NoNewWindow -FilePath ".venv\Scripts\python" -ArgumentList "-m uv
 
 ---
 
-## 7. 端口 8321 被占用
+## 9. 端口 8321 被占用
 
 **症状：** `[Errno 98] Address already in use` 或 `[WinError 10048]`
 
@@ -99,11 +144,11 @@ Start-Process -NoNewWindow -FilePath ".venv\Scripts\python" -ArgumentList "-m uv
 | Linux/macOS | `lsof -i :8321` |
 | Windows | `netstat -ano \| findstr 8321` |
 
-**修复：** 告知用户端口被占用，请用户终止占用进程或选择其他端口。如果是之前的 cooagents 实例，用户可以先终止它再重新启动。
+**修复：** 告知用户端口被占用，请终止占用进程或选择其他端口。如果是之前的 cooagents 实例，可先结束它再重新启动。
 
 ---
 
-## 8. 健康检查超时（30 秒内未返回 200）
+## 10. 健康检查超时（30 秒内 `/health` 未返回成功）
 
 **症状：** 多次 `curl http://127.0.0.1:8321/health` 无响应或返回错误
 
@@ -117,14 +162,34 @@ cat {repo_path}/cooagents.log
 
 | 原因 | 修复 |
 |------|------|
-| DB 初始化失败 | 检查 `.coop/state.db` 是否存在，重新执行 DB 初始化命令 |
+| DB 初始化失败 | 检查 `.coop/state.db` 是否存在，重新执行初始化 |
 | import 错误（缺少依赖） | 重新执行 `pip install -r requirements.txt` |
 | uvicorn 未安装 | 确认 venv 激活后安装：`pip install uvicorn[standard]` |
-| 配置文件缺失 | 确认 `config/settings.yaml` 存在（必须从 git repo clone，不支持手动创建目录结构） |
+| 配置文件缺失 | 确认 `config/settings.yaml` 存在 |
 
 ---
 
-## 9. git clone 失败
+## 11. Dashboard 根路径不返回 HTML
+
+**症状：**
+- `curl -s http://127.0.0.1:8321/health` 返回正常
+- `curl -s http://127.0.0.1:8321/` 不包含 `<html`
+
+**修复：**
+
+1. 先确认 `web/dist/index.html` 存在
+2. 重新执行：
+   ```bash
+   cd {repo_path}
+   bash scripts/bootstrap.sh
+   ```
+3. 再次启动服务并验证根路径
+
+只要根路径不返回 HTML，就不要宣称安装完成。
+
+---
+
+## 12. `git clone` 失败
 
 **症状：** `fatal: repository not found` 或 `Permission denied (publickey)`
 
@@ -133,15 +198,15 @@ cat {repo_path}/cooagents.log
 | 原因 | 修复 |
 |------|------|
 | 仓库地址错误 | 确认 URL 正确 |
-| SSH key 未配置 | `ssh -T git@github.com` 测试连接；需要配置 SSH key |
-| 网络问题 | 检查网络连接；尝试 HTTPS 地址替代 SSH |
+| SSH key 未配置 | `ssh -T git@github.com` 测试连接；按需配置 SSH key |
+| 网络问题 | 检查网络连接；必要时改用 HTTPS 地址 |
 
 ---
 
-## 10. config/settings.yaml 缺失
+## 13. `config/settings.yaml` 缺失
 
 **症状：** 阶段 ① 检查时 `config/settings.yaml` 不存在
 
-**原因：** 用户手动创建了目录结构而非从 git clone
+**原因：** 用户手动创建了目录结构而非通过 `git clone`
 
 **修复：** 必须从 git 仓库 clone 完整代码。手动创建目录结构不受支持。
