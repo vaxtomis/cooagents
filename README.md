@@ -97,17 +97,17 @@ bootstrap 脚本会自动完成：Python ≥3.11 校验 → git/node/npm 检查 
 ### 启动服务
 
 ```bash
-uvicorn src.app:app --host 127.0.0.1 --port 8321
+uvicorn src.app:app --host 0.0.0.0 --port 8321
 ```
 
 启动后访问 API 文档：
 
 | 地址 | 说明 |
 |------|------|
-| `http://127.0.0.1:8321/` | Dashboard（返回 HTML） |
-| `http://127.0.0.1:8321/docs` | Swagger UI（交互式） |
-| `http://127.0.0.1:8321/redoc` | ReDoc（阅读式） |
-| `http://127.0.0.1:8321/health` | 健康检查 |
+| `http://0.0.0.0:8321/` | Dashboard（返回 HTML） |
+| `http://0.0.0.0:8321/docs` | Swagger UI（交互式） |
+| `http://0.0.0.0:8321/redoc` | ReDoc（阅读式） |
+| `http://0.0.0.0:8321/health` | 健康检查 |
 
 ## 配置说明
 
@@ -115,7 +115,7 @@ uvicorn src.app:app --host 127.0.0.1 --port 8321
 
 ```yaml
 server:
-  host: 127.0.0.1
+  host: 0.0.0.0
   port: 8321
 
 database:

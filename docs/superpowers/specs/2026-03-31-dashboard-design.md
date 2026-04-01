@@ -6,7 +6,7 @@
 ## 概述
 
 Cooagents Dashboard 是 cooagents 多 Agent 协作编排系统的 Web 控制台，面向项目管理者、运维和开发者。
-当前实现已经覆盖 6 个真实页面：概览、Runs、Run 详情、Agent Hosts、Merge Queue、Event Log，并由 FastAPI 提供同源 API 与静态资源挂载。
+当前实现已经覆盖 5 个真实页面：概览、Runs、Run 详情、Agent Hosts、Merge Queue，并由 FastAPI 提供同源 API 与静态资源挂载。
 
 ## 技术栈
 
@@ -42,7 +42,6 @@ cooagents/
 │       │   ├── runs.ts
 │       │   ├── agents.ts
 │       │   ├── repos.ts
-│       │   ├── events.ts
 │       │   └── diagnostics.ts
 │       ├── hooks/
 │       │   ├── usePolling.ts
@@ -58,8 +57,7 @@ cooagents/
 │       │   ├── RunsListPage.tsx
 │       │   ├── RunDetailPage.tsx
 │       │   ├── AgentHostsPage.tsx
-│       │   ├── MergeQueuePage.tsx
-│       │   └── EventLogPage.tsx
+│       │   └── MergeQueuePage.tsx
 │       └── types/
 │           └── index.ts
 ├── routes/
@@ -87,7 +85,6 @@ cooagents/
   - `/runs/:runId`
   - `/agent-hosts`
   - `/merge-queue`
-  - `/events`
 
 ### 主题与样式
 
@@ -297,47 +294,6 @@ cooagents/
 - `GET /api/v1/runs/{run_id}/conflicts`
 - `POST /api/v1/runs/{run_id}/resolve-conflict`
 
-### 6. Event Log
-
-**路由：** `/events`
-
-**当前实现分两种模式：**
-
-#### Global mode
-- 当 URL 没有 `runId` 时生效
-- 提供全局浏览能力
-- 当前筛选项：
-  - `runId`
-  - `level`
-  - `spanType`
-  - `page`
-- 支持分页、payload 展开、跳转到 `/runs/:runId`
-
-#### Run diagnostic mode
-- 当 URL 带 `runId` 时生效
-- 页面切换为 run-first 故障排查视图
-- 顶部诊断摘要展示：
-  - status
-  - failed_at_stage
-  - errors
-  - warnings
-  - suspicious jobs
-  - last event
-- 主区展示“异常优先时间线”
-- 支持进一步筛选：
-  - `jobId`
-  - `eventType`
-  - `traceId`
-- 支持：
-  - Job diagnosis 面板
-  - Trace lookup 面板
-
-**主要数据来源：**
-- `GET /api/v1/events`
-- `GET /api/v1/runs/{run_id}/trace`
-- `GET /api/v1/jobs/{job_id}/diagnosis`
-- `GET /api/v1/traces/{trace_id}`
-
 ## 后端接口规格
 
 ### Runs
@@ -433,6 +389,4 @@ python -m uvicorn src.app:app --reload --port 8321
 1. 当前路由库是 React Router 6，不是 React Router 7。
 2. 当前没有 `web/tailwind.config.ts`，主题定义在 `web/src/index.css`。
 3. 当前没有独立的 `layouts/MainLayout.tsx`，页面壳层在 `web/src/router.tsx` 中实现。
-4. 全局 `Event Log` 模式目前不支持 `trace_id` 作为 `/api/v1/events` 查询参数；`traceId` 只在 run diagnosis 模式下用于 trace drilldown。
-5. `/api/v1/events` 返回的分页信息是 `limit / offset / has_more`，没有后端 `total` 字段。
-6. `Agent Hosts` 页面当前是“配置展示优先 + 运维操作保留”的实现，而不是单独的重运维控制台。
+4. `Agent Hosts` 页面当前是”配置展示优先 + 运维操作保留”的实现，而不是单独的重运维控制台。
