@@ -57,7 +57,7 @@ export function ApprovalAction({
           onClick={handleApprove}
           type="button"
         >
-          {pendingAction === "approve" ? "Approving¡­" : "Approve"}
+          {pendingAction === "approve" ? "Approving..." : "Approve"}
         </button>
         <button
           className="rounded-full bg-danger px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -65,7 +65,7 @@ export function ApprovalAction({
           onClick={handleReject}
           type="button"
         >
-          {pendingAction === "reject" ? "Rejecting¡­" : "Reject"}
+          {pendingAction === "reject" ? "Rejecting..." : "Reject"}
         </button>
       </div>
       {errorMessage ? <p className="text-xs text-danger">{errorMessage}</p> : null}

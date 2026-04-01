@@ -23,16 +23,11 @@ vi.mock("./pages/MergeQueuePage", () => ({
   MergeQueuePage: () => <div>merge queue page</div>,
 }));
 
-vi.mock("./pages/EventLogPage", () => ({
-  EventLogPage: () => <div>event log page</div>,
-}));
-
 describe("App shell", () => {
   it("renders the sidebar navigation and phase 2 routes", () => {
     const overviewLabel = "\u6982\u89c8";
     const hostsLabel = "Agent \u4e3b\u673a";
     const queueLabel = "Merge \u961f\u5217";
-    const eventsLabel = "\u4e8b\u4ef6\u65e5\u5fd7";
 
     const overview = render(<RouterProvider router={createAppRouter(["/"])} />);
 
@@ -41,7 +36,6 @@ describe("App shell", () => {
     expect(screen.getAllByRole("link", { name: "Runs" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: hostsLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: queueLabel }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: eventsLabel }).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: overviewLabel })).toBeInTheDocument();
     overview.unmount();
 
@@ -61,7 +55,5 @@ describe("App shell", () => {
     expect(screen.getByRole("heading", { name: queueLabel })).toBeInTheDocument();
     queue.unmount();
 
-    render(<RouterProvider router={createAppRouter(["/events"])} />);
-    expect(screen.getByRole("heading", { name: eventsLabel })).toBeInTheDocument();
   });
 });

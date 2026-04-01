@@ -5,7 +5,6 @@ import {
   CirclePlay,
   GitMerge,
   LayoutDashboard,
-  ScrollText,
   Server,
 } from "lucide-react";
 import {
@@ -17,7 +16,6 @@ import {
 } from "react-router-dom";
 import { AgentHostsPage } from "./pages/AgentHostsPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { EventLogPage } from "./pages/EventLogPage";
 import { MergeQueuePage } from "./pages/MergeQueuePage";
 import { RunDetailPage } from "./pages/RunDetailPage";
 import { RunsListPage } from "./pages/RunsListPage";
@@ -40,7 +38,6 @@ const navItems: NavItem[] = [
   { to: "/runs", label: "Runs", icon: CirclePlay },
   { to: "/agent-hosts", label: "Agent 主机", icon: Server },
   { to: "/merge-queue", label: "Merge 队列", icon: GitMerge },
-  { to: "/events", label: "事件日志", icon: ScrollText },
 ];
 
 function resolvePageMeta(pathname: string): PageMeta {
@@ -90,10 +87,9 @@ function resolvePageMeta(pathname: string): PageMeta {
   }
 
   return {
-    title: "事件日志",
-    eyebrow: "Global Trace",
-    description:
-      "Browse filtered events across runs with payload inspection, pagination, and direct links back into run detail.",
+    title: "",
+    eyebrow: "",
+    description: "",
   };
 }
 
@@ -147,8 +143,8 @@ function ShellLayout() {
           <div className="mt-auto rounded-[24px] border border-white/6 bg-panel p-4 text-sm text-muted">
             <p className="text-white">Operations console online</p>
             <p className="mt-2">
-              Overview, runs, host management, merge control, and event browsing now share
-              the same live shell.
+              Overview, runs, host management, and merge control now share the same live
+              shell.
             </p>
           </div>
         </aside>
@@ -202,7 +198,6 @@ const routes = [
       { path: "runs/:runId", element: <RunDetailPage /> },
       { path: "agent-hosts", element: <AgentHostsPage /> },
       { path: "merge-queue", element: <MergeQueuePage /> },
-      { path: "events", element: <EventLogPage /> },
     ],
   },
 ];

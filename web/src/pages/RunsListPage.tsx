@@ -13,11 +13,11 @@ const DEFAULT_SORT_ORDER = "desc" as const;
 
 const STATUS_OPTIONS = ["", "running", "completed", "failed", "cancelled"];
 const SORT_OPTIONS = [
-  { value: "updated_at", label: "×î½ü¸üĞÂ" },
-  { value: "created_at", label: "´´½¨Ê±¼ä" },
+  { value: "updated_at", label: "æ›´æ–°æ—¶é—´" },
+  { value: "created_at", label: "åˆ›å»ºæ—¶é—´" },
   { value: "ticket", label: "Ticket" },
-  { value: "current_stage", label: "½×¶Î" },
-  { value: "status", label: "×´Ì¬" },
+  { value: "current_stage", label: "é˜¶æ®µ" },
+  { value: "status", label: "çŠ¶æ€" },
 ];
 
 type FilterDraft = {
@@ -222,7 +222,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>Status</span>
             <select
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))}
               value={draft.status}
             >
@@ -238,7 +238,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>Stage</span>
             <select
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, stage: event.target.value }))}
               value={draft.stage}
             >
@@ -254,7 +254,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>Sort by</span>
             <select
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, sortBy: event.target.value }))}
               value={draft.sortBy}
             >
@@ -269,7 +269,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>Direction</span>
             <select
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, sortOrder: event.target.value === "asc" ? "asc" : "desc" }))}
               value={draft.sortOrder}
             >

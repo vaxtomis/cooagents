@@ -276,11 +276,6 @@ export interface MergeQueueItem {
   updated_at: string;
 }
 
-export interface EventsIndexResponse {
-  events: EventRecord[];
-  pagination: Pagination;
-}
-
 export interface ApprovePayload {
   gate: GateName;
   by: string;

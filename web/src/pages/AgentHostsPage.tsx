@@ -237,7 +237,7 @@ export function AgentHostsPage() {
 
               return (
                 <article
-                  className={`rounded-[24px] border bg-panel-strong/80 p-5 transition ${
+                  className={`flex flex-col rounded-[24px] border bg-panel-strong/80 p-5 transition ${
                     isSelected ? "border-accent/30 shadow-[0_0_0_1px_rgba(168,85,247,0.22)]" : "border-white/6"
                   }`}
                   key={host.id}
@@ -274,7 +274,7 @@ export function AgentHostsPage() {
                     )}
                   </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
+                  <div className="mt-auto flex flex-wrap gap-2 pt-4">
                     <button
                       className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
                       onClick={() => {
@@ -315,13 +315,15 @@ export function AgentHostsPage() {
           <p className="text-sm text-muted">
             {isEditing ? `Selected ${selectedHostId}` : "Register a new host or choose an existing host to edit."}
           </p>
-          <button
-            className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
-            onClick={resetForm}
-            type="button"
-          >
-            Create new
-          </button>
+          {isEditing && (
+            <button
+              className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+              onClick={resetForm}
+              type="button"
+            >
+              Create new
+            </button>
+          )}
         </div>
 
         <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
@@ -348,7 +350,7 @@ export function AgentHostsPage() {
 
           <Field label="Agent type">
             <select
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={updateForm("agent_type")}
               value={form.agent_type}
             >
