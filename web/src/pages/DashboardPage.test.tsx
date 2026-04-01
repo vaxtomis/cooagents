@@ -265,7 +265,7 @@ describe("DashboardPage", () => {
 
     renderPage();
 
-    await screen.findByText("运行中");
+    await screen.findAllByText("运行中");
     expectStatCard("运行中", "03");
     expectStatCard("待审批", "01");
     expectStatCard("合并中", "01");

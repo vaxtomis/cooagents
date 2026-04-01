@@ -19,7 +19,101 @@
           "ref": "vPvVB",
           "name": "sidebarRef",
           "x": 20,
-          "y": 20
+          "y": 20,
+          "descendants": {
+            "3DTxh": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16,
+              "y": 16
+            },
+            "4IdU9": {
+              "x": 8,
+              "y": 8.5
+            },
+            "VRgxe": {
+              "width": "fit_content",
+              "height": "fit_content",
+              "x": 60,
+              "y": 8
+            },
+            "FIqms": {
+              "y": 24
+            },
+            "wG6zG": {
+              "width": "fill_container",
+              "height": "fill_container",
+              "x": 16,
+              "y": 73
+            },
+            "yG9n0": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 32
+            },
+            "EubXG": {
+              "x": 12,
+              "y": 13
+            },
+            "Eq4XR": {
+              "x": 42,
+              "y": 12
+            },
+            "O8t1G": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 82
+            },
+            "2imju": {
+              "x": 12,
+              "y": 12
+            },
+            "q5h38": {
+              "x": 42,
+              "y": 12.5
+            },
+            "5R2Pc": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 130
+            },
+            "Z4zuX": {
+              "x": 12,
+              "y": 13
+            },
+            "bR65j": {
+              "x": 42,
+              "y": 12
+            },
+            "5P3np": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 180
+            },
+            "vvy4J": {
+              "x": 12,
+              "y": 13
+            },
+            "Cwcj7": {
+              "x": 42,
+              "y": 12
+            },
+            "0Gi52": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16,
+              "y": 893
+            },
+            "JaGoM": {
+              "x": 16,
+              "y": 16
+            },
+            "XKazk": {
+              "width": "fill_container",
+              "x": 16,
+              "y": 44
+            }
+          }
         },
         {
           "type": "frame",
@@ -83,9 +177,10 @@
                           "id": "HAlYy",
                           "name": "eyebrow",
                           "fill": "$accent",
-                          "content": "DASHBOARD OVERVIEW",
+                          "content": "仪表盘总览",
                           "fontFamily": "Inter",
                           "fontSize": 11,
+                          "fontWeight": "normal",
                           "letterSpacing": 3.5
                         },
                         {
@@ -106,7 +201,7 @@
                           "fill": "$muted",
                           "textGrowth": "fixed-width",
                           "width": 680,
-                          "content": "Live overview for approvals, active runs, host health, and the first-phase operational summary.",
+                          "content": "审批状态、活跃运行、主机健康度与首阶段运维摘要的实时总览。",
                           "lineHeight": 1.5,
                           "fontFamily": "Inter",
                           "fontSize": 15,
@@ -145,7 +240,7 @@
                           "id": "xnfsn",
                           "name": "liveTxt",
                           "fill": "$muted",
-                          "content": "LIVE SHELL",
+                          "content": "在线",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -400,9 +495,10 @@
                           "id": "GcpnD",
                           "name": "leftKicker",
                           "fill": "$muted-75",
-                          "content": "QUEUE SNAPSHOT",
+                          "content": "队列快照",
                           "fontFamily": "Inter",
                           "fontSize": 11,
+                          "fontWeight": "normal",
                           "letterSpacing": 3.3
                         },
                         {
@@ -410,7 +506,7 @@
                           "id": "Qgg5d",
                           "name": "leftTitle",
                           "fill": "#FFFFFF",
-                          "content": "活跃任务",
+                          "content": "活跃运行",
                           "fontFamily": "Inter",
                           "fontSize": 18,
                           "fontWeight": "600"
@@ -1417,18 +1513,50 @@
           "x": 20,
           "y": 20,
           "descendants": {
+            "3DTxh": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16,
+              "y": 16
+            },
+            "4IdU9": {
+              "x": 8,
+              "y": 8.5
+            },
+            "VRgxe": {
+              "width": "fit_content",
+              "height": "fit_content",
+              "x": 60,
+              "y": 8
+            },
+            "FIqms": {
+              "y": 24
+            },
+            "wG6zG": {
+              "width": "fill_container",
+              "height": "fill_container",
+              "x": 16,
+              "y": 73
+            },
             "yG9n0": {
               "fill": "#00000000",
               "stroke": {
                 "thickness": 0,
                 "fill": "#00000000"
-              }
+              },
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 32
             },
             "EubXG": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 12,
+              "y": 13
             },
             "Eq4XR": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 42,
+              "y": 12
             },
             "O8t1G": {
               "fill": "$accent-12",
@@ -1436,13 +1564,61 @@
                 "align": "inside",
                 "thickness": 1,
                 "fill": "$accent-30"
-              }
+              },
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 82
             },
             "2imju": {
-              "fill": "$accent"
+              "fill": "$accent",
+              "x": 12,
+              "y": 12
             },
             "q5h38": {
-              "fill": "$accent"
+              "fill": "$accent",
+              "x": 42,
+              "y": 12.5
+            },
+            "5R2Pc": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 130
+            },
+            "Z4zuX": {
+              "x": 12,
+              "y": 13
+            },
+            "bR65j": {
+              "x": 42,
+              "y": 12
+            },
+            "5P3np": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 180
+            },
+            "vvy4J": {
+              "x": 12,
+              "y": 13
+            },
+            "Cwcj7": {
+              "x": 42,
+              "y": 12
+            },
+            "0Gi52": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16,
+              "y": 893
+            },
+            "JaGoM": {
+              "x": 16,
+              "y": 16
+            },
+            "XKazk": {
+              "width": "fill_container",
+              "x": 16,
+              "y": 44
             }
           }
         },
@@ -1508,7 +1684,7 @@
                           "id": "KCwKw",
                           "name": "hdr2eye",
                           "fill": "$accent",
-                          "content": "SERVER-BACKED QUEUE",
+                          "content": "服务端查询",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -1532,7 +1708,7 @@
                           "fill": "$muted",
                           "textGrowth": "fixed-width",
                           "width": 680,
-                          "content": "Search, filter, sort, and page through real run data, then drill into run detail without leaving the shell.",
+                          "content": "搜索、筛选、排序并翻页浏览运行数据，点击即可进入运行详情。",
                           "lineHeight": 1.5,
                           "fontFamily": "Inter",
                           "fontSize": 15,
@@ -1571,7 +1747,7 @@
                           "id": "Dh7HB",
                           "name": "hdr2live",
                           "fill": "$muted",
-                          "content": "LIVE SHELL",
+                          "content": "在线",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -1613,7 +1789,7 @@
                       "id": "qdtGb",
                       "name": "filterKicker",
                       "fill": "$muted-75",
-                      "content": "QUERY CONTROLS",
+                      "content": "查询条件",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "normal",
@@ -1624,7 +1800,7 @@
                       "id": "0xlGi",
                       "name": "filterTitle",
                       "fill": "#FFFFFF",
-                      "content": "Run filters",
+                      "content": "筛选条件",
                       "fontFamily": "Inter",
                       "fontSize": 18,
                       "fontWeight": "600"
@@ -1656,7 +1832,7 @@
                               "id": "2TPJn",
                               "name": "f1label",
                               "fill": "$muted",
-                              "content": "Ticket",
+                              "content": "工单",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -1684,7 +1860,7 @@
                                   "id": "3lhiY",
                                   "name": "f1text",
                                   "fill": "$muted-75",
-                                  "content": "Search by ticket",
+                                  "content": "按工单搜索",
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
                                   "fontWeight": "normal"
@@ -1706,7 +1882,7 @@
                               "id": "C3t7a",
                               "name": "f2label",
                               "fill": "$muted",
-                              "content": "Status",
+                              "content": "状态",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -1734,7 +1910,7 @@
                                   "id": "klTNT",
                                   "name": "f2text",
                                   "fill": "#FFFFFF",
-                                  "content": "All",
+                                  "content": "全部",
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
                                   "fontWeight": "normal"
@@ -1756,7 +1932,7 @@
                               "id": "qeLKc",
                               "name": "f3label",
                               "fill": "$muted",
-                              "content": "Stage",
+                              "content": "阶段",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -1784,7 +1960,7 @@
                                   "id": "Gtc5H",
                                   "name": "f3text",
                                   "fill": "#FFFFFF",
-                                  "content": "All",
+                                  "content": "全部",
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
                                   "fontWeight": "normal"
@@ -1806,7 +1982,7 @@
                               "id": "rn7Jw",
                               "name": "f4label",
                               "fill": "$muted",
-                              "content": "Sort by",
+                              "content": "排序",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -1861,7 +2037,7 @@
                               "id": "bIIjf",
                               "name": "applyTxt",
                               "fill": "#09090b",
-                              "content": "Apply",
+                              "content": "查询",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "500"
@@ -1891,7 +2067,7 @@
                               "id": "C6Eo2",
                               "name": "refreshTxt",
                               "fill": "#FFFFFF",
-                              "content": "Refresh",
+                              "content": "刷新",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "500"
@@ -1924,7 +2100,7 @@
                       "id": "UYeTt",
                       "name": "listKicker",
                       "fill": "$muted-75",
-                      "content": "SERVER-BACKED QUERY",
+                      "content": "服务端查询",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "normal",
@@ -1935,7 +2111,7 @@
                       "id": "QpM3y",
                       "name": "listTitle",
                       "fill": "#FFFFFF",
-                      "content": "Runs list",
+                      "content": "运行列表",
                       "fontFamily": "Inter",
                       "fontSize": 18,
                       "fontWeight": "600"
@@ -1963,7 +2139,7 @@
                           "id": "7jQJe",
                           "name": "pagSummary",
                           "fill": "$muted",
-                          "content": "Showing 1-10 of 42 runs",
+                          "content": "显示第 1-10 条，共 42 条",
                           "fontFamily": "Inter",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -1997,7 +2173,7 @@
                                   "id": "Oo6Zg",
                                   "name": "prevTxt",
                                   "fill": "#FFFFFF",
-                                  "content": "Previous",
+                                  "content": "上一页",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "500"
@@ -2026,7 +2202,7 @@
                                   "id": "jeEe1",
                                   "name": "pageIndTxt",
                                   "fill": "$muted",
-                                  "content": "Page 1 / 5",
+                                  "content": "第 1 / 5 页",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -2055,7 +2231,7 @@
                                   "id": "OSvVV",
                                   "name": "nextTxt",
                                   "fill": "#FFFFFF",
-                                  "content": "Next",
+                                  "content": "下一页",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "500"
@@ -2392,7 +2568,7 @@
                                           "id": "VX3nj",
                                           "name": "rr1m1l",
                                           "fill": "$muted-75",
-                                          "content": "STAGE",
+                                          "content": "阶段",
                                           "fontFamily": "Inter",
                                           "fontSize": 10,
                                           "fontWeight": "normal",
@@ -2431,7 +2607,7 @@
                                           "id": "f5BmB",
                                           "name": "rr1m2l",
                                           "fill": "$muted-75",
-                                          "content": "UPDATED",
+                                          "content": "更新时间",
                                           "fontFamily": "Inter",
                                           "fontSize": 10,
                                           "fontWeight": "normal",
@@ -2470,7 +2646,7 @@
                                           "id": "JUXnR",
                                           "name": "rr1m3l",
                                           "fill": "$muted-75",
-                                          "content": "REPO",
+                                          "content": "仓库",
                                           "fontFamily": "Inter",
                                           "fontSize": 10,
                                           "fontWeight": "normal",
@@ -2505,7 +2681,7 @@
                                               "id": "Gx03z",
                                               "name": "rr1m3btxt",
                                               "fill": "#09090b",
-                                              "content": "Open",
+                                              "content": "查看",
                                               "fontFamily": "Inter",
                                               "fontSize": 11,
                                               "fontWeight": "500"
@@ -2794,21 +2970,50 @@
           "x": 20,
           "y": 20,
           "descendants": {
+            "3DTxh": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16,
+              "y": 16
+            },
+            "4IdU9": {
+              "x": 8,
+              "y": 8.5
+            },
+            "VRgxe": {
+              "width": "fit_content",
+              "height": "fit_content",
+              "x": 60,
+              "y": 8
+            },
+            "FIqms": {
+              "y": 24
+            },
             "wG6zG": {
-              "height": "fill_container"
+              "height": "fill_container",
+              "width": "fill_container",
+              "x": 16,
+              "y": 73
             },
             "yG9n0": {
               "fill": "#00000000",
               "stroke": {
                 "thickness": 0,
                 "fill": "#00000000"
-              }
+              },
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 32
             },
             "EubXG": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 12,
+              "y": 13
             },
             "Eq4XR": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 42,
+              "y": 12
             },
             "O8t1G": {
               "fill": "$accent-12",
@@ -2816,16 +3021,61 @@
                 "align": "inside",
                 "thickness": 1,
                 "fill": "$accent-30"
-              }
+              },
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 82
             },
             "2imju": {
-              "fill": "$accent"
+              "fill": "$accent",
+              "x": 12,
+              "y": 12
             },
             "q5h38": {
-              "fill": "$accent"
+              "fill": "$accent",
+              "x": 42,
+              "y": 12.5
+            },
+            "5R2Pc": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 130
+            },
+            "Z4zuX": {
+              "x": 12,
+              "y": 13
+            },
+            "bR65j": {
+              "x": 42,
+              "y": 12
+            },
+            "5P3np": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 180
+            },
+            "vvy4J": {
+              "x": 12,
+              "y": 13
+            },
+            "Cwcj7": {
+              "x": 42,
+              "y": 12
             },
             "0Gi52": {
-              "y": 1007
+              "y": 1043,
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16
+            },
+            "JaGoM": {
+              "x": 16,
+              "y": 16
+            },
+            "XKazk": {
+              "width": "fill_container",
+              "x": 16,
+              "y": 44
             }
           }
         },
@@ -2891,7 +3141,7 @@
                           "id": "Mmt2F",
                           "name": "hdr3eye",
                           "fill": "$accent",
-                          "content": "LIVE RUN TIMELINE",
+                          "content": "实时运行时间线",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -2902,7 +3152,7 @@
                           "id": "g7VoD",
                           "name": "hdr3title",
                           "fill": "#FFFFFF",
-                          "content": "Run Detail",
+                          "content": "运行详情",
                           "fontFamily": "Inter",
                           "fontSize": 34,
                           "fontWeight": "600",
@@ -2915,7 +3165,7 @@
                           "fill": "$muted",
                           "textGrowth": "fixed-width",
                           "width": 680,
-                          "content": "Inspect the current run state with jobs, artifacts, trace events, approval actions, and SSE refresh.",
+                          "content": "查看当前运行状态：任务、产物、事件追踪、审批操作，以及基于 SSE 的实时刷新。",
                           "lineHeight": 1.5,
                           "fontFamily": "Inter",
                           "fontSize": 15,
@@ -2954,7 +3204,7 @@
                           "id": "DYHcz",
                           "name": "hdr3live",
                           "fill": "$muted",
-                          "content": "LIVE SHELL",
+                          "content": "在线",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -3003,7 +3253,7 @@
                           "id": "lbP6v",
                           "name": "sumKicker",
                           "fill": "$muted-75",
-                          "content": "PRIMARY CONTEXT",
+                          "content": "基本信息",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -3014,7 +3264,7 @@
                           "id": "1LyBO",
                           "name": "sumTitle",
                           "fill": "#FFFFFF",
-                          "content": "Run summary",
+                          "content": "运行摘要",
                           "fontFamily": "Inter",
                           "fontSize": 18,
                           "fontWeight": "600"
@@ -3053,7 +3303,7 @@
                                   "id": "xvYME",
                                   "name": "m1l",
                                   "fill": "$muted-75",
-                                  "content": "TICKET",
+                                  "content": "工单",
                                   "fontFamily": "Inter",
                                   "fontSize": 10,
                                   "fontWeight": "normal",
@@ -3092,7 +3342,7 @@
                                   "id": "EQRTk",
                                   "name": "m2l",
                                   "fill": "$muted-75",
-                                  "content": "CURRENT STAGE",
+                                  "content": "当前阶段",
                                   "fontFamily": "Inter",
                                   "fontSize": 10,
                                   "fontWeight": "normal",
@@ -3131,7 +3381,7 @@
                                   "id": "eriMZ",
                                   "name": "m3l",
                                   "fill": "$muted-75",
-                                  "content": "STATUS",
+                                  "content": "状态",
                                   "fontFamily": "Inter",
                                   "fontSize": 10,
                                   "fontWeight": "normal",
@@ -3170,7 +3420,7 @@
                                   "id": "x746r",
                                   "name": "m4l",
                                   "fill": "$muted-75",
-                                  "content": "REPO",
+                                  "content": "仓库",
                                   "fontFamily": "Inter",
                                   "fontSize": 10,
                                   "fontWeight": "normal",
@@ -3285,7 +3535,7 @@
                               "id": "cM2ET",
                               "name": "updTime",
                               "fill": "$muted",
-                              "content": "Updated 04-01 14:32",
+                              "content": "更新于 04-01 14:32",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -3470,7 +3720,7 @@
                           "id": "EDTvY",
                           "name": "detKicker",
                           "fill": "$muted-75",
-                          "content": "DETAIL SURFACE",
+                          "content": "详情面板",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -3481,7 +3731,7 @@
                           "id": "maNMB",
                           "name": "detTitle",
                           "fill": "#FFFFFF",
-                          "content": "Artifacts",
+                          "content": "产物",
                           "fontFamily": "Inter",
                           "fontSize": 18,
                           "fontWeight": "600"
@@ -3521,7 +3771,7 @@
                                   "id": "mcVJi",
                                   "name": "tab1txt",
                                   "fill": "#FFFFFF",
-                                  "content": "Artifacts",
+                                  "content": "产物",
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
                                   "fontWeight": "500"
@@ -3608,7 +3858,7 @@
                                   "id": "HkyQu",
                                   "name": "tab4txt",
                                   "fill": "$muted",
-                                  "content": "Stage历史",
+                                  "content": "阶段历史",
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
                                   "fontWeight": "normal"
@@ -3697,7 +3947,7 @@
                                       "id": "bbvUt",
                                       "name": "art1btxt",
                                       "fill": "#FFFFFF",
-                                      "content": "Inspect",
+                                      "content": "查看",
                                       "fontFamily": "Inter",
                                       "fontSize": 12,
                                       "fontWeight": "500"
@@ -3772,7 +4022,7 @@
                                       "id": "veiL2",
                                       "name": "art2btxt",
                                       "fill": "#FFFFFF",
-                                      "content": "Inspect",
+                                      "content": "查看",
                                       "fontFamily": "Inter",
                                       "fontSize": 12,
                                       "fontWeight": "500"
@@ -3816,7 +4066,7 @@
                           "id": "dYI5T",
                           "name": "sseKicker",
                           "fill": "$muted-75",
-                          "content": "SSE STATUS",
+                          "content": "SSE 状态",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -3827,7 +4077,7 @@
                           "id": "E10aA",
                           "name": "sseTitle",
                           "fill": "#FFFFFF",
-                          "content": "Live connection",
+                          "content": "实时连接",
                           "fontFamily": "Inter",
                           "fontSize": 18,
                           "fontWeight": "600"
@@ -3861,7 +4111,7 @@
                                   "id": "U3A1Q",
                                   "name": "sseName",
                                   "fill": "#FFFFFF",
-                                  "content": "Run events stream",
+                                  "content": "运行事件流",
                                   "fontFamily": "Inter",
                                   "fontSize": 14,
                                   "fontWeight": "normal"
@@ -3897,7 +4147,7 @@
                                       "id": "xzHaN",
                                       "name": "sseBtxt",
                                       "fill": "$success",
-                                      "content": "Live",
+                                      "content": "在线",
                                       "fontFamily": "Inter",
                                       "fontSize": 12,
                                       "fontWeight": "500"
@@ -3913,7 +4163,7 @@
                               "fill": "$muted",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Run events trigger a throttled detail refresh so artifacts and jobs stay current.",
+                              "content": "相关运行事件会触发节流刷新，使产物和任务数据保持最新。",
                               "lineHeight": 1.5,
                               "fontFamily": "Inter",
                               "fontSize": 13,
@@ -3944,7 +4194,7 @@
                           "id": "w67sH",
                           "name": "apprvKicker",
                           "fill": "$muted-75",
-                          "content": "GATE STATUS",
+                          "content": "审批状态",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -3955,7 +4205,7 @@
                           "id": "ZHhFW",
                           "name": "apprvTitle",
                           "fill": "#FFFFFF",
-                          "content": "Approval history",
+                          "content": "审批历史",
                           "fontFamily": "Inter",
                           "fontSize": 18,
                           "fontWeight": "600"
@@ -4207,7 +4457,7 @@
                                           "id": "Gd9bV",
                                           "name": "gate3meta",
                                           "fill": "$muted",
-                                          "content": "DEV gate is active now.",
+                                          "content": "DEV 门控已激活。",
                                           "fontFamily": "Inter",
                                           "fontSize": 12,
                                           "fontWeight": "normal"
@@ -4245,7 +4495,7 @@
                                           "id": "j8VB7",
                                           "name": "gate3btxt",
                                           "fill": "$warning",
-                                          "content": "Awaiting",
+                                          "content": "等待中",
                                           "fontFamily": "Inter",
                                           "fontSize": 11,
                                           "fontWeight": "500"
@@ -4281,7 +4531,7 @@
                           "id": "Miqx7",
                           "name": "ctrlKicker",
                           "fill": "$muted-75",
-                          "content": "ACTIONS",
+                          "content": "操作",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -4292,7 +4542,7 @@
                           "id": "Jr97b",
                           "name": "ctrlTitle",
                           "fill": "#FFFFFF",
-                          "content": "Operator controls",
+                          "content": "操作控制",
                           "fontFamily": "Inter",
                           "fontSize": 18,
                           "fontWeight": "600"
@@ -4332,7 +4582,7 @@
                                   "id": "HfjfO",
                                   "name": "ctrlApName",
                                   "fill": "#FFFFFF",
-                                  "content": "Approval gate",
+                                  "content": "审批门控",
                                   "fontFamily": "Inter",
                                   "fontSize": 14,
                                   "fontWeight": "normal"
@@ -4344,7 +4594,7 @@
                                   "fill": "$muted",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "DEV_REVIEW is awaiting a decision.",
+                                  "content": "DEV_REVIEW 等待审批决策中。",
                                   "lineHeight": 1.4,
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
@@ -4382,7 +4632,7 @@
                                           "id": "NA9l7",
                                           "name": "ctrlApvTxt",
                                           "fill": "#09090b",
-                                          "content": "Approve",
+                                          "content": "批准",
                                           "fontFamily": "Inter",
                                           "fontSize": 13,
                                           "fontWeight": "500"
@@ -4408,7 +4658,7 @@
                                           "id": "XspMf",
                                           "name": "ctrlRejTxt",
                                           "fill": "#FFFFFF",
-                                          "content": "Reject",
+                                          "content": "驳回",
                                           "fontFamily": "Inter",
                                           "fontSize": 13,
                                           "fontWeight": "500"
@@ -4440,7 +4690,7 @@
                                   "id": "Rdhg5",
                                   "name": "cancelName",
                                   "fill": "#FFFFFF",
-                                  "content": "Run termination",
+                                  "content": "终止运行",
                                   "fontFamily": "Inter",
                                   "fontSize": 14,
                                   "fontWeight": "normal"
@@ -4452,7 +4702,7 @@
                                   "fill": "$muted",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "Cancel the current run when you need to stop further work.",
+                                  "content": "需要停止后续工作时，取消当前运行。",
                                   "lineHeight": 1.4,
                                   "fontFamily": "Inter",
                                   "fontSize": 13,
@@ -4475,7 +4725,7 @@
                                       "id": "LjKJb",
                                       "name": "cancelTxt",
                                       "fill": "#FFFFFF",
-                                      "content": "Cancel run",
+                                      "content": "取消运行",
                                       "fontFamily": "Inter",
                                       "fontSize": 13,
                                       "fontWeight": "500"
@@ -4516,18 +4766,63 @@
           "x": 20,
           "y": 20,
           "descendants": {
+            "3DTxh": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16,
+              "y": 16
+            },
+            "4IdU9": {
+              "x": 8,
+              "y": 8.5
+            },
+            "VRgxe": {
+              "width": "fit_content",
+              "height": "fit_content",
+              "x": 60,
+              "y": 8
+            },
+            "FIqms": {
+              "y": 24
+            },
+            "wG6zG": {
+              "width": "fill_container",
+              "height": "fill_container",
+              "x": 16,
+              "y": 73
+            },
             "yG9n0": {
               "fill": "#00000000",
               "stroke": {
                 "thickness": 0,
                 "fill": "#00000000"
-              }
+              },
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 32
             },
             "EubXG": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 12,
+              "y": 13
             },
             "Eq4XR": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 42,
+              "y": 12
+            },
+            "O8t1G": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 82
+            },
+            "2imju": {
+              "x": 12,
+              "y": 12
+            },
+            "q5h38": {
+              "x": 42,
+              "y": 12.5
             },
             "5R2Pc": {
               "fill": "$accent-12",
@@ -4535,13 +4830,48 @@
                 "align": "inside",
                 "thickness": 1,
                 "fill": "$accent-30"
-              }
+              },
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 130
             },
             "Z4zuX": {
-              "fill": "$accent"
+              "fill": "$accent",
+              "x": 12,
+              "y": 13
             },
             "bR65j": {
-              "fill": "$accent"
+              "fill": "$accent",
+              "x": 42,
+              "y": 12
+            },
+            "5P3np": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 180
+            },
+            "vvy4J": {
+              "x": 12,
+              "y": 13
+            },
+            "Cwcj7": {
+              "x": 42,
+              "y": 12
+            },
+            "0Gi52": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16,
+              "y": 893
+            },
+            "JaGoM": {
+              "x": 16,
+              "y": 16
+            },
+            "XKazk": {
+              "width": "fill_container",
+              "x": 16,
+              "y": 44
             }
           }
         },
@@ -4607,7 +4937,7 @@
                           "id": "2heM6",
                           "name": "hdr4eye",
                           "fill": "$accent",
-                          "content": "FLEET OPERATIONS",
+                          "content": "集群运维",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -4631,7 +4961,7 @@
                           "fill": "$muted",
                           "textGrowth": "fixed-width",
                           "width": 680,
-                          "content": "Manage host inventory, update capacity, run health checks, and remove stale agents from the active pool.",
+                          "content": "管理主机清单、调整并发容量、执行健康检查、移除失效 Agent。",
                           "lineHeight": 1.5,
                           "fontFamily": "Inter",
                           "fontSize": 15,
@@ -4670,7 +5000,7 @@
                           "id": "OoxmV",
                           "name": "hdr4live",
                           "fill": "$muted",
-                          "content": "LIVE SHELL",
+                          "content": "在线",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -4712,7 +5042,7 @@
                       "id": "RgyLX",
                       "name": "hrKicker",
                       "fill": "$muted-75",
-                      "content": "HOST REGISTRY",
+                      "content": "主机注册",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "normal",
@@ -4723,7 +5053,7 @@
                       "id": "5fMBY",
                       "name": "hrTitle",
                       "fill": "#FFFFFF",
-                      "content": "Agent host configuration",
+                      "content": "Agent 主机配置",
                       "fontFamily": "Inter",
                       "fontSize": 18,
                       "fontWeight": "600"
@@ -4776,7 +5106,7 @@
                                   "id": "uEh7t",
                                   "name": "hc1kicker",
                                   "fill": "$muted-75",
-                                  "content": "HOST CONFIGURATION",
+                                  "content": "主机配置",
                                   "fontFamily": "Inter",
                                   "fontSize": 10,
                                   "fontWeight": "normal",
@@ -4881,7 +5211,7 @@
                                           "id": "Ky5J3",
                                           "name": "cfg1l",
                                           "fill": "$muted-75",
-                                          "content": "AGENT TYPE",
+                                          "content": "AGENT 类型",
                                           "fontFamily": "Inter",
                                           "fontSize": 9,
                                           "fontWeight": "normal",
@@ -4923,7 +5253,7 @@
                                           "id": "lMd6m",
                                           "name": "cfg2l",
                                           "fill": "$muted-75",
-                                          "content": "SSH KEY",
+                                          "content": "SSH 密钥",
                                           "fontFamily": "Inter",
                                           "fontSize": 9,
                                           "fontWeight": "normal",
@@ -4934,7 +5264,7 @@
                                           "id": "ybfG2",
                                           "name": "cfg2v",
                                           "fill": "#FFFFFF",
-                                          "content": "Configured",
+                                          "content": "已配置",
                                           "fontFamily": "Inter",
                                           "fontSize": 13,
                                           "fontWeight": "500"
@@ -4975,7 +5305,7 @@
                                           "id": "OCXwT",
                                           "name": "cfg3l",
                                           "fill": "$muted-75",
-                                          "content": "MAX CONCURRENT",
+                                          "content": "最大并发",
                                           "fontFamily": "Inter",
                                           "fontSize": 9,
                                           "fontWeight": "normal",
@@ -5017,7 +5347,7 @@
                                           "id": "KI6BA",
                                           "name": "cfg4l",
                                           "fill": "$muted-75",
-                                          "content": "CURRENT LOAD",
+                                          "content": "当前负载",
                                           "fontFamily": "Inter",
                                           "fontSize": 9,
                                           "fontWeight": "normal",
@@ -5028,7 +5358,7 @@
                                           "id": "Uec8e",
                                           "name": "cfg4v",
                                           "fill": "#FFFFFF",
-                                          "content": "2/4 in use",
+                                          "content": "2/4 使用中",
                                           "fontFamily": "Inter",
                                           "fontSize": 13,
                                           "fontWeight": "500"
@@ -5063,7 +5393,7 @@
                                   "id": "MLtXc",
                                   "name": "labelsL",
                                   "fill": "$muted-75",
-                                  "content": "LABELS",
+                                  "content": "标签",
                                   "fontFamily": "Inter",
                                   "fontSize": 9,
                                   "fontWeight": "normal",
@@ -5164,7 +5494,7 @@
                                       "id": "RyLKN",
                                       "name": "editTxt",
                                       "fill": "#FFFFFF",
-                                      "content": "Edit",
+                                      "content": "编辑",
                                       "fontFamily": "Inter",
                                       "fontSize": 12,
                                       "fontWeight": "500"
@@ -5192,7 +5522,7 @@
                                       "id": "3iqCK",
                                       "name": "checkTxt",
                                       "fill": "#FFFFFF",
-                                      "content": "Check",
+                                      "content": "检查",
                                       "fontFamily": "Inter",
                                       "fontSize": 12,
                                       "fontWeight": "500"
@@ -5215,7 +5545,7 @@
                                       "id": "s4qSn",
                                       "name": "delTxt",
                                       "fill": "#FFFFFF",
-                                      "content": "Delete",
+                                      "content": "删除",
                                       "fontFamily": "Inter",
                                       "fontSize": 12,
                                       "fontWeight": "500"
@@ -5255,7 +5585,7 @@
                                   "id": "1HtvK",
                                   "name": "hc2kicker",
                                   "fill": "$muted-75",
-                                  "content": "HOST CONFIGURATION",
+                                  "content": "主机配置",
                                   "fontFamily": "Inter",
                                   "fontSize": 10,
                                   "fontWeight": "normal",
@@ -5360,7 +5690,7 @@
                                           "id": "bqwOm",
                                           "name": "hc2c1l",
                                           "fill": "$muted-75",
-                                          "content": "AGENT TYPE",
+                                          "content": "AGENT 类型",
                                           "fontFamily": "Inter",
                                           "fontSize": 9,
                                           "fontWeight": "normal",
@@ -5402,7 +5732,7 @@
                                           "id": "EDlhI",
                                           "name": "hc2c2l",
                                           "fill": "$muted-75",
-                                          "content": "SSH KEY",
+                                          "content": "SSH 密钥",
                                           "fontFamily": "Inter",
                                           "fontSize": 9,
                                           "fontWeight": "normal",
@@ -5413,7 +5743,7 @@
                                           "id": "NSh4V",
                                           "name": "hc2c2v",
                                           "fill": "#FFFFFF",
-                                          "content": "Missing",
+                                          "content": "未配置",
                                           "fontFamily": "Inter",
                                           "fontSize": 13,
                                           "fontWeight": "500"
@@ -5454,7 +5784,7 @@
                                           "id": "8JDYx",
                                           "name": "hc2c3l",
                                           "fill": "$muted-75",
-                                          "content": "MAX CONCURRENT",
+                                          "content": "最大并发",
                                           "fontFamily": "Inter",
                                           "fontSize": 9,
                                           "fontWeight": "normal",
@@ -5496,7 +5826,7 @@
                                           "id": "X1D4u",
                                           "name": "hc2c4l",
                                           "fill": "$muted-75",
-                                          "content": "CURRENT LOAD",
+                                          "content": "当前负载",
                                           "fontFamily": "Inter",
                                           "fontSize": 9,
                                           "fontWeight": "normal",
@@ -5507,7 +5837,7 @@
                                           "id": "su9lu",
                                           "name": "hc2c4v",
                                           "fill": "#FFFFFF",
-                                          "content": "0/3 in use",
+                                          "content": "0/3 使用中",
                                           "fontFamily": "Inter",
                                           "fontSize": 13,
                                           "fontWeight": "500"
@@ -5550,31 +5880,83 @@
           "y": 20,
           "name": "sb5",
           "descendants": {
+            "3DTxh": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16,
+              "y": 16
+            },
+            "4IdU9": {
+              "x": 8,
+              "y": 8.5
+            },
+            "VRgxe": {
+              "width": "fit_content",
+              "height": "fit_content",
+              "x": 60,
+              "y": 8
+            },
+            "FIqms": {
+              "y": 24
+            },
+            "wG6zG": {
+              "width": "fill_container",
+              "height": "fill_container",
+              "x": 16,
+              "y": 73
+            },
             "yG9n0": {
               "fill": "#00000000",
               "stroke": {
                 "thickness": 0,
                 "fill": "#00000000"
-              }
+              },
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 32
             },
             "EubXG": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 12,
+              "y": 13
             },
             "Eq4XR": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 42,
+              "y": 12
             },
             "O8t1G": {
               "fill": "#00000000",
               "stroke": {
                 "thickness": 0,
                 "fill": "#00000000"
-              }
+              },
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 82
             },
             "2imju": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 12,
+              "y": 12
             },
             "q5h38": {
-              "fill": "$muted"
+              "fill": "$muted",
+              "x": 42,
+              "y": 12.5
+            },
+            "5R2Pc": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 130
+            },
+            "Z4zuX": {
+              "x": 12,
+              "y": 13
+            },
+            "bR65j": {
+              "x": 42,
+              "y": 12
             },
             "5P3np": {
               "fill": "$accent-12",
@@ -5582,13 +5964,35 @@
                 "align": "inside",
                 "thickness": 1,
                 "fill": "$accent-30"
-              }
+              },
+              "width": "fill_container",
+              "height": "fit_content",
+              "y": 180
             },
             "vvy4J": {
-              "fill": "$accent"
+              "fill": "$accent",
+              "x": 12,
+              "y": 13
             },
             "Cwcj7": {
-              "fill": "$accent"
+              "fill": "$accent",
+              "x": 42,
+              "y": 12
+            },
+            "0Gi52": {
+              "width": "fill_container",
+              "height": "fit_content",
+              "x": 16,
+              "y": 893
+            },
+            "JaGoM": {
+              "x": 16,
+              "y": 16
+            },
+            "XKazk": {
+              "width": "fill_container",
+              "x": 16,
+              "y": 44
             }
           }
         },
@@ -5654,7 +6058,7 @@
                           "id": "mVk4g",
                           "name": "hdr5eye",
                           "fill": "$accent",
-                          "content": "MERGE CONTROL",
+                          "content": "队列管理",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -5678,7 +6082,7 @@
                           "fill": "$muted",
                           "textGrowth": "fixed-width",
                           "width": 680,
-                          "content": "Review queued pull requests, reorder priority, resolve conflicts, and trigger merges from one unified view.",
+                          "content": "查看待合并项、跟踪冲突状态、关联运行数据，执行合并或跳过操作。",
                           "lineHeight": 1.5,
                           "fontFamily": "Inter",
                           "fontSize": 15,
@@ -5717,7 +6121,7 @@
                           "id": "rzpYe",
                           "name": "hdr5live",
                           "fill": "$muted",
-                          "content": "LIVE SHELL",
+                          "content": "在线",
                           "fontFamily": "Inter",
                           "fontSize": 11,
                           "fontWeight": "normal",
@@ -5760,7 +6164,7 @@
                       "id": "Vb4Ew",
                       "name": "mqKicker",
                       "fill": "$muted-75",
-                      "content": "PRIORITY QUEUE",
+                      "content": "队列清单",
                       "fontFamily": "Inter",
                       "fontSize": 11,
                       "fontWeight": "normal",
@@ -5771,7 +6175,7 @@
                       "id": "QR0J5",
                       "name": "mqTitle",
                       "fill": "#FFFFFF",
-                      "content": "Queued pull requests",
+                      "content": "待合并请求",
                       "fontFamily": "Inter",
                       "fontSize": 18,
                       "fontWeight": "600"
@@ -5799,7 +6203,7 @@
                           "id": "5ixJQ",
                           "name": "mqPagSummary",
                           "fill": "$muted",
-                          "content": "4 items in queue",
+                          "content": "队列中 4 项",
                           "fontFamily": "Inter",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -5843,7 +6247,7 @@
                                   "id": "1e85d",
                                   "name": "mqMergeAllTxt",
                                   "fill": "$accent",
-                                  "content": "Merge All",
+                                  "content": "全部合并",
                                   "fontFamily": "Inter",
                                   "fontSize": 12,
                                   "fontWeight": "600"
@@ -5938,7 +6342,7 @@
                                               "type": "text",
                                               "id": "S8hGi",
                                               "fill": "$danger",
-                                              "content": "P0 — Critical",
+                                              "content": "P0 — 紧急",
                                               "fontFamily": "Inter",
                                               "fontSize": 11,
                                               "fontWeight": "600"
@@ -5966,7 +6370,7 @@
                                               "type": "text",
                                               "id": "LqsNX",
                                               "fill": "$success",
-                                              "content": "Checks passed",
+                                              "content": "检查通过",
                                               "fontFamily": "Inter",
                                               "fontSize": 11,
                                               "fontWeight": "normal"
@@ -6039,7 +6443,7 @@
                                           "type": "text",
                                           "id": "a6qOT",
                                           "fill": "#FFFFFF",
-                                          "content": "Merge",
+                                          "content": "合并",
                                           "fontFamily": "Inter",
                                           "fontSize": 12,
                                           "fontWeight": "600"
@@ -6143,7 +6547,7 @@
                                               "type": "text",
                                               "id": "fH230",
                                               "fill": "$warning",
-                                              "content": "P1 — High",
+                                              "content": "P1 — 高",
                                               "fontFamily": "Inter",
                                               "fontSize": 11,
                                               "fontWeight": "600"
@@ -6171,7 +6575,7 @@
                                               "type": "text",
                                               "id": "9aVw8",
                                               "fill": "$success",
-                                              "content": "Checks passed",
+                                              "content": "检查通过",
                                               "fontFamily": "Inter",
                                               "fontSize": 11,
                                               "fontWeight": "normal"
@@ -6242,7 +6646,7 @@
                                           "type": "text",
                                           "id": "o0Oln",
                                           "fill": "#FFFFFF",
-                                          "content": "Merge",
+                                          "content": "合并",
                                           "fontFamily": "Inter",
                                           "fontSize": 12,
                                           "fontWeight": "600"
@@ -6323,7 +6727,7 @@
                                               "type": "text",
                                               "id": "TT88H",
                                               "fill": "$accent",
-                                              "content": "P2 — Normal",
+                                              "content": "P2 — 普通",
                                               "fontFamily": "Inter",
                                               "fontSize": 11,
                                               "fontWeight": "600"
@@ -6351,7 +6755,7 @@
                                               "type": "text",
                                               "id": "09KX4",
                                               "fill": "$warning",
-                                              "content": "Checks running",
+                                              "content": "检查中",
                                               "fontFamily": "Inter",
                                               "fontSize": 11,
                                               "fontWeight": "normal"
@@ -6427,7 +6831,7 @@
                                           "type": "text",
                                           "id": "kUFiH",
                                           "fill": "$muted",
-                                          "content": "Waiting",
+                                          "content": "等待中",
                                           "fontFamily": "Inter",
                                           "fontSize": 12,
                                           "fontWeight": "600"
@@ -6530,7 +6934,7 @@
                                               "type": "text",
                                               "id": "byC03",
                                               "fill": "$accent",
-                                              "content": "P2 — Normal",
+                                              "content": "P2 — 普通",
                                               "fontFamily": "Inter",
                                               "fontSize": 11,
                                               "fontWeight": "600"
@@ -6558,7 +6962,7 @@
                                               "type": "text",
                                               "id": "NTyHN",
                                               "fill": "$danger",
-                                              "content": "Conflict",
+                                              "content": "冲突",
                                               "fontFamily": "Inter",
                                               "fontSize": 11,
                                               "fontWeight": "normal"
@@ -6634,7 +7038,7 @@
                                           "type": "text",
                                           "id": "9PNBL",
                                           "fill": "$danger",
-                                          "content": "Resolve",
+                                          "content": "解决",
                                           "fontFamily": "Inter",
                                           "fontSize": 12,
                                           "fontWeight": "600"
@@ -6733,7 +7137,7 @@
                   "id": "FIqms",
                   "name": "logoSub",
                   "fill": "$muted",
-                  "content": "operations dashboard",
+                  "content": "运维控制台",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -6914,7 +7318,7 @@
               "id": "JaGoM",
               "name": "infoTitle",
               "fill": "#FFFFFF",
-              "content": "Operations console online",
+              "content": "运维控制台已上线",
               "fontFamily": "Inter",
               "fontSize": 14,
               "fontWeight": "normal"
@@ -6926,7 +7330,7 @@
               "fill": "$muted",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "Overview, runs, host management, and merge control now share the same live shell.",
+              "content": "概览、Runs、主机管理与合并控制共享同一实时终端。",
               "lineHeight": 1.5,
               "fontFamily": "Inter",
               "fontSize": 13,

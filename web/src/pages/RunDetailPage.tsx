@@ -148,12 +148,13 @@ function resolveApprovalState({
   gate: GateName;
   reviewStage: string;
 }) {
+  const DECISION_LABELS: Record<string, string> = { approved: "已通过", rejected: "已驳回" };
   const record = getLatestApproval(approvals, gate);
   if (record) {
     return {
       byline: `${record.by} · ${formatTimestamp(record.created_at)}`,
       comment: record.comment,
-      label: record.decision,
+      label: DECISION_LABELS[record.decision] ?? record.decision,
       status: record.decision,
     };
   }

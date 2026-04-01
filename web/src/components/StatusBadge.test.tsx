@@ -17,7 +17,7 @@ describe("StatusBadge", () => {
   it("maps approved statuses to the expected label and tone", () => {
     render(<StatusBadge status="running" />);
 
-    const badge = screen.getByRole("status", { name: "running" });
+    const badge = screen.getByRole("status", { name: "运行中" });
     expect(badge).toHaveAttribute("data-tone", "success");
     expect(badge).toHaveClass("bg-success/12", "text-success");
   });
