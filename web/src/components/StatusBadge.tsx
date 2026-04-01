@@ -122,7 +122,7 @@ export function StatusBadge({
   return (
     <span
       aria-label={resolvedLabel}
-      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${meta.className} ${className}`.trim()}
+      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium ${meta.className} ${className}`.trim()}
       data-tone={meta.tone}
       role="status"
     >

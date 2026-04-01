@@ -44,7 +44,7 @@ describe("App shell", () => {
     runs.unmount();
 
     const detail = render(<RouterProvider router={createAppRouter(["/runs/run-123"])} />);
-    expect(screen.getByRole("heading", { name: "Run Detail" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "运行详情" })).toBeInTheDocument();
     detail.unmount();
 
     const hosts = render(<RouterProvider router={createAppRouter(["/agent-hosts"])} />);

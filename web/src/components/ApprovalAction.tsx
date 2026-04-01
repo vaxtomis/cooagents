@@ -29,7 +29,7 @@ export function ApprovalAction({
       await approveRun(runId, { gate, by, comment });
       await onComplete?.();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Approval failed");
+      setErrorMessage(error instanceof Error ? error.message : "批准失败");
     } finally {
       setPendingAction(null);
     }
@@ -42,7 +42,7 @@ export function ApprovalAction({
       await rejectRun(runId, { gate, by, reason: reason?.trim() || DEFAULT_REJECT_REASON });
       await onComplete?.();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Rejection failed");
+      setErrorMessage(error instanceof Error ? error.message : "驳回失败");
     } finally {
       setPendingAction(null);
     }
@@ -57,7 +57,7 @@ export function ApprovalAction({
           onClick={handleApprove}
           type="button"
         >
-          {pendingAction === "approve" ? "Approving..." : "Approve"}
+          {pendingAction === "approve" ? "批准中..." : "批准"}
         </button>
         <button
           className="rounded-full bg-danger px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -65,7 +65,7 @@ export function ApprovalAction({
           onClick={handleReject}
           type="button"
         >
-          {pendingAction === "reject" ? "Rejecting..." : "Reject"}
+          {pendingAction === "reject" ? "驳回中..." : "驳回"}
         </button>
       </div>
       {errorMessage ? <p className="text-xs text-danger">{errorMessage}</p> : null}

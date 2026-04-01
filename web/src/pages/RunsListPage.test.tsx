@@ -78,7 +78,7 @@ describe("RunsListPage", () => {
     expect(screen.getByDisplayValue("PROJ")).toBeInTheDocument();
     expect(screen.getByDisplayValue("DEV_RUNNING")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
 
     await waitFor(() => {
       expect(listRuns).toHaveBeenCalledTimes(2);
@@ -92,7 +92,7 @@ describe("RunsListPage", () => {
       ticket: "PROJ",
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open PROJ-210" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开 PROJ-210" }));
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/runs/run-210");

@@ -37,7 +37,7 @@ describe("ApprovalAction", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "批准" }));
     await waitFor(() => {
       expect(approveRun).toHaveBeenCalledWith("run-1", {
         by: "tester",
@@ -46,7 +46,7 @@ describe("ApprovalAction", () => {
       });
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "驳回" }));
     await waitFor(() => {
       expect(rejectRun).toHaveBeenCalledWith("run-1", {
         by: "tester",

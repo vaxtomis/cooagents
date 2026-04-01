@@ -44,45 +44,45 @@ function resolvePageMeta(pathname: string): PageMeta {
   if (pathname === "/") {
     return {
       title: "概览",
-      eyebrow: "Dashboard Overview",
+      eyebrow: "仪表盘总览",
       description:
-        "Live overview for approvals, active runs, host health, and the first-phase operational summary.",
+        "审批状态、活跃运行、主机健康度与首阶段运维摘要的实时总览。",
     };
   }
 
   if (pathname === "/runs") {
     return {
       title: "Runs",
-      eyebrow: "Server-backed Queue",
+      eyebrow: "服务端查询",
       description:
-        "Search, filter, sort, and page through real run data, then drill into run detail without leaving the shell.",
+        "搜索、筛选、排序并翻页浏览运行数据，点击即可进入运行详情。",
     };
   }
 
   if (pathname.startsWith("/runs/")) {
     return {
-      title: "Run Detail",
-      eyebrow: "Live Run Timeline",
+      title: "运行详情",
+      eyebrow: "实时运行时间线",
       description:
-        "Inspect the current run state with jobs, artifacts, trace events, approval actions, cancellation, and run-scoped SSE refresh.",
+        "查看当前运行状态：任务、产物、事件追踪、审批操作、取消控制，以及基于 SSE 的实时刷新。",
     };
   }
 
   if (pathname === "/agent-hosts") {
     return {
       title: "Agent 主机",
-      eyebrow: "Fleet Operations",
+      eyebrow: "集群运维",
       description:
-        "Manage host inventory, update capacity, run health checks, and remove stale agents from the active pool.",
+        "管理主机清单、调整并发容量、执行健康检查、移除失效 Agent。",
     };
   }
 
   if (pathname === "/merge-queue") {
     return {
       title: "Merge 队列",
-      eyebrow: "Queue Operations",
+      eyebrow: "队列管理",
       description:
-        "Inspect merge candidates, track conflict status, enrich queue rows with run data, and control merge or skip actions.",
+        "查看待合并项、跟踪冲突状态、关联运行数据，执行合并或跳过操作。",
     };
   }
 
@@ -130,7 +130,7 @@ function ShellLayout() {
             </div>
             <div>
               <p className="text-lg font-semibold tracking-tight text-white">Cooagents</p>
-              <p className="text-xs text-muted">operations dashboard</p>
+              <p className="text-xs text-muted">运维控制台</p>
             </div>
           </div>
 
@@ -141,10 +141,9 @@ function ShellLayout() {
           </nav>
 
           <div className="mt-auto rounded-[24px] border border-white/6 bg-panel p-4 text-sm text-muted">
-            <p className="text-white">Operations console online</p>
+            <p className="text-white">运维控制台已上线</p>
             <p className="mt-2">
-              Overview, runs, host management, and merge control now share the same live
-              shell.
+              概览、Runs、主机管理与合并控制共享同一实时终端。
             </p>
           </div>
         </aside>
@@ -167,7 +166,7 @@ function ShellLayout() {
 
                 <div className="hidden rounded-full border border-white/8 bg-white/4 px-4 py-2 text-xs uppercase tracking-[0.24em] text-muted md:flex md:items-center md:gap-2">
                   <span className="size-2 rounded-full bg-success" />
-                  live shell
+                  在线
                 </div>
               </div>
 

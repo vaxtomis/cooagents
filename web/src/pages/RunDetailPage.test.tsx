@@ -225,11 +225,11 @@ describe("RunDetailPage", () => {
 
     expect(await screen.findByText("PROJ-210")).toBeInTheDocument();
     expect(screen.getByText("Development output is ready for review.")).toBeInTheDocument();
-    expect(screen.getByText("Live")).toBeInTheDocument();
-    expect(screen.getByText("Approval history")).toBeInTheDocument();
+    expect(screen.getByText("在线")).toBeInTheDocument();
+    expect(screen.getByText("审批历史")).toBeInTheDocument();
     expect(screen.getByText("Req sign-off complete")).toBeInTheDocument();
     expect(screen.getByText("Design sign-off complete")).toBeInTheDocument();
-    expect(screen.getByText("Awaiting decision")).toBeInTheDocument();
+    expect(screen.getByText("等待决策")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(getRun).toHaveBeenCalledWith("run-210");
@@ -243,27 +243,27 @@ describe("RunDetailPage", () => {
     expect(useSSE).toHaveBeenCalled();
     expect(sseState.lastCall?.url).toBe("/api/v1/runs/run-210/events/stream");
 
-    expect(screen.getByRole("tab", { name: "Artifacts" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "产物" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Agent输出" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "事件追踪" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Stage历史" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "阶段历史" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Inspect docs/plan.md" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看 docs/plan.md" }));
     expect(await screen.findByText((_, element) => element?.textContent === "# Plan\nship it")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "@@ -1 +1 @@\n- old\n+ new")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Agent输出" }));
-    fireEvent.click(screen.getByRole("button", { name: "Load output job-dev-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "加载输出 job-dev-1" }));
     expect(await screen.findByText("build ok")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "事件追踪" }));
     expect(screen.getByText("stage.changed")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Stage历史" }));
+    fireEvent.click(screen.getByRole("tab", { name: "阶段历史" }));
     expect(screen.getByText("REQ_COLLECTING -> REQ_REVIEW")).toBeInTheDocument();
     expect(screen.getByText("REQ_REVIEW -> DESIGN_RUNNING")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消运行" }));
     await waitFor(() => {
       expect(cancelRun).toHaveBeenCalledWith("run-210", false);
     });

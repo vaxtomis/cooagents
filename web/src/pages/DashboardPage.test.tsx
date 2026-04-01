@@ -277,7 +277,7 @@ describe("DashboardPage", () => {
     expect(screen.getByText("codex-worker-01")).toBeInTheDocument();
     expect(screen.getByText("claude-host-02")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "批准" }));
 
     await waitFor(() => {
       expect(approveRun).toHaveBeenCalledWith("run-2", {
@@ -293,7 +293,7 @@ describe("DashboardPage", () => {
 
     await waitFor(() => {
       expectStatCard("待审批", "00");
-      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "批准" })).not.toBeInTheDocument();
     });
   });
 });

@@ -135,33 +135,33 @@ describe("MergeQueuePage", () => {
       expect(getRun).toHaveBeenCalledWith("run-2");
     });
 
-    fireEvent.change(screen.getByLabelText("Merge priority"), { target: { value: "7" } });
-    fireEvent.click(screen.getByRole("button", { name: "Merge run-1" }));
+    fireEvent.change(screen.getByLabelText("合并优先级"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "合并 run-1" }));
 
     await waitFor(() => {
       expect(mergeRun).toHaveBeenCalledWith("run-1", 7);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Inspect run-2" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看 run-2" }));
 
     await waitFor(() => {
       expect(getRunConflicts).toHaveBeenCalledWith("run-2");
     });
 
-    expect(await screen.findByText("Conflict detected")).toBeInTheDocument();
+    expect(await screen.findByText("检测到冲突")).toBeInTheDocument();
     expect(await screen.findByText("src/live-conflict-a.ts")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Resolve and requeue run-2" }));
+    fireEvent.click(screen.getByRole("button", { name: "解决冲突并重新入队 run-2" }));
 
     await waitFor(() => {
       expect(resolveRunConflict).toHaveBeenCalledWith("run-2", "dashboard");
     });
     expect(await screen.findByText("Requeued run-2")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.queryByText("Conflict detected")).not.toBeInTheDocument();
+      expect(screen.queryByText("检测到冲突")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Skip run-2" }));
+    fireEvent.click(screen.getByRole("button", { name: "跳过 run-2" }));
 
     await waitFor(() => {
       expect(skipMergeRun).toHaveBeenCalledWith("run-2");
@@ -212,9 +212,9 @@ describe("MergeQueuePage", () => {
     });
 
     expect(await screen.findByText("src/fallback-a.ts")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry conflict details" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试冲突详情" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Resolve and requeue run-7" }));
+    fireEvent.click(screen.getByRole("button", { name: "解决冲突并重新入队 run-7" }));
 
     await waitFor(() => {
       expect(resolveRunConflict).toHaveBeenCalledWith("run-7", "dashboard");

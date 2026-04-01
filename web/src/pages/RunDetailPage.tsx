@@ -32,10 +32,10 @@ const GATE_DEFINITIONS: Array<{ gate: GateName; label: string; reviewStage: stri
 ];
 
 const DETAIL_TABS = [
-  { id: "artifacts", label: "Artifacts" },
+  { id: "artifacts", label: "产物" },
   { id: "jobs", label: "Agent\u8F93\u51FA" },
   { id: "trace", label: "\u4E8B\u4EF6\u8FFD\u8E2A" },
-  { id: "history", label: "Stage\u5386\u53F2" },
+  { id: "history", label: "阶段历史" },
 ] as const;
 
 type DetailTabId = (typeof DETAIL_TABS)[number]["id"];
@@ -116,13 +116,13 @@ function formatDuration(seconds: number | null | undefined) {
 function resolveConnectionLabel(state: SseConnectionState) {
   switch (state) {
     case "live":
-      return { label: "Live", tone: "success" as const };
+      return { label: "在线", tone: "success" as const };
     case "reconnecting":
-      return { label: "Reconnecting", tone: "warning" as const };
+      return { label: "重连中", tone: "warning" as const };
     case "offline":
-      return { label: "Offline", tone: "danger" as const };
+      return { label: "离线", tone: "danger" as const };
     default:
-      return { label: "Connecting", tone: "muted" as const };
+      return { label: "连接中", tone: "muted" as const };
   }
 }
 
@@ -160,26 +160,26 @@ function resolveApprovalState({
 
   if (currentStage === reviewStage) {
     return {
-      byline: `${gate.toUpperCase()} gate is active now.`,
+      byline: `${gate.toUpperCase()} 审批门控已激活。`,
       comment: null,
-      label: "Awaiting decision",
+      label: "等待决策",
       status: "review",
     };
   }
 
   if (getStageOrder(currentStage) < getStageOrder(reviewStage)) {
     return {
-      byline: "Gate has not been reached yet.",
+      byline: "尚未到达此门控。",
       comment: null,
-      label: "Not reached",
+      label: "未到达",
       status: "muted",
     };
   }
 
   return {
-    byline: "Gate was passed without a stored approval record.",
+    byline: "门控已通过，但无审批记录。",
     comment: null,
-    label: "No record",
+    label: "无记录",
     status: "muted",
   };
 }
@@ -196,11 +196,11 @@ function ApprovalHistory({ approvals, currentStage }: { approvals: ApprovalRecor
         });
 
         return (
-          <article className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4" key={definition.gate}>
+          <article className="overflow-hidden rounded-2xl border border-white/6 bg-panel-strong/80 p-4" key={definition.gate}>
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-medium text-white">{definition.label}</p>
-                <p className="mt-2 text-xs text-muted">{state.byline}</p>
+                <p className="mt-2 truncate text-xs text-muted">{state.byline}</p>
               </div>
               <StatusBadge label={state.label} status={state.status} />
             </div>
@@ -231,7 +231,7 @@ function ArtifactsPanel({
   return (
     <div>
       {artifacts.length === 0 ? (
-        <EmptyState copy="No artifacts are available for this run yet." />
+        <EmptyState copy="当前运行暂无产物。" />
       ) : (
         <div className="space-y-3">
           {artifacts.map((artifact) => (
@@ -248,7 +248,7 @@ function ArtifactsPanel({
                   onClick={() => void onInspect(artifact)}
                   type="button"
                 >
-                  {`Inspect ${artifact.path}`}
+                  {`查看 ${artifact.path}`}
                 </button>
               </div>
             </article>
@@ -260,7 +260,7 @@ function ArtifactsPanel({
         <div className="mt-4 rounded-[24px] border border-white/6 bg-black/20 p-4">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-medium text-white">{artifactState.path}</p>
-            {artifactState.loading ? <span className="text-xs text-muted">Loading...</span> : null}
+            {artifactState.loading ? <span className="text-xs text-muted">加载中...</span> : null}
           </div>
           {artifactState.error ? <p className="mt-3 text-sm text-danger">{artifactState.error}</p> : null}
           {artifactState.content ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.content}</pre> : null}
@@ -281,7 +281,7 @@ function JobsPanel({
   onLoadOutput: (job: JobRecord) => void | Promise<void>;
 }) {
   if (jobs.length === 0) {
-    return <EmptyState copy="No jobs have been registered for this run yet." />;
+    return <EmptyState copy="当前运行暂无任务记录。" />;
   }
 
   return (
@@ -302,10 +302,10 @@ function JobsPanel({
                 onClick={() => void onLoadOutput(job)}
                 type="button"
               >
-                {`Load output ${job.id}`}
+                {`加载输出 ${job.id}`}
               </button>
             </div>
-            {outputState.loading ? <p className="mt-3 text-sm text-muted">Loading output...</p> : null}
+            {outputState.loading ? <p className="mt-3 text-sm text-muted">加载输出中...</p> : null}
             {outputState.error ? <p className="mt-3 text-sm text-danger">{outputState.error}</p> : null}
             {outputState.output ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{outputState.output}</pre> : null}
           </article>
@@ -317,7 +317,7 @@ function JobsPanel({
 
 function TraceEvents({ trace }: { trace: RunTraceResponse }) {
   if (trace.events.length === 0) {
-    return <EmptyState copy="No trace events were returned for this run." />;
+    return <EmptyState copy="当前运行暂无追踪事件。" />;
   }
 
   return (
@@ -344,7 +344,7 @@ function StageHistoryPanel({ steps }: { steps: StepRecord[] | undefined }) {
   const orderedSteps = [...(steps ?? [])].sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at));
 
   if (orderedSteps.length === 0) {
-    return <EmptyState copy="No stage transitions have been recorded for this run." />;
+    return <EmptyState copy="当前运行暂无阶段变更记录。" />;
   }
 
   return (
@@ -354,7 +354,7 @@ function StageHistoryPanel({ steps }: { steps: StepRecord[] | undefined }) {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-white">{`${step.from_stage} -> ${step.to_stage}`}</p>
-              <p className="mt-2 text-xs text-muted">Triggered by {step.triggered_by ?? "system"}</p>
+              <p className="mt-2 text-xs text-muted">触发者 {step.triggered_by ?? "system"}</p>
             </div>
             <span className="text-xs text-muted">{formatTimestamp(step.created_at)}</span>
           </div>
@@ -423,8 +423,8 @@ export function RunDetailPage() {
   if (!runId) {
     return (
       <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
-        <h2 className="text-lg font-semibold text-white">Run id is missing</h2>
-        <p className="mt-2 text-sm text-muted">Open this page from the dashboard or runs list to inspect a specific run.</p>
+        <h2 className="text-lg font-semibold text-white">缺少运行 ID</h2>
+        <p className="mt-2 text-sm text-muted">请从概览或运行列表进入以查看具体运行。</p>
       </section>
     );
   }
@@ -433,10 +433,10 @@ export function RunDetailPage() {
   if (error) {
     return (
       <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
-        <h2 className="text-lg font-semibold text-white">Run detail failed to load</h2>
-        <p className="mt-2 text-sm text-muted">Retry the run detail queries to restore artifacts, jobs, and trace data.</p>
+        <h2 className="text-lg font-semibold text-white">运行详情加载失败</h2>
+        <p className="mt-2 text-sm text-muted">重试查询以恢复产物、任务和追踪数据。</p>
         <button className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black" onClick={() => void refreshAll()} type="button">
-          Retry
+          重试
         </button>
       </section>
     );
@@ -472,7 +472,7 @@ export function RunDetailPage() {
         artifactId: artifact.id,
         content: "",
         diff: "",
-        error: loadError instanceof Error ? loadError.message : "Artifact detail failed to load",
+        error: loadError instanceof Error ? loadError.message : "产物详情加载失败",
         loading: false,
         path: artifact.path,
       });
@@ -488,7 +488,7 @@ export function RunDetailPage() {
       setJobOutputs((current) => ({
         ...current,
         [job.id]: {
-          error: loadError instanceof Error ? loadError.message : "Job output failed to load",
+          error: loadError instanceof Error ? loadError.message : "任务输出加载失败",
           loading: false,
         },
       }));
@@ -500,9 +500,9 @@ export function RunDetailPage() {
     setCancelMessage(null);
     try {
       await cancelRun(resolvedRunId, false);
-      setCancelMessage("Cancellation requested. Waiting for the run stream to confirm the terminal state.");
+      setCancelMessage("已请求取消。等待运行流确认终止状态。");
     } catch (cancelError) {
-      setCancelMessage(cancelError instanceof Error ? cancelError.message : "Cancel request failed");
+      setCancelMessage(cancelError instanceof Error ? cancelError.message : "取消请求失败");
     } finally {
       setCancelPending(false);
     }
@@ -513,47 +513,47 @@ export function RunDetailPage() {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-4">
-        <SectionPanel kicker="Primary Context" title="Run summary">
+        <SectionPanel kicker="基本信息" title="运行摘要">
           <div className="grid gap-3 md:grid-cols-4">
-            <MetricCard label="Ticket" value={runData.ticket} />
-            <MetricCard label="Current stage" value={runData.current_stage} />
-            <MetricCard label="Status" value={runData.status} />
-            <MetricCard label="Repo" value={runData.repo_path} />
+            <MetricCard label="工单" value={runData.ticket} />
+            <MetricCard label="当前阶段" value={runData.current_stage} />
+            <MetricCard label="状态" value={runData.status} />
+            <MetricCard label="仓库" value={runData.repo_path} />
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <StatusBadge status={runData.status} />
             <StatusBadge label={runData.current_stage} status={activeGate ? "review" : runData.status} />
-            <span className="text-sm text-muted">Updated {formatTimestamp(runData.updated_at)}</span>
+            <span className="text-sm text-muted">更新于 {formatTimestamp(runData.updated_at)}</span>
           </div>
 
-          <p className="mt-5 text-sm leading-6 text-muted">{briefData.current.summary || runData.description || "No summary provided for this run."}</p>
+          <p className="mt-5 text-sm leading-6 text-muted">{briefData.current.summary || runData.description || "暂无运行摘要。"}</p>
 
           <div className="mt-5">
             <StageProgress failedAtStage={runData.failed_at_stage} stage={runData.current_stage} />
           </div>
         </SectionPanel>
 
-        <SectionPanel kicker="Current Step" title="Execution context">
+        <SectionPanel kicker="当前步骤" title="执行上下文">
           <div className="grid gap-3 md:grid-cols-3">
-            <MetricCard label="Action" value={briefData.current.action_type} />
-            <MetricCard label="Elapsed" value={formatDuration(briefData.current.elapsed_sec)} />
-            <MetricCard label="Artifacts" value={String(briefData.progress.artifacts_count)} />
+            <MetricCard label="操作类型" value={briefData.current.action_type} />
+            <MetricCard label="已用时" value={formatDuration(briefData.current.elapsed_sec)} />
+            <MetricCard label="产物数" value={String(briefData.progress.artifacts_count)} />
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
-              <p className="text-xs uppercase tracking-[0.24em] text-muted/75">Current description</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-muted/75">当前描述</p>
               <p className="mt-3 text-sm text-muted">{briefData.current.description}</p>
             </div>
             <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
-              <p className="text-xs uppercase tracking-[0.24em] text-muted/75">Previous stage</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-muted/75">上一阶段</p>
               <p className="mt-3 text-sm text-white">{briefData.previous?.stage ?? "-"}</p>
-              <p className="mt-2 text-xs text-muted">{briefData.previous?.result ?? "No prior transition recorded."}</p>
+              <p className="mt-2 text-xs text-muted">{briefData.previous?.result ?? "暂无阶段转换记录。"}</p>
             </div>
           </div>
         </SectionPanel>
 
-        <SectionPanel kicker="Detail Surface" title={activeTabMeta.label}>
+        <SectionPanel kicker="详情面板" title={activeTabMeta.label}>
           <div aria-label="Run detail tabs" className="flex flex-wrap gap-2" role="tablist">
             {DETAIL_TABS.map((tab) => {
               const selected = tab.id === activeTab;
@@ -587,26 +587,26 @@ export function RunDetailPage() {
       </div>
 
       <div className="space-y-4">
-        <SectionPanel kicker="SSE Status" title="Live connection">
+        <SectionPanel kicker="SSE 状态" title="实时连接">
           <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-white">Run events stream</span>
+              <span className="text-sm text-white">运行事件流</span>
               <StatusBadge label={connection.label} status={connection.tone} />
             </div>
-            <p className="mt-3 text-sm text-muted">Relevant run events trigger a throttled detail refresh so artifacts, jobs, and trace stay current without maintaining a separate client state machine.</p>
+            <p className="mt-3 text-sm text-muted">相关运行事件会触发节流刷新，使产物、任务和追踪数据保持最新。</p>
           </div>
         </SectionPanel>
 
-        <SectionPanel kicker="Gate Status" title="Approval history">
+        <SectionPanel kicker="审批状态" title="审批历史">
           <ApprovalHistory approvals={runData.approvals} currentStage={runData.current_stage} />
         </SectionPanel>
 
-        <SectionPanel kicker="Actions" title="Operator controls">
+        <SectionPanel kicker="操作" title="操作控制">
           <div className="space-y-4">
             {activeGate ? (
               <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
-                <p className="text-sm text-white">Approval gate</p>
-                <p className="mt-2 text-sm text-muted">{runData.current_stage} is awaiting a decision.</p>
+                <p className="text-sm text-white">审批门控</p>
+                <p className="mt-2 text-sm text-muted">{runData.current_stage} 等待审批决策中。</p>
                 <div className="mt-4">
                   <ApprovalAction by="detail" gate={activeGate} onComplete={refreshAll} runId={resolvedRunId} />
                 </div>
@@ -614,15 +614,15 @@ export function RunDetailPage() {
             ) : null}
 
             <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
-              <p className="text-sm text-white">Run termination</p>
-              <p className="mt-2 text-sm text-muted">Cancel the current run when you need to stop further work and wait for a terminal event.</p>
+              <p className="text-sm text-white">终止运行</p>
+              <p className="mt-2 text-sm text-muted">需要停止后续工作时，取消当前运行并等待终止事件。</p>
               <button
                 className="mt-4 rounded-full bg-danger px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={cancelPending || runData.status !== "running"}
                 onClick={() => void handleCancelRun()}
                 type="button"
               >
-                {cancelPending ? "Cancelling..." : "Cancel run"}
+                {cancelPending ? "取消中..." : "取消运行"}
               </button>
               {cancelMessage ? <p className="mt-3 text-sm text-muted">{cancelMessage}</p> : null}
             </div>

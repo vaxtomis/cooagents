@@ -207,25 +207,25 @@ export function MergeQueuePage() {
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <SectionPanel kicker="Queue Inventory" title="Merge queue">
+      <SectionPanel kicker="队列清单" title="合并队列">
         {queueQuery.error || enrichedQuery.error ? (
           <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
-            <h3 className="text-base font-semibold text-white">Merge queue failed to load</h3>
+            <h3 className="text-base font-semibold text-white">合并队列加载失败</h3>
             <p className="mt-2 text-sm text-muted">
-              Retry the queue query to restore merge status and run context.
+              重试查询以恢复合并状态和运行上下文。
             </p>
             <button
               className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black"
               onClick={() => void refreshAll()}
               type="button"
             >
-              Retry
+              重试
             </button>
           </div>
         ) : !queueQuery.data || !enrichedQuery.data ? (
           <LoadingSkeleton />
         ) : queue.length === 0 ? (
-          <EmptyState copy="No runs are waiting in the merge queue." />
+          <EmptyState copy="合并队列中暂无等待项。" />
         ) : (
           <div className="space-y-3">
             {queue.map((item) => {
@@ -259,7 +259,7 @@ export function MergeQueuePage() {
                       onClick={() => setSelectedRunId(item.run_id)}
                       type="button"
                     >
-                      {`Inspect ${item.run_id}`}
+                      {`查看 ${item.run_id}`}
                     </button>
                     <button
                       className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-60"
@@ -267,7 +267,7 @@ export function MergeQueuePage() {
                       onClick={() => void handleMerge(item.run_id, item.priority)}
                       type="button"
                     >
-                      {pendingState === "merge" ? "Queueing..." : `Merge ${item.run_id}`}
+                      {pendingState === "merge" ? "排队中..." : `合并 ${item.run_id}`}
                     </button>
                     <button
                       className="rounded-full bg-danger px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -275,7 +275,7 @@ export function MergeQueuePage() {
                       onClick={() => void handleSkip(item.run_id)}
                       type="button"
                     >
-                      {pendingState === "skip" ? "Skipping..." : `Skip ${item.run_id}`}
+                      {pendingState === "skip" ? "跳过中..." : `跳过 ${item.run_id}`}
                     </button>
                   </div>
                 </article>
@@ -285,7 +285,7 @@ export function MergeQueuePage() {
         )}
       </SectionPanel>
 
-      <SectionPanel kicker="Selected Item" title="Queue detail">
+      <SectionPanel kicker="选中项" title="队列详情">
         {selected ? (
           <div className="space-y-4">
             <div className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4">
@@ -300,21 +300,21 @@ export function MergeQueuePage() {
               </div>
 
               <div className="mt-4 grid gap-3">
-                <DetailLine label="Run id" value={selected.run_id} />
+                <DetailLine label="运行 ID" value={selected.run_id} />
                 <DetailLine
-                  label="Repo"
+                  label="仓库"
                   value={selected.run?.repo_path ?? "Run details unavailable"}
                 />
                 <DetailLine
-                  label="Stage"
+                  label="阶段"
                   value={selected.run?.current_stage ?? "Run details unavailable"}
                 />
-                <DetailLine label="Updated" value={formatTimestamp(selected.updated_at)} />
+                <DetailLine label="更新时间" value={formatTimestamp(selected.updated_at)} />
               </div>
             </div>
 
             <label className="block space-y-2 text-sm text-muted">
-              <span>Merge priority</span>
+              <span>合并优先级</span>
               <input
                 className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
                 min={0}
@@ -328,37 +328,37 @@ export function MergeQueuePage() {
               <div className="rounded-[24px] border border-warning/20 bg-warning/10 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium text-white">Conflict detected</p>
+                    <p className="text-sm font-medium text-white">检测到冲突</p>
                     <p className="mt-2 text-sm text-muted">
-                      Review the conflicted files, resolve them externally, then requeue this run.
+                      查看冲突文件，在外部解决后重新入队。
                     </p>
                   </div>
                   <span className="rounded-full border border-warning/20 bg-warning/10 px-3 py-1 text-xs text-warning">
-                    {`${conflictFiles.length} files`}
+                    {`${conflictFiles.length} 个文件`}
                   </span>
                 </div>
 
                 {conflictsQuery.error ? (
                   <div className="mt-4 rounded-2xl border border-danger/15 bg-danger/8 p-4">
                     <p className="text-sm text-white">
-                      Conflict detail refresh failed. Showing the queue snapshot instead.
+                      冲突详情刷新失败，显示队列快照。
                     </p>
                     <button
                       className="mt-3 rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
                       onClick={() => void conflictsQuery.mutate()}
                       type="button"
                     >
-                      Retry conflict details
+                      重试冲突详情
                     </button>
                   </div>
                 ) : null}
 
                 <div className="mt-4 rounded-[24px] border border-white/6 bg-panel-strong/80 p-4">
-                  <p className="text-sm font-medium text-white">Conflict files</p>
+                  <p className="text-sm font-medium text-white">冲突文件</p>
                   {selected.status === "conflict" && conflictsQuery.isLoading && !conflictsQuery.data ? (
-                    <p className="mt-3 text-sm text-muted">Loading conflict details...</p>
+                    <p className="mt-3 text-sm text-muted">加载冲突详情...</p>
                   ) : conflictFiles.length === 0 ? (
-                    <p className="mt-3 text-sm text-muted">No conflict files reported</p>
+                    <p className="mt-3 text-sm text-muted">未报告冲突文件</p>
                   ) : (
                     <ul className="mt-3 space-y-2 text-sm text-muted">
                       {conflictFiles.map((file) => (
@@ -375,15 +375,15 @@ export function MergeQueuePage() {
                   type="button"
                 >
                   {rowPending[selected.run_id] === "resolve"
-                    ? "Requeueing..."
-                    : `Resolve and requeue ${selected.run_id}`}
+                    ? "重新入队中..."
+                    : `解决冲突并重新入队 ${selected.run_id}`}
                 </button>
               </div>
             ) : (
               <div className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4">
-                <p className="text-sm font-medium text-white">Conflict files</p>
+                <p className="text-sm font-medium text-white">冲突文件</p>
                 {selected.conflict_files.length === 0 ? (
-                  <p className="mt-3 text-sm text-muted">No conflict files reported</p>
+                  <p className="mt-3 text-sm text-muted">未报告冲突文件</p>
                 ) : (
                   <ul className="mt-3 space-y-2 text-sm text-muted">
                     {selected.conflict_files.map((file) => (
@@ -398,7 +398,7 @@ export function MergeQueuePage() {
             {actionError ? <p className="text-sm text-danger">{actionError}</p> : null}
           </div>
         ) : (
-          <EmptyState copy="Select a queue item to inspect its merge context." />
+          <EmptyState copy="选择一个队列项以查看合并上下文。" />
         )}
       </SectionPanel>
     </div>

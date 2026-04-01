@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHostsPage } from "./AgentHostsPage";
@@ -106,24 +106,25 @@ describe("AgentHostsPage", () => {
 
     expect(await screen.findByText("local-box")).toBeInTheDocument();
     expect(screen.getByText("queue-box")).toBeInTheDocument();
-    expect(screen.getAllByText("Agent type").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Max concurrent").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("SSH key").length).toBeGreaterThan(0);
-    expect(screen.getByText("Missing")).toBeInTheDocument();
-    expect(screen.getByText("Configured")).toBeInTheDocument();
+    expect(screen.getAllByText("Agent 类型").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("最大并发").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("SSH 密钥").length).toBeGreaterThan(0);
+    expect(screen.getByText("未配置")).toBeInTheDocument();
+    expect(screen.getByText("已配置")).toBeInTheDocument();
     expect(screen.getByText("runner")).toBeInTheDocument();
     expect(screen.getByText("west")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Check local-box" }));
+    const localCard = screen.getByText("local-box").closest("article")!;
+    fireEvent.click(within(localCard).getByRole("button", { name: "检查" }));
     await waitFor(() => {
       expect(checkAgentHost).toHaveBeenCalledWith("local-box");
     });
-    expect(await screen.findByText("Last check: offline")).toBeInTheDocument();
+    expect(await screen.findByText("检查结果：离线")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit local-box" }));
+    fireEvent.click(within(localCard).getByRole("button", { name: "编辑" }));
     expect(screen.getByDisplayValue("local-box")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Max concurrent"), { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save host" }));
+    fireEvent.change(screen.getByLabelText("最大并发"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存主机" }));
 
     await waitFor(() => {
       expect(updateAgentHost).toHaveBeenCalledWith("local-box", {
@@ -135,13 +136,13 @@ describe("AgentHostsPage", () => {
       });
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Create new" }));
-    fireEvent.change(screen.getByLabelText("Host id"), { target: { value: "new-box" } });
-    fireEvent.change(screen.getByLabelText("Host address"), { target: { value: "10.0.0.9" } });
-    fireEvent.change(screen.getByLabelText("Agent type"), { target: { value: "claude" } });
-    fireEvent.change(screen.getByLabelText("Max concurrent"), { target: { value: "4" } });
-    fireEvent.change(screen.getByLabelText("Labels"), { target: { value: "blue, night" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save host" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    fireEvent.change(screen.getByLabelText("主机 ID"), { target: { value: "new-box" } });
+    fireEvent.change(screen.getByLabelText("主机地址"), { target: { value: "10.0.0.9" } });
+    fireEvent.change(screen.getByLabelText("Agent 类型"), { target: { value: "claude" } });
+    fireEvent.change(screen.getByLabelText("最大并发"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("标签"), { target: { value: "blue, night" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存主机" }));
 
     await waitFor(() => {
       expect(createAgentHost).toHaveBeenCalledWith({
@@ -155,7 +156,8 @@ describe("AgentHostsPage", () => {
     });
     expect(await screen.findByText("new-box")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete queue-box" }));
+    const queueCard = screen.getByText("queue-box").closest("article")!;
+    fireEvent.click(within(queueCard).getByRole("button", { name: "删除" }));
     await waitFor(() => {
       expect(deleteAgentHost).toHaveBeenCalledWith("queue-box");
     });

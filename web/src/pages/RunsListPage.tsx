@@ -15,7 +15,7 @@ const STATUS_OPTIONS = ["", "running", "completed", "failed", "cancelled"];
 const SORT_OPTIONS = [
   { value: "updated_at", label: "更新时间" },
   { value: "created_at", label: "创建时间" },
-  { value: "ticket", label: "Ticket" },
+  { value: "ticket", label: "工单" },
   { value: "current_stage", label: "阶段" },
   { value: "status", label: "状态" },
 ];
@@ -127,7 +127,7 @@ function RunRow({ run, onOpen }: { run: RunRecord; onOpen: (runId: string) => vo
             <StatusBadge status={run.status} />
             <StatusBadge label={run.current_stage} status={run.current_stage.includes("REVIEW") ? "review" : run.status} />
           </div>
-          <p className="mt-3 text-sm text-muted">{run.description || "No summary provided for this run."}</p>
+          <p className="mt-3 text-sm text-muted">{run.description || "暂无运行摘要。"}</p>
           <div className="mt-4">
             <StageProgress failedAtStage={run.failed_at_stage} stage={run.current_stage} />
           </div>
@@ -135,16 +135,16 @@ function RunRow({ run, onOpen }: { run: RunRecord; onOpen: (runId: string) => vo
 
         <div className="grid gap-3 text-sm text-muted sm:grid-cols-3 xl:min-w-[360px]">
           <div className="rounded-2xl border border-white/6 bg-black/18 px-3 py-3">
-            <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">Stage</p>
+            <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">阶段</p>
             <p className="mt-2 font-mono text-xs text-white">{run.current_stage}</p>
           </div>
           <div className="rounded-2xl border border-white/6 bg-black/18 px-3 py-3">
-            <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">Updated</p>
+            <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">更新时间</p>
             <p className="mt-2 text-xs text-white">{formatTimestamp(run.updated_at)}</p>
           </div>
           <div className="flex flex-col justify-between rounded-2xl border border-white/6 bg-black/18 px-3 py-3">
             <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">Repo</p>
+              <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">仓库</p>
               <p className="mt-2 truncate text-xs text-white">{run.repo_path}</p>
             </div>
             <button
@@ -152,7 +152,7 @@ function RunRow({ run, onOpen }: { run: RunRecord; onOpen: (runId: string) => vo
               onClick={() => onOpen(run.id)}
               type="button"
             >
-              {`Open ${run.ticket}`}
+              {`打开 ${run.ticket}`}
             </button>
           </div>
         </div>
@@ -192,8 +192,8 @@ export function RunsListPage() {
   const total = runs.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const summary = total === 0
-    ? "No runs matched the current query."
-    : `Showing ${runs.data!.offset + 1}-${Math.min(runs.data!.offset + items.length, total)} of ${total} runs`;
+    ? "当前查询未匹配到任何运行记录。"
+    : `显示第 ${runs.data!.offset + 1}-${Math.min(runs.data!.offset + items.length, total)} 条，共 ${total} 条`;
 
   function commit(nextDraft: FilterDraft, nextPage: number) {
     setSearchParams(buildSearchParams(nextDraft, nextPage));
@@ -206,27 +206,27 @@ export function RunsListPage() {
 
   return (
     <div className="space-y-4">
-      <SectionPanel kicker="Query Controls" title="Run filters">
+      <SectionPanel kicker="查询条件" title="筛选条件">
         <form className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,0.8fr))_auto_auto]" onSubmit={handleSubmit}>
           <label className="space-y-2 text-sm text-muted">
-            <span>Ticket</span>
+            <span>工单</span>
             <input
               className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
               onChange={(event) => setDraft((current) => ({ ...current, ticket: event.target.value }))}
-              placeholder="Search by ticket"
+              placeholder="按工单搜索"
               type="search"
               value={draft.ticket}
             />
           </label>
 
           <label className="space-y-2 text-sm text-muted">
-            <span>Status</span>
+            <span>状态</span>
             <select
               className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))}
               value={draft.status}
             >
-              <option value="">All</option>
+              <option value="">全部</option>
               {STATUS_OPTIONS.filter(Boolean).map((status) => (
                 <option key={status} value={status}>
                   {status}
@@ -236,13 +236,13 @@ export function RunsListPage() {
           </label>
 
           <label className="space-y-2 text-sm text-muted">
-            <span>Stage</span>
+            <span>阶段</span>
             <select
               className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, stage: event.target.value }))}
               value={draft.stage}
             >
-              <option value="">All</option>
+              <option value="">全部</option>
               {DASHBOARD_STAGE_FLOW.map((stage) => (
                 <option key={stage} value={stage}>
                   {stage}
@@ -252,7 +252,7 @@ export function RunsListPage() {
           </label>
 
           <label className="space-y-2 text-sm text-muted">
-            <span>Sort by</span>
+            <span>排序字段</span>
             <select
               className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, sortBy: event.target.value }))}
@@ -267,31 +267,31 @@ export function RunsListPage() {
           </label>
 
           <label className="space-y-2 text-sm text-muted">
-            <span>Direction</span>
+            <span>排序方向</span>
             <select
               className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, sortOrder: event.target.value === "asc" ? "asc" : "desc" }))}
               value={draft.sortOrder}
             >
-              <option value="desc">desc</option>
-              <option value="asc">asc</option>
+              <option value="desc">降序</option>
+              <option value="asc">升序</option>
             </select>
           </label>
 
           <button className="rounded-full bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90" type="submit">
-            Apply
+            查询
           </button>
           <button
             className="rounded-full border border-white/10 bg-white/4 px-4 py-3 text-sm font-medium text-white transition hover:border-white/20 hover:bg-white/8"
             onClick={() => void runs.mutate()}
             type="button"
           >
-            Refresh
+            刷新
           </button>
         </form>
       </SectionPanel>
 
-      <SectionPanel kicker="Server-backed Query" title="Runs list">
+      <SectionPanel kicker="服务端查询" title="运行列表">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/6 pb-4 text-sm text-muted">
           <p>{summary}</p>
           <div className="flex items-center gap-2">
@@ -301,16 +301,16 @@ export function RunsListPage() {
               onClick={() => commit(applied, page - 1)}
               type="button"
             >
-              Previous
+              上一页
             </button>
-            <span className="rounded-full border border-white/8 bg-black/18 px-3 py-2 text-xs text-muted">{`Page ${page} / ${totalPages}`}</span>
+            <span className="rounded-full border border-white/8 bg-black/18 px-3 py-2 text-xs text-muted">{`第 ${page} / ${totalPages} 页`}</span>
             <button
               className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={page >= totalPages || total === 0}
               onClick={() => commit(applied, page + 1)}
               type="button"
             >
-              Next
+              下一页
             </button>
           </div>
         </div>
@@ -318,16 +318,16 @@ export function RunsListPage() {
         <div className="mt-5">
           {runs.error ? (
             <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
-              <h3 className="text-base font-semibold text-white">Runs data failed to load</h3>
-              <p className="mt-2 text-sm text-muted">Retry the server query or adjust the current filters.</p>
+              <h3 className="text-base font-semibold text-white">运行数据加载失败</h3>
+              <p className="mt-2 text-sm text-muted">请重试查询或调整筛选条件。</p>
               <button className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black" onClick={() => void runs.mutate()} type="button">
-                Retry
+                重试
               </button>
             </div>
           ) : !runs.data ? (
             <LoadingSkeleton />
           ) : items.length === 0 ? (
-            <EmptyState copy="No runs matched the current filters yet." />
+            <EmptyState copy="当前筛选条件未匹配到任何运行记录。" />
           ) : (
             <div className="space-y-3">
               {items.map((run) => (
