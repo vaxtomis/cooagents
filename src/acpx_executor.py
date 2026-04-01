@@ -83,6 +83,16 @@ class AcpxExecutor:
         """Return the AcpxConfig or None."""
         return getattr(self.config, "acpx", None) if self.config else None
 
+    def _permission_flag(self):
+        """Map config ``permission_mode`` to the corresponding CLI flag."""
+        cfg = self._acpx_cfg()
+        mode = cfg.permission_mode if cfg else "approve-all"
+        return {
+            "approve-all": "--approve-all",
+            "approve-reads": "--approve-reads",
+            "deny-all": "--deny-all",
+        }.get(mode, "--approve-all")
+
     def _dispatch_ensure_timeout(self):
         timeout_cfg = getattr(self.config, "timeouts", None) if self.config else None
         if not timeout_cfg:
@@ -194,7 +204,8 @@ class AcpxExecutor:
         cmd = [
             "acpx", "--cwd", worktree,
             "--format", "json",
-            "--approve-all",
+            self._permission_flag(),
+            "--non-interactive-permissions", "deny",
             "--timeout", str(timeout_sec),
         ]
         cfg = self._acpx_cfg()
@@ -221,7 +232,8 @@ class AcpxExecutor:
         cmd = [
             "acpx", "--cwd", worktree,
             "--format", "json",
-            "--approve-all",
+            self._permission_flag(),
+            "--non-interactive-permissions", "deny",
             "--timeout", str(timeout_sec),
         ]
         cfg = self._acpx_cfg()
@@ -240,15 +252,31 @@ class AcpxExecutor:
 
     def _build_acpx_ensure_cmd(self, agent_type, session_name, worktree):
         agent = self._resolve_agent(agent_type)
-        return ["acpx", "--cwd", worktree, agent, "sessions", "ensure", "--name", session_name]
+        return [
+            "acpx", "--cwd", worktree,
+            "--format", "json",
+            self._permission_flag(),
+            "--non-interactive-permissions", "deny",
+            agent, "sessions", "ensure", "--name", session_name,
+        ]
 
     def _build_acpx_cancel_cmd(self, agent_type, session_name, worktree):
         agent = self._resolve_agent(agent_type)
-        return ["acpx", "--cwd", worktree, agent, "cancel", "-s", session_name]
+        return [
+            "acpx", "--cwd", worktree,
+            self._permission_flag(),
+            "--non-interactive-permissions", "deny",
+            agent, "cancel", "-s", session_name,
+        ]
 
     def _build_acpx_close_cmd(self, agent_type, session_name, worktree):
         agent = self._resolve_agent(agent_type)
-        return ["acpx", "--cwd", worktree, agent, "sessions", "close", session_name]
+        return [
+            "acpx", "--cwd", worktree,
+            self._permission_flag(),
+            "--non-interactive-permissions", "deny",
+            agent, "sessions", "close", session_name,
+        ]
 
     def _build_acpx_status_cmd(self, agent_type, session_name, worktree):
         agent = self._resolve_agent(agent_type)
@@ -288,6 +316,7 @@ class AcpxExecutor:
     async def _run_cmd(self, cmd, cwd):
         proc = await asyncio.create_subprocess_exec(
             *cmd, cwd=cwd,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -401,6 +430,28 @@ class AcpxExecutor:
                 })
                 await self._notify_job_status_changed_safely(run_id, job_id, "failed")
                 logger.error(f"acpx ensure failed for {session_name}")
+                return
+
+            # Verify queue owner is actually alive after ensure succeeded
+            probe_host = host if host["host"] != "local" else None
+            status = await self._probe_session_status(run_id, agent_type, host=probe_host)
+            session_state = status.get("status") if status else None
+            if session_state not in ("running", "alive"):
+                now = datetime.now(timezone.utc).isoformat()
+                await self.jobs.update_status(job_id, "failed", ended_at=now)
+                summary = status.get("summary", "unknown") if status else "no response"
+                await self._emit_event(run_id, "session.ensure_unhealthy", {
+                    "job_id": job_id,
+                    "session_name": session_name,
+                    "agent_type": agent_type,
+                    "queue_status": session_state,
+                    "summary": summary,
+                })
+                await self._trace_event("session.ensure_unhealthy",
+                    {"job_id": job_id, "session_name": session_name, "status": session_state},
+                    level="error", error_detail=f"Queue owner {session_state}: {summary}")
+                await self._notify_job_status_changed_safely(run_id, job_id, "failed")
+                logger.error(f"Queue owner unhealthy after ensure for {session_name}: {session_state} - {summary}")
                 return
 
             prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, task_file)
@@ -598,6 +649,7 @@ class AcpxExecutor:
         cmd = self._build_acpx_exec_cmd(agent_type, worktree, timeout_sec, task_file, prompt)
         proc = await asyncio.create_subprocess_exec(
             *cmd, cwd=worktree,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -680,6 +732,7 @@ class AcpxExecutor:
         stderr_fh = open(log_dir / "stderr.log", "w", encoding="utf-8")
         process = await asyncio.create_subprocess_exec(
             *cmd, cwd=worktree,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=stderr_fh,
         )

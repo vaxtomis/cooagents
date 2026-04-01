@@ -80,6 +80,7 @@ def test_build_prompt_cmd(executor):
         "acpx", "--cwd", "/wt",
         "--format", "json",
         "--approve-all",
+        "--non-interactive-permissions", "deny",
         "--timeout", "1800",
         "claude",
         "-s", "run-abc-design",
@@ -93,6 +94,7 @@ def test_build_prompt_cmd_codex(executor):
         "acpx", "--cwd", "/wt",
         "--format", "json",
         "--approve-all",
+        "--non-interactive-permissions", "deny",
         "--timeout", "3600",
         "codex",
         "-s", "run-abc-dev",
@@ -209,17 +211,33 @@ def test_build_exec_cmd_with_config(executor_with_config):
 
 def test_build_ensure_cmd(executor):
     cmd = executor._build_acpx_ensure_cmd("claude", "run-abc-design", "/wt")
-    assert cmd == ["acpx", "--cwd", "/wt", "claude", "sessions", "ensure", "--name", "run-abc-design"]
+    assert cmd == [
+        "acpx", "--cwd", "/wt",
+        "--format", "json",
+        "--approve-all",
+        "--non-interactive-permissions", "deny",
+        "claude", "sessions", "ensure", "--name", "run-abc-design",
+    ]
 
 
 def test_build_cancel_cmd(executor):
     cmd = executor._build_acpx_cancel_cmd("claude", "run-abc-design", "/wt")
-    assert cmd == ["acpx", "--cwd", "/wt", "claude", "cancel", "-s", "run-abc-design"]
+    assert cmd == [
+        "acpx", "--cwd", "/wt",
+        "--approve-all",
+        "--non-interactive-permissions", "deny",
+        "claude", "cancel", "-s", "run-abc-design",
+    ]
 
 
 def test_build_close_cmd(executor):
     cmd = executor._build_acpx_close_cmd("claude", "run-abc-design", "/wt")
-    assert cmd == ["acpx", "--cwd", "/wt", "claude", "sessions", "close", "run-abc-design"]
+    assert cmd == [
+        "acpx", "--cwd", "/wt",
+        "--approve-all",
+        "--non-interactive-permissions", "deny",
+        "claude", "sessions", "close", "run-abc-design",
+    ]
 
 
 def test_build_status_cmd(executor):
@@ -369,6 +387,7 @@ async def test_start_session_records_dispatched_stage_for_queued_runs(
 
     host = {"id": "local", "host": "local"}
     executor._run_cmd = AsyncMock(return_value=("", "", 0))
+    executor._probe_session_status = AsyncMock(return_value={"status": "running"})
     executor._start_local = AsyncMock(return_value=MagicMock())
     executor._emit_event = AsyncMock()
     executor._watch = AsyncMock(return_value=None)
@@ -405,6 +424,7 @@ async def test_start_session_notifies_state_machine_when_job_enters_running(
 
     host = {"id": "local", "host": "local"}
     executor._run_cmd = AsyncMock(return_value=("", "", 0))
+    executor._probe_session_status = AsyncMock(return_value={"status": "running"})
     executor._start_local = AsyncMock(return_value=MagicMock())
     executor._emit_event = AsyncMock()
     executor._watch = AsyncMock(return_value=None)
@@ -432,6 +452,7 @@ async def test_start_session_does_not_emit_running_before_process_starts(executo
 
     host = {"id": "local", "host": "local"}
     executor._run_cmd = AsyncMock(return_value=("", "", 0))
+    executor._probe_session_status = AsyncMock(return_value={"status": "running"})
     executor._start_local = AsyncMock(side_effect=RuntimeError("spawn failed"))
     executor._emit_event = AsyncMock()
     state_machine = AsyncMock()
