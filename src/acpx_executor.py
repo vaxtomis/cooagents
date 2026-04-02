@@ -505,92 +505,10 @@ class AcpxExecutor:
                 logger.error(f"acpx ensure failed for {session_name}")
                 return
 
-            # Verify queue owner is actually alive after ensure succeeded.
-            # If the session record exists but the queue owner process is dead
-            # (e.g. previous TTL expiry or crash), close the stale session and
-            # re-ensure so acpx creates a fresh queue owner.
-            probe_host = host if host["host"] != "local" else None
-            probe_timeout = max(10, ensure_timeout // 2)
-            try:
-                status = await asyncio.wait_for(
-                    self._probe_session_status(run_id, agent_type, host=probe_host),
-                    timeout=probe_timeout,
-                )
-            except asyncio.TimeoutError:
-                status = None
-                logger.warning(f"Post-ensure health probe timed out after {probe_timeout}s for {session_name}")
-            session_state = status.get("status") if status else None
-            if session_state not in ("running", "alive"):
-                summary = status.get("summary", "unknown") if status else "no response"
-                logger.warning(
-                    f"Queue owner unhealthy after ensure for {session_name}: "
-                    f"{session_state} - {summary}; attempting close + re-ensure"
-                )
-                await self._emit_event(run_id, "session.ensure_unhealthy_retry", {
-                    "job_id": job_id,
-                    "session_name": session_name,
-                    "queue_status": session_state,
-                    "summary": summary,
-                })
-
-                # Close the stale session so ensure will create a new one
-                close_cmd = self._build_acpx_close_cmd(agent_type, session_name, worktree)
-                try:
-                    if host["host"] == "local":
-                        await asyncio.wait_for(self._run_cmd(close_cmd, worktree), timeout=30)
-                    else:
-                        await asyncio.wait_for(self._run_ssh_cmd(host, close_cmd), timeout=30)
-                except Exception:
-                    pass  # best-effort
-
-                # Re-ensure: should now create a fresh queue owner
-                try:
-                    if host["host"] == "local":
-                        _, _, rc2 = await asyncio.wait_for(
-                            self._run_cmd(ensure_cmd, worktree), timeout=ensure_timeout,
-                        )
-                    else:
-                        _, _, rc2 = await asyncio.wait_for(
-                            self._run_ssh_cmd(host, ensure_cmd), timeout=ensure_timeout,
-                        )
-                except asyncio.TimeoutError:
-                    rc2 = None
-
-                if rc2 is None or rc2 != 0:
-                    now = datetime.now(timezone.utc).isoformat()
-                    await self.jobs.update_status(job_id, "failed", ended_at=now)
-                    await self._emit_event(run_id, "session.ensure_failed", {
-                        "job_id": job_id, "session_name": session_name,
-                        "agent_type": agent_type, "reason": "re-ensure after stale close",
-                    })
-                    await self._notify_job_status_changed_safely(run_id, job_id, "failed")
-                    logger.error(f"Re-ensure failed for {session_name} after stale session close")
-                    return
-
-                # Probe again after re-ensure
-                try:
-                    status = await asyncio.wait_for(
-                        self._probe_session_status(run_id, agent_type, host=probe_host),
-                        timeout=probe_timeout,
-                    )
-                except asyncio.TimeoutError:
-                    status = None
-                session_state = status.get("status") if status else None
-                if session_state not in ("running", "alive"):
-                    now = datetime.now(timezone.utc).isoformat()
-                    await self.jobs.update_status(job_id, "failed", ended_at=now)
-                    summary = status.get("summary", "unknown") if status else "no response"
-                    await self._emit_event(run_id, "session.ensure_unhealthy", {
-                        "job_id": job_id, "session_name": session_name,
-                        "agent_type": agent_type, "queue_status": session_state,
-                        "summary": summary,
-                    })
-                    await self._trace_event("session.ensure_unhealthy",
-                        {"job_id": job_id, "session_name": session_name, "status": session_state},
-                        level="error", error_detail=f"Queue owner {session_state}: {summary}")
-                    await self._notify_job_status_changed_safely(run_id, job_id, "failed")
-                    logger.error(f"Queue owner still unhealthy after re-ensure for {session_name}")
-                    return
+            # NOTE: acpx queue owner only starts when a prompt is sent, so
+            # status=dead after ensure is expected.  Skip health probe here;
+            # reconciliation during DISPATCHED/RUNNING stages will catch a
+            # truly dead session later.
 
             prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, task_file)
             try:
@@ -621,8 +539,9 @@ class AcpxExecutor:
     async def send_followup(self, run_id, agent_type, prompt_file, worktree, timeout_sec) -> None:
         """Send a followup prompt to an existing session (non-blocking).
 
-        Probes session health before sending to avoid dispatching into a dead
-        queue owner (e.g. session died due to TTL or crash between turns).
+        NOTE: No health probe before sending — acpx queue owner only runs
+        while a prompt is active, so it is expected to be dead between turns.
+        Sending a new prompt will restart the queue owner automatically.
         """
         job = await self.db.fetchone(
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
@@ -634,15 +553,6 @@ class AcpxExecutor:
         session_name = job["session_name"]
         host_id = job["host_id"]
         host = await self.db.fetchone("SELECT * FROM agent_hosts WHERE id=?", (host_id,))
-
-        # Verify the session is still alive before sending a followup prompt
-        probe_host = dict(host) if host and host["host"] != "local" else None
-        status = await self._probe_session_status(run_id, agent_type, host=probe_host)
-        session_state = status.get("status") if status else None
-        if session_state not in ("running", "alive"):
-            raise RuntimeError(
-                f"Session {session_name} not healthy before followup: {session_state}"
-            )
 
         prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, prompt_file)
 
