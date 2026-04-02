@@ -267,6 +267,9 @@ class AcpxExecutor:
         ]
         if timeout_sec is not None:
             cmd += ["--timeout", str(timeout_sec)]
+        cfg = self._acpx_cfg()
+        if cfg:
+            cmd += ["--ttl", str(cfg.ttl)]
         cmd += [agent, "sessions", "ensure", "--name", session_name]
         return cmd
 
