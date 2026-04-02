@@ -103,3 +103,14 @@ async def test_database_on_trace_event_callback(db):
     await db2.connect()
     assert db2._on_trace_event is on_event
     await db2.close()
+
+
+async def test_runs_has_agent_columns(tmp_path):
+    d = Database(db_path=tmp_path / "test.db", schema_path="db/schema.sql")
+    await d.connect()
+    async with d._ensure_connected().execute("PRAGMA table_info(runs)") as cursor:
+        rows = await cursor.fetchall()
+    cols = [r["name"] for r in rows]
+    assert "design_agent" in cols
+    assert "dev_agent" in cols
+    await d.close()

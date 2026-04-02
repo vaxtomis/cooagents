@@ -31,6 +31,8 @@ class CreateRunRequest(BaseModel):
     notify_channel: str | None = None
     notify_to: str | None = None
     repo_url: str | None = None
+    design_agent: str | None = None
+    dev_agent: str | None = None
 
 
 class EnsureRepoRequest(BaseModel):

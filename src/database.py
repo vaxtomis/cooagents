@@ -98,6 +98,12 @@ class Database:
                 await self._migrate_events_nullable_run_id(conn)
                 break
 
+        # Agent preference columns on runs
+        if not await self._column_exists("runs", "design_agent"):
+            await conn.execute("ALTER TABLE runs ADD COLUMN design_agent TEXT DEFAULT 'claude'")
+        if not await self._column_exists("runs", "dev_agent"):
+            await conn.execute("ALTER TABLE runs ADD COLUMN dev_agent TEXT DEFAULT 'claude'")
+
         # Ensure tracing indexes exist
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_trace ON events(trace_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_job ON events(job_id)")

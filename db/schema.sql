@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS runs (
   preferences_json TEXT,
   notify_channel  TEXT,
   notify_to       TEXT,
+  design_agent    TEXT DEFAULT 'claude' CHECK(design_agent IN ('claude','codex')),
+  dev_agent       TEXT DEFAULT 'claude' CHECK(dev_agent IN ('claude','codex')),
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
