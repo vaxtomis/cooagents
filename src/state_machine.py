@@ -169,6 +169,12 @@ class StateMachine:
 
         Idempotent: review/waiting stages are no-ops.
         """
+        lock = self._progression_locks.setdefault(run_id, asyncio.Lock())
+        async with lock:
+            return await self._tick_unlocked(run_id)
+
+    async def _tick_unlocked(self, run_id: str) -> dict:
+        """Inner tick logic, must be called while holding ``_progression_locks[run_id]``."""
         run = await self._get_run(run_id)
         if run["status"] != "running":
             return run
@@ -223,13 +229,13 @@ class StateMachine:
             elif status == "completed":
                 if not self._stage_matches_completed_event(current_stage, job_stage):
                     return run
-                await self.tick(run_id)
+                await self._tick_unlocked(run_id)
             elif status in {"failed", "timeout", "interrupted"}:
                 run = await self._advance_queued_run_to_dispatched_job_stage(run, job_stage)
                 current_stage = run["current_stage"]
                 if not self._stage_matches_terminal_failure_event(current_stage, job_stage):
                     return run
-                await self.tick(run_id)
+                await self._tick_unlocked(run_id)
             return await self._get_run(run_id)
 
     async def approve(
@@ -926,13 +932,23 @@ class StateMachine:
         from_stage: str,
         to_stage: str,
         **extra,
-    ) -> None:
-        """Persist a stage transition, record a step row, emit an event, and snapshot."""
+    ) -> bool:
+        """Persist a stage transition, record a step row, emit an event, and snapshot.
+
+        Uses compare-and-swap: the UPDATE only takes effect when the run is
+        still in ``from_stage``.  Returns ``True`` if the transition was
+        applied, ``False`` if it was pre-empted by a concurrent transition.
+        """
         now = datetime.now(timezone.utc).isoformat()
         await self.db.execute(
-            "UPDATE runs SET current_stage=?, updated_at=? WHERE id=?",
-            (to_stage, now, run_id),
+            "UPDATE runs SET current_stage=?, updated_at=? WHERE id=? AND current_stage=?",
+            (to_stage, now, run_id, from_stage),
         )
+        # Verify the CAS succeeded (another path may have transitioned first)
+        run = await self.db.fetchone("SELECT current_stage FROM runs WHERE id=?", (run_id,))
+        if not run or run["current_stage"] != to_stage:
+            return False
+
         await self.db.execute(
             "INSERT INTO steps(run_id,from_stage,to_stage,triggered_by,created_at) "
             "VALUES(?,?,?,?,?)",
@@ -950,6 +966,7 @@ class StateMachine:
             await self._emit(run_id, "gate.waiting", {"gate": gate, "stage": to_stage})
 
         await self._snapshot(run_id)
+        return True
 
     async def _emit(self, run_id: str, event_type: str, payload: dict | None = None) -> None:
         """Persist an event row and fire the webhook notifier."""

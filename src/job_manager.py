@@ -40,9 +40,12 @@ class JobManager:
 
     async def mark_running(self, job_id, started_at=None):
         started_at = started_at or datetime.now(timezone.utc).isoformat()
+        # Only transition from 'starting'; don't overwrite a terminal status
+        # that the scheduler may have set (e.g. 'timeout') while bootstrap was
+        # still in progress.
         await self.db.execute(
-            "UPDATE jobs SET status=?, running_started_at=? WHERE id=?",
-            ("running", started_at, job_id),
+            "UPDATE jobs SET status='running', running_started_at=? WHERE id=? AND status='starting'",
+            (started_at, job_id),
         )
 
     async def get_active_job(self, run_id):

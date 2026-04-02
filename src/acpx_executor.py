@@ -562,7 +562,11 @@ class AcpxExecutor:
                 self._tasks.pop(job_id, None)
 
     async def send_followup(self, run_id, agent_type, prompt_file, worktree, timeout_sec) -> None:
-        """Send a followup prompt to an existing session (non-blocking)."""
+        """Send a followup prompt to an existing session (non-blocking).
+
+        Probes session health before sending to avoid dispatching into a dead
+        queue owner (e.g. session died due to TTL or crash between turns).
+        """
         job = await self.db.fetchone(
             "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
             (run_id,),
@@ -573,6 +577,15 @@ class AcpxExecutor:
         session_name = job["session_name"]
         host_id = job["host_id"]
         host = await self.db.fetchone("SELECT * FROM agent_hosts WHERE id=?", (host_id,))
+
+        # Verify the session is still alive before sending a followup prompt
+        probe_host = dict(host) if host and host["host"] != "local" else None
+        status = await self._probe_session_status(run_id, agent_type, host=probe_host)
+        session_state = status.get("status") if status else None
+        if session_state not in ("running", "alive"):
+            raise RuntimeError(
+                f"Session {session_name} not healthy before followup: {session_state}"
+            )
 
         prompt_cmd = self._build_acpx_prompt_cmd(agent_type, session_name, worktree, timeout_sec, prompt_file)
 
@@ -608,6 +621,11 @@ class AcpxExecutor:
         if task:
             task.cancel()
 
+        # Re-read job status: the _watch task may have already marked it as
+        # completed before we got here.  Don't overwrite a terminal success.
+        fresh = await self.db.fetchone("SELECT status FROM jobs WHERE id=?", (job["id"],))
+        if fresh and fresh["status"] == "completed":
+            return
         now = datetime.now(timezone.utc).isoformat()
         await self.jobs.update_status(job["id"], final_status, ended_at=now)
 
