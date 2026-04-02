@@ -224,6 +224,7 @@ def test_build_cancel_cmd(executor):
     cmd = executor._build_acpx_cancel_cmd("claude", "run-abc-design", "/wt")
     assert cmd == [
         "acpx", "--cwd", "/wt",
+        "--format", "json",
         "--approve-all",
         "--non-interactive-permissions", "deny",
         "claude", "cancel", "-s", "run-abc-design",
@@ -234,6 +235,7 @@ def test_build_close_cmd(executor):
     cmd = executor._build_acpx_close_cmd("claude", "run-abc-design", "/wt")
     assert cmd == [
         "acpx", "--cwd", "/wt",
+        "--format", "json",
         "--approve-all",
         "--non-interactive-permissions", "deny",
         "claude", "sessions", "close", "run-abc-design",
@@ -242,7 +244,12 @@ def test_build_close_cmd(executor):
 
 def test_build_status_cmd(executor):
     cmd = executor._build_acpx_status_cmd("claude", "run-abc-design", "/wt")
-    assert cmd == ["acpx", "--cwd", "/wt", "--format", "json", "claude", "status", "-s", "run-abc-design"]
+    assert cmd == [
+        "acpx", "--cwd", "/wt",
+        "--format", "json",
+        "--non-interactive-permissions", "deny",
+        "claude", "status", "-s", "run-abc-design",
+    ]
 
 
 def test_build_show_cmd(executor):
@@ -250,6 +257,8 @@ def test_build_show_cmd(executor):
     agent_idx = cmd.index("claude")
     assert cmd.index("--format") < agent_idx
     assert cmd[cmd.index("--format") + 1] == "json"
+    assert "--non-interactive-permissions" in cmd
+    assert cmd.index("--non-interactive-permissions") < agent_idx
     assert cmd.index("sessions") > agent_idx
     assert cmd.index("show") > agent_idx
 
@@ -258,6 +267,8 @@ def test_build_history_cmd(executor):
     cmd = executor._build_acpx_history_cmd("codex", "run-abc-dev", "/wt", limit=50)
     agent_idx = cmd.index("codex")
     assert cmd.index("--format") < agent_idx
+    assert "--non-interactive-permissions" in cmd
+    assert cmd.index("--non-interactive-permissions") < agent_idx
     assert cmd.index("sessions") > agent_idx
     assert cmd.index("history") > agent_idx
     assert "--limit" in cmd
@@ -266,12 +277,22 @@ def test_build_history_cmd(executor):
 
 def test_build_set_mode_cmd(executor):
     cmd = executor._build_acpx_set_mode_cmd("codex", "run-abc-dev", "/wt", "plan")
-    assert cmd == ["acpx", "--cwd", "/wt", "codex", "set-mode", "plan", "-s", "run-abc-dev"]
+    assert cmd == [
+        "acpx", "--cwd", "/wt",
+        "--format", "json",
+        "--non-interactive-permissions", "deny",
+        "codex", "set-mode", "plan", "-s", "run-abc-dev",
+    ]
 
 
 def test_build_set_cmd(executor):
     cmd = executor._build_acpx_set_cmd("codex", "run-abc-dev", "/wt", "reasoning_effort", "high")
-    assert cmd == ["acpx", "--cwd", "/wt", "codex", "set", "reasoning_effort", "high", "-s", "run-abc-dev"]
+    assert cmd == [
+        "acpx", "--cwd", "/wt",
+        "--format", "json",
+        "--non-interactive-permissions", "deny",
+        "codex", "set", "reasoning_effort", "high", "-s", "run-abc-dev",
+    ]
 
 
 # ------------------------------------------------------------------
