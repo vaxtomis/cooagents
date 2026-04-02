@@ -770,7 +770,15 @@ class AcpxExecutor:
             await self.close_session(run_id, agent_type)
 
     async def restore_on_startup(self):
-        """On startup, check acpx session status for stale jobs."""
+        """On startup, reconcile stale jobs left behind by a previous process.
+
+        * ``starting`` jobs never reached the prompt phase — no queue owner
+          exists, so probing is pointless.  Mark them interrupted immediately.
+        * ``running`` jobs had an active prompt.  Even if the detached queue
+          owner survived the restart, we have no ``_watch`` task monitoring it
+          any more, so we must treat it as interrupted and let the state
+          machine decide whether to retry.
+        """
         jobs = await self.db.fetchall(
             "SELECT * FROM jobs WHERE status IN ('starting','running')"
         )
@@ -781,17 +789,6 @@ class AcpxExecutor:
             if not run:
                 await self.jobs.update_status(j["id"], "interrupted", ended_at=now)
                 continue
-            if j.get("session_name"):
-                host = None
-                if j.get("host_id"):
-                    host = await self.db.fetchone(
-                        "SELECT * FROM agent_hosts WHERE id=?", (j["host_id"],)
-                    )
-                    if host:
-                        host = dict(host)
-                status = await self._probe_session_status(j["run_id"], j["agent_type"], host=host)
-                if status and status.get("status") in {"running", "alive"}:
-                    continue  # Still running, leave it
             restored_status = self._finalize_terminal_status("interrupted", self._job_events_file(j))
             await self.jobs.update_status(j["id"], restored_status, ended_at=now)
             await self._notify_job_status_changed_safely(j["run_id"], j["id"], restored_status)
