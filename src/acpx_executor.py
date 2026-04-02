@@ -830,16 +830,11 @@ class AcpxExecutor:
             log_dir.mkdir(parents=True, exist_ok=True)
             events_file = log_dir / "events.jsonl"
 
-            saw_end_turn = await self._parse_ndjson_stream(process, job_id, run_id, events_file)
+            await self._parse_ndjson_stream(process, job_id, run_id, events_file)
             try:
                 await asyncio.wait_for(process.wait(), timeout=30)
             except asyncio.TimeoutError:
-                if saw_end_turn:
-                    # Prompt completed but the acpx CLI hasn't exited (likely
-                    # a leaked socket handle).  Safe to kill.
-                    logger.info(f"acpx process lingering after end_turn for job {job_id}, killing")
-                else:
-                    logger.warning(f"process.wait() timed out for job {job_id}, killing process")
+                logger.warning(f"process.wait() timed out for job {job_id}, killing process")
                 try:
                     process.kill()
                 except ProcessLookupError:
@@ -847,12 +842,7 @@ class AcpxExecutor:
                 await process.wait()
             rc = process.returncode
             now = datetime.now(timezone.utc).isoformat()
-            # If we detected end_turn in the stream, treat as completed
-            # regardless of exit code (process may have been killed above).
-            if saw_end_turn:
-                status = "completed"
-            else:
-                status = self._finalize_terminal_status(self._map_exit_code(rc), events_file)
+            status = self._finalize_terminal_status(self._map_exit_code(rc), events_file)
 
             await self.jobs.update_status(job_id, status, ended_at=now)
             await self.db.execute(
@@ -945,22 +935,14 @@ class AcpxExecutor:
         handle.flush()
 
     async def _parse_ndjson_stream(self, process, job_id, run_id, events_file):
-        """Parse NDJSON lines from process stdout, append to events file.
-
-        Returns ``True`` if a ``stopReason: end_turn`` was detected in the
-        stream (prompt completed), ``False`` otherwise.  The caller can use
-        this to avoid waiting indefinitely for a process that may not exit
-        cleanly (e.g. acpx CLI hanging on an unclosed socket after the queue
-        owner finishes).
-        """
+        """Parse NDJSON lines from process stdout, append to events file."""
         stdout = getattr(process, "stdout", None)
         if stdout is None:
-            return False
+            return
 
         chunk_limit = self._output_line_limit_bytes()
         read_size = self._output_read_chunk_size()
         pending = b""
-        saw_end_turn = False
 
         with open(events_file, "a", encoding="utf-8") as handle:
             while True:
@@ -983,18 +965,6 @@ class AcpxExecutor:
                         chunk_limit,
                         "\n",
                     )
-                    # Detect prompt completion in the stream so we don't have
-                    # to wait for the acpx CLI process to exit.
-                    if not saw_end_turn and b'"end_turn"' in line_bytes:
-                        try:
-                            payload = json.loads(line_bytes.rstrip(b"\r"))
-                            if self._json_contains_stop_reason(payload, "end_turn"):
-                                saw_end_turn = True
-                        except (json.JSONDecodeError, ValueError):
-                            pass
-
-                if saw_end_turn:
-                    break
 
                 if len(pending) > chunk_limit:
                     await self._write_output_record(
@@ -1016,8 +986,6 @@ class AcpxExecutor:
                     chunk_limit,
                     None,
                 )
-
-        return saw_end_turn
 
     async def _emit_event(self, run_id, event_type, payload):
         now = datetime.now(timezone.utc).isoformat()
