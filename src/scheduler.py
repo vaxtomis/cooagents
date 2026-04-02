@@ -214,6 +214,10 @@ class Scheduler:
         return True
 
     async def _handle_starting_job_timeout(self, job: dict, now: datetime) -> None:
+        # Re-check: job may have transitioned since the query
+        fresh = await self.db.fetchone("SELECT status FROM jobs WHERE id=?", (job["id"],))
+        if not fresh or fresh["status"] != "starting":
+            return
         await self.jobs.update_status(job["id"], "timeout", ended_at=now.isoformat())
         if await self._should_notify_job_timeout(job):
             await self._notify_limited(
@@ -229,7 +233,7 @@ class Scheduler:
                 await self.sm.tick(job["run_id"])
 
     async def _handle_job_timeout(self, job: dict, now: datetime) -> None:
-        await self.executor.cancel_session(job["run_id"], job["agent_type"], final_status="timeout")
+        await self.executor.cancel_session(job["run_id"], job["agent_type"], final_status="timeout", job_id=job["id"])
         if await self._should_notify_job_timeout(job):
             await self._notify_limited(
                 job["run_id"],

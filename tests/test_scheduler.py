@@ -164,7 +164,7 @@ async def test_handle_job_timeout_marks_run_failed_and_limits_notifications(db, 
         ("job-timeout-1", rid, "local", "claude", "DESIGN_RUNNING", "running", "/t.md", str(tmp_path), "run-timeout-1-design", now),
     )
 
-    async def _mark_timeout(run_id, agent_type, final_status="cancelled"):
+    async def _mark_timeout(run_id, agent_type, final_status="cancelled", job_id=None):
         await jm.update_status("job-timeout-1", final_status, ended_at=now)
 
     ae.cancel_session = AsyncMock(side_effect=_mark_timeout)
@@ -298,7 +298,7 @@ async def test_handle_job_timeout_skips_notification_after_stage_advances(db, tm
         ),
     )
 
-    async def _mark_timeout(run_id, agent_type, final_status="cancelled"):
+    async def _mark_timeout(run_id, agent_type, final_status="cancelled", job_id=None):
         await jm.update_status("job-advanced", final_status, ended_at=now)
 
     ae.cancel_session = AsyncMock(side_effect=_mark_timeout)
@@ -360,7 +360,7 @@ async def test_handle_job_timeout_routes_progression_through_job_status_callback
         ),
     )
 
-    async def _mark_timeout(run_id, agent_type, final_status="cancelled"):
+    async def _mark_timeout(run_id, agent_type, final_status="cancelled", job_id=None):
         await jm.update_status("job-timeout-callback", final_status, ended_at=now)
 
     ae.cancel_session = AsyncMock(side_effect=_mark_timeout)

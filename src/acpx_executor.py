@@ -20,6 +20,7 @@ _EXIT_CODE_MAP = {
     4: "failed",
     5: "failed",
     130: "interrupted",
+    143: "interrupted",  # SIGTERM
 }
 
 
@@ -434,7 +435,15 @@ class AcpxExecutor:
 
             # Verify queue owner is actually alive after ensure succeeded
             probe_host = host if host["host"] != "local" else None
-            status = await self._probe_session_status(run_id, agent_type, host=probe_host)
+            probe_timeout = max(10, ensure_timeout // 2)
+            try:
+                status = await asyncio.wait_for(
+                    self._probe_session_status(run_id, agent_type, host=probe_host),
+                    timeout=probe_timeout,
+                )
+            except asyncio.TimeoutError:
+                status = None
+                logger.warning(f"Post-ensure health probe timed out after {probe_timeout}s for {session_name}")
             session_state = status.get("status") if status else None
             if session_state not in ("running", "alive"):
                 now = datetime.now(timezone.utc).isoformat()
@@ -503,12 +512,17 @@ class AcpxExecutor:
         task = asyncio.create_task(self._watch(job["id"], process, run_id, host_id, session_name))
         self._tasks[job["id"]] = task
 
-    async def cancel_session(self, run_id, agent_type, final_status="cancelled") -> None:
+    async def cancel_session(self, run_id, agent_type, final_status="cancelled", job_id=None) -> None:
         """Cooperatively cancel the current prompt on the session."""
-        job = await self.db.fetchone(
-            "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
-            (run_id,),
-        )
+        if job_id:
+            job = await self.db.fetchone(
+                "SELECT * FROM jobs WHERE id=?", (job_id,),
+            )
+        else:
+            job = await self.db.fetchone(
+                "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+                (run_id,),
+            )
         if not job or not job.get("session_name"):
             return
 
@@ -554,9 +568,13 @@ class AcpxExecutor:
         status_cmd = self._build_acpx_status_cmd(agent_type, job["session_name"], job["worktree"])
         try:
             if host and host["host"] != "local":
-                stdout, _, _ = await self._run_ssh_cmd(host, status_cmd)
+                stdout, _, _ = await asyncio.wait_for(
+                    self._run_ssh_cmd(host, status_cmd), timeout=10,
+                )
             else:
-                stdout, _, _ = await self._route_cmd(job["host_id"], status_cmd, job["worktree"])
+                stdout, _, _ = await asyncio.wait_for(
+                    self._route_cmd(job["host_id"], status_cmd, job["worktree"]), timeout=10,
+                )
             return json.loads(stdout)
         except Exception:
             return None
@@ -759,7 +777,15 @@ class AcpxExecutor:
             events_file = log_dir / "events.jsonl"
 
             await self._parse_ndjson_stream(process, job_id, run_id, events_file)
-            await process.wait()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=30)
+            except asyncio.TimeoutError:
+                logger.warning(f"process.wait() timed out for job {job_id}, killing process")
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.wait()
             rc = process.returncode
             now = datetime.now(timezone.utc).isoformat()
             status = self._finalize_terminal_status(self._map_exit_code(rc), events_file)
