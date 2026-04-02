@@ -46,3 +46,16 @@ def test_tracing_config_from_dict():
     assert s.tracing.enabled is False
     assert s.tracing.retention_days == 14
     assert s.tracing.debug_retention_days == 3
+
+def test_agent_preference_config_defaults():
+    s = Settings()
+    assert s.preferred_design_agent == "claude"
+    assert s.preferred_dev_agent == "claude"
+
+def test_agent_preference_config_from_dict():
+    s = Settings.model_validate({
+        "preferred_design_agent": "codex",
+        "preferred_dev_agent": "codex",
+    })
+    assert s.preferred_design_agent == "codex"
+    assert s.preferred_dev_agent == "codex"

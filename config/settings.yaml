@@ -34,6 +34,9 @@ turns:
   design_max_turns: 1
   dev_max_turns: 1
 
+preferred_design_agent: "claude"
+preferred_dev_agent: "claude"
+
 openclaw:
   deploy_skills: true
   targets:

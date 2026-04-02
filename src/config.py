@@ -94,6 +94,8 @@ class Settings(BaseModel):
     turns: TurnsConfig = TurnsConfig()
     openclaw: OpenclawConfig = OpenclawConfig()
     tracing: TracingConfig = TracingConfig()
+    preferred_design_agent: str = "claude"
+    preferred_dev_agent: str = "claude"
 
 
 def load_settings(path: Path | str | None = None) -> Settings:
