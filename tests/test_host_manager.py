@@ -112,6 +112,48 @@ async def test_select_host_ignores_orphan_jobs(hm, db):
     assert hosts[0]["current_load"] == 0
     assert host["id"] == "h1"
 
+async def test_health_check_validates_claude_cli(hm, db):
+    """Host with agent_type='claude' must have claude CLI available."""
+    await hm.register("h-claude", "local", "claude")
+    import unittest.mock
+    with unittest.mock.patch("shutil.which") as mock_which:
+        mock_which.side_effect = lambda cmd: "/usr/bin/codex" if cmd == "codex" else ("/usr/bin/acpx" if cmd == "acpx" else None)
+        result = await hm.health_check("h-claude")
+    assert result is False
+    host = await db.fetchone("SELECT * FROM agent_hosts WHERE id='h-claude'")
+    assert host["status"] == "offline"
+
+async def test_health_check_validates_codex_cli(hm, db):
+    """Host with agent_type='codex' must have codex CLI available."""
+    await hm.register("h-codex", "local", "codex")
+    import unittest.mock
+    with unittest.mock.patch("shutil.which") as mock_which:
+        mock_which.side_effect = lambda cmd: "/usr/bin/claude" if cmd == "claude" else ("/usr/bin/acpx" if cmd == "acpx" else None)
+        result = await hm.health_check("h-codex")
+    assert result is False
+    host = await db.fetchone("SELECT * FROM agent_hosts WHERE id='h-codex'")
+    assert host["status"] == "offline"
+
+async def test_health_check_validates_both_cli(hm, db):
+    """Host with agent_type='both' must have both CLIs available."""
+    await hm.register("h-both", "local", "both")
+    import unittest.mock
+    with unittest.mock.patch("shutil.which") as mock_which:
+        mock_which.side_effect = lambda cmd: "/usr/bin/claude" if cmd == "claude" else ("/usr/bin/acpx" if cmd == "acpx" else None)
+        result = await hm.health_check("h-both")
+    assert result is False
+
+async def test_health_check_passes_when_cli_available(hm, db):
+    """Host passes when required CLI is available."""
+    await hm.register("h-ok", "local", "claude")
+    import unittest.mock
+    with unittest.mock.patch("shutil.which") as mock_which:
+        mock_which.side_effect = lambda cmd: f"/usr/bin/{cmd}" if cmd in ("acpx", "claude") else None
+        result = await hm.health_check("h-ok")
+    assert result is True
+    host = await db.fetchone("SELECT * FROM agent_hosts WHERE id='h-ok'")
+    assert host["status"] == "active"
+
 async def test_load_from_config(hm):
     config = [
         {"id": "pc1", "host": "local", "agent_type": "both", "max_concurrent": 2},

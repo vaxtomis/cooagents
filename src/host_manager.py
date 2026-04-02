@@ -89,27 +89,45 @@ class HostManager:
             (status, now, host_id)
         )
 
+    def _check_local_cli(self, agent_type):
+        """Verify the required CLI tools are available locally for the given agent_type."""
+        import shutil
+        if agent_type == "claude":
+            return bool(shutil.which("claude"))
+        elif agent_type == "codex":
+            return bool(shutil.which("codex"))
+        else:  # "both"
+            return bool(shutil.which("claude")) and bool(shutil.which("codex"))
+
     async def health_check(self, host_id):
         host = await self.db.fetchone("SELECT * FROM agent_hosts WHERE id=?", (host_id,))
         if not host:
             return False
         if host["host"] == "local":
-            import shutil
-            has_acpx = shutil.which("acpx")
-            if not has_acpx:
-                # Fallback: check for direct CLI availability
-                has_acpx = shutil.which("claude") or shutil.which("codex")
-            status = "active" if has_acpx else "offline"
+            cli_ok = self._check_local_cli(host["agent_type"])
+            status = "active" if cli_ok else "offline"
         else:
             try:
                 import asyncssh
+                agent_type = host["agent_type"]
                 async with asyncssh.connect(
                     host["host"],
                     known_hosts=None,
                     client_keys=[host["ssh_key"]] if host.get("ssh_key") else None,
                 ) as conn:
-                    result = await conn.run("acpx --version")
-                    status = "active" if result.returncode == 0 else "offline"
+                    if agent_type == "claude":
+                        cmds = ["claude"]
+                    elif agent_type == "codex":
+                        cmds = ["codex"]
+                    else:
+                        cmds = ["claude", "codex"]
+                    cli_ok = True
+                    for cmd in cmds:
+                        result = await conn.run(f"which {cmd}")
+                        if result.returncode != 0:
+                            cli_ok = False
+                            break
+                    status = "active" if cli_ok else "offline"
             except Exception:
                 status = "offline"
         await self.set_status(host_id, status)
