@@ -4,14 +4,18 @@ set -euo pipefail
 echo "=== cooagents bootstrap ==="
 
 # ---------- 1. Check Python >=3.11 ----------
-python3 --version 2>/dev/null || { echo "ERROR: python3 not found"; exit 1; }
-PYVER=$(python3 -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}')")
-PYOK=$(python3 -c "import sys; print(int(sys.version_info >= (3, 11)))")
+PYTHON_BIN="python3"
+if command -v python3.11 >/dev/null 2>&1; then
+  PYTHON_BIN="python3.11"
+fi
+$PYTHON_BIN --version 2>/dev/null || { echo "ERROR: python3/python3.11 not found"; exit 1; }
+PYVER=$($PYTHON_BIN -c "import sys; v=sys.version_info; print(f'{v.major}.{v.minor}')")
+PYOK=$($PYTHON_BIN -c "import sys; print(int(sys.version_info >= (3, 11)))")
 if [ "$PYOK" != "1" ]; then
   echo "ERROR: Python >=3.11 required, got $PYVER"
   exit 1
 fi
-echo "Python $PYVER  ✓"
+echo "Python $PYVER ($PYTHON_BIN)  ✓"
 
 # ---------- 2. Check git ----------
 git --version >/dev/null 2>&1 || { echo "ERROR: git not found"; exit 1; }
@@ -35,7 +39,7 @@ fi
 
 # ---------- 5. Install Python dependencies (venv) ----------
 echo "Installing dependencies..."
-if python3 -m venv .venv 2>/dev/null; then
+if $PYTHON_BIN -m venv .venv 2>/dev/null; then
   # shellcheck disable=SC1091
   source .venv/bin/activate 2>/dev/null || source .venv/Scripts/activate 2>/dev/null
   pip install -r requirements.txt
@@ -63,7 +67,7 @@ mkdir -p .coop/runs .coop/jobs
 echo "runtime dirs  ✓"
 
 # ---------- 8. Initialize database ----------
-python3 -c "
+$PYTHON_BIN -c "
 import sqlite3, pathlib
 db_path = '.coop/state.db'
 backup = db_path + '.bak'
