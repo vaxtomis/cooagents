@@ -217,6 +217,39 @@ async def test_design_queued_keeps_stage_when_start_session_times_out(sm, mocks,
     assert run["status"] == "running"
 
 
+async def test_design_queued_falls_back_to_codex(sm, mocks, db, tmp_path):
+    """When preferred design agent (claude) has no host, fall back to codex."""
+    _, _, host_mgr, _ = mocks
+
+    # First call (claude) returns None, second call (codex) returns a host
+    host_mgr.select_host = AsyncMock(side_effect=[None, {"id": "local", "host": "local"}])
+
+    run = await sm.create_run("T-FB-D", str(tmp_path))
+    await sm.submit_requirement(run["run_id"], "# Req")
+    await sm.approve(run["run_id"], "req", "user1")
+    run = await sm.tick(run["run_id"])
+    assert run["current_stage"] == "DESIGN_DISPATCHED"
+
+    # Verify fallback event was emitted
+    events = await db.fetchall(
+        "SELECT * FROM events WHERE run_id=? AND event_type='agent.fallback'",
+        (run["run_id"],),
+    )
+    assert len(events) == 1
+
+
+async def test_design_queued_no_host_at_all(sm, mocks, tmp_path):
+    """When neither preferred nor fallback agent has a host, stay in DESIGN_QUEUED."""
+    _, _, host_mgr, _ = mocks
+    host_mgr.select_host = AsyncMock(return_value=None)
+
+    run = await sm.create_run("T-NOHOST-D", str(tmp_path))
+    await sm.submit_requirement(run["run_id"], "# Req")
+    await sm.approve(run["run_id"], "req", "user1")
+    run = await sm.tick(run["run_id"])
+    assert run["current_stage"] == "DESIGN_QUEUED"
+
+
 async def test_design_queued_advances_to_dispatched_while_ensure_is_still_pending(db, tmp_path):
     from src.acpx_executor import AcpxExecutor
 
