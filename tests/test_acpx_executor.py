@@ -247,6 +247,7 @@ def test_build_status_cmd(executor):
     assert cmd == [
         "acpx", "--cwd", "/wt",
         "--format", "json",
+        "--approve-all",
         "--non-interactive-permissions", "deny",
         "claude", "status", "-s", "run-abc-design",
     ]
@@ -257,6 +258,8 @@ def test_build_show_cmd(executor):
     agent_idx = cmd.index("claude")
     assert cmd.index("--format") < agent_idx
     assert cmd[cmd.index("--format") + 1] == "json"
+    assert "--approve-all" in cmd
+    assert cmd.index("--approve-all") < agent_idx
     assert "--non-interactive-permissions" in cmd
     assert cmd.index("--non-interactive-permissions") < agent_idx
     assert cmd.index("sessions") > agent_idx
@@ -267,6 +270,8 @@ def test_build_history_cmd(executor):
     cmd = executor._build_acpx_history_cmd("codex", "run-abc-dev", "/wt", limit=50)
     agent_idx = cmd.index("codex")
     assert cmd.index("--format") < agent_idx
+    assert "--approve-all" in cmd
+    assert cmd.index("--approve-all") < agent_idx
     assert "--non-interactive-permissions" in cmd
     assert cmd.index("--non-interactive-permissions") < agent_idx
     assert cmd.index("sessions") > agent_idx
@@ -280,6 +285,7 @@ def test_build_set_mode_cmd(executor):
     assert cmd == [
         "acpx", "--cwd", "/wt",
         "--format", "json",
+        "--approve-all",
         "--non-interactive-permissions", "deny",
         "codex", "set-mode", "plan", "-s", "run-abc-dev",
     ]
@@ -290,6 +296,7 @@ def test_build_set_cmd(executor):
     assert cmd == [
         "acpx", "--cwd", "/wt",
         "--format", "json",
+        "--approve-all",
         "--non-interactive-permissions", "deny",
         "codex", "set", "reasoning_effort", "high", "-s", "run-abc-dev",
     ]
