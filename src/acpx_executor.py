@@ -97,8 +97,14 @@ class AcpxExecutor:
     def _dispatch_ensure_timeout(self):
         timeout_cfg = getattr(self.config, "timeouts", None) if self.config else None
         if not timeout_cfg:
-            return 60
-        return getattr(timeout_cfg, "dispatch_ensure", 60)
+            return 120
+        return getattr(timeout_cfg, "dispatch_ensure", 120)
+
+    def _dispatch_ensure_max_retries(self):
+        timeout_cfg = getattr(self.config, "timeouts", None) if self.config else None
+        if not timeout_cfg:
+            return 2
+        return max(0, getattr(timeout_cfg, "dispatch_ensure_max_retries", 2))
 
     def _output_read_chunk_size(self):
         return 8192
@@ -251,15 +257,18 @@ class AcpxExecutor:
             cmd.append(prompt)
         return cmd
 
-    def _build_acpx_ensure_cmd(self, agent_type, session_name, worktree):
+    def _build_acpx_ensure_cmd(self, agent_type, session_name, worktree, timeout_sec=None):
         agent = self._resolve_agent(agent_type)
-        return [
+        cmd = [
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
             "--non-interactive-permissions", "deny",
-            agent, "sessions", "ensure", "--name", session_name,
         ]
+        if timeout_sec is not None:
+            cmd += ["--timeout", str(timeout_sec)]
+        cmd += [agent, "sessions", "ensure", "--name", session_name]
+        return cmd
 
     def _build_acpx_cancel_cmd(self, agent_type, session_name, worktree):
         agent = self._resolve_agent(agent_type)
@@ -387,26 +396,54 @@ class AcpxExecutor:
         """Ensure the session exists, then start the prompt process in the background."""
         current_task = asyncio.current_task()
         try:
-            ensure_cmd = self._build_acpx_ensure_cmd(agent_type, session_name, worktree)
             ensure_timeout = self._dispatch_ensure_timeout()
+            max_retries = self._dispatch_ensure_max_retries()
+            # Give acpx an internal timeout slightly shorter than the external one
+            acpx_internal_timeout = max(30, ensure_timeout - 10)
+            ensure_cmd = self._build_acpx_ensure_cmd(agent_type, session_name, worktree, timeout_sec=acpx_internal_timeout)
             await self._emit_event(run_id, "session.ensure_started", {
                 "job_id": job_id,
                 "session_name": session_name,
                 "agent_type": agent_type,
                 "timeout_sec": ensure_timeout,
+                "max_retries": max_retries,
             })
-            try:
-                if host["host"] == "local":
-                    _, _, rc = await asyncio.wait_for(
-                        self._run_cmd(ensure_cmd, worktree),
-                        timeout=ensure_timeout,
+
+            rc = None
+            last_error = None
+            for attempt in range(1 + max_retries):
+                try:
+                    if host["host"] == "local":
+                        _, _, rc = await asyncio.wait_for(
+                            self._run_cmd(ensure_cmd, worktree),
+                            timeout=ensure_timeout,
+                        )
+                    else:
+                        _, _, rc = await asyncio.wait_for(
+                            self._run_ssh_cmd(host, ensure_cmd),
+                            timeout=ensure_timeout,
+                        )
+                    if rc == 0:
+                        break
+                    last_error = f"exit_code={rc}"
+                except asyncio.TimeoutError:
+                    last_error = "timeout"
+                    rc = None
+
+                if attempt < max_retries:
+                    logger.warning(
+                        f"Ensure attempt {attempt + 1}/{1 + max_retries} failed for {session_name} ({last_error}), retrying..."
                     )
-                else:
-                    _, _, rc = await asyncio.wait_for(
-                        self._run_ssh_cmd(host, ensure_cmd),
-                        timeout=ensure_timeout,
-                    )
-            except asyncio.TimeoutError:
+                    await self._emit_event(run_id, "session.ensure_retry", {
+                        "job_id": job_id,
+                        "session_name": session_name,
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                        "reason": last_error,
+                    })
+                    await asyncio.sleep(5)
+
+            if last_error == "timeout" and rc is None:
                 now = datetime.now(timezone.utc).isoformat()
                 await self.jobs.update_status(job_id, "timeout", ended_at=now)
                 await self._emit_event(run_id, "session.ensure_timeout", {
@@ -414,9 +451,10 @@ class AcpxExecutor:
                     "session_name": session_name,
                     "agent_type": agent_type,
                     "timeout_sec": ensure_timeout,
+                    "attempts": 1 + max_retries,
                 })
                 await self._trace_event("session.ensure_timeout", {"job_id": job_id, "session_name": session_name},
-                                        level="error", error_detail=f"Timeout after {ensure_timeout}s")
+                                        level="error", error_detail=f"Timeout after {1 + max_retries} attempts ({ensure_timeout}s each)")
                 await self._notify_job_status_changed_safely(run_id, job_id, "timeout")
                 return
 

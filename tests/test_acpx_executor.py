@@ -483,6 +483,7 @@ async def test_start_session_times_out_stuck_ensure(executor, db):
     class FakeConfig:
         class timeouts:
             dispatch_ensure = 0.01
+            dispatch_ensure_max_retries = 0
 
     executor.config = FakeConfig()
 
@@ -527,6 +528,7 @@ async def test_start_session_emits_ensure_events(executor, db):
     class FakeConfig:
         class timeouts:
             dispatch_ensure = 0.01
+            dispatch_ensure_max_retries = 0
 
     executor.config = FakeConfig()
 

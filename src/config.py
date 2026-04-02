@@ -20,7 +20,8 @@ class DatabaseConfig(BaseModel):
 
 class TimeoutConfig(BaseModel):
     dispatch_startup: int = 300
-    dispatch_ensure: int = 60
+    dispatch_ensure: int = 120
+    dispatch_ensure_max_retries: int = 2
     dispatch_reconcile_grace: int = 30
     design_execution: int = 1800
     dev_execution: int = 3600
