@@ -212,7 +212,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
             "--timeout", str(timeout_sec),
         ]
         cfg = self._acpx_cfg()
@@ -240,7 +240,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
             "--timeout", str(timeout_sec),
         ]
         cfg = self._acpx_cfg()
@@ -263,7 +263,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
         ]
         if timeout_sec is not None:
             cmd += ["--timeout", str(timeout_sec)]
@@ -279,7 +279,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
             agent, "cancel", "-s", session_name,
         ]
 
@@ -289,7 +289,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
             agent, "sessions", "close", session_name,
         ]
 
@@ -299,7 +299,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
             agent, "status", "-s", session_name,
         ]
 
@@ -310,7 +310,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
             agent, "sessions", "show", session_name,
         ]
 
@@ -321,7 +321,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
             agent, "sessions", "history", session_name, "--limit", str(limit),
         ]
 
@@ -331,7 +331,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
             agent, "set-mode", mode, "-s", session_name,
         ]
 
@@ -341,7 +341,7 @@ class AcpxExecutor:
             "acpx", "--cwd", worktree,
             "--format", "json",
             self._permission_flag(),
-            "--non-interactive-permissions", "deny",
+
             agent, "set", key, value, "-s", session_name,
         ]
 
