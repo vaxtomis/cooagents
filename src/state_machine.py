@@ -127,6 +127,8 @@ class StateMachine:
         notify_channel: str | None = None,
         notify_to: str | None = None,
         repo_url: str | None = None,
+        design_agent: str | None = None,
+        dev_agent: str | None = None,
     ) -> dict:
         """Create a new workflow run and advance it to REQ_COLLECTING.
 
@@ -141,6 +143,12 @@ class StateMachine:
                 "Call POST /repos/ensure first."
             )
 
+        # Resolve agent preferences
+        if design_agent is None:
+            design_agent = getattr(self._config, "preferred_design_agent", "claude") if self._config else "claude"
+        if dev_agent is None:
+            dev_agent = getattr(self._config, "preferred_dev_agent", "claude") if self._config else "claude"
+
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
         prefs = json.dumps(preferences) if preferences else None
@@ -153,10 +161,11 @@ class StateMachine:
 
         await self.db.execute(
             "INSERT INTO runs(id,ticket,repo_path,repo_url,status,current_stage,"
-            "description,preferences_json,notify_channel,notify_to,created_at,updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "description,preferences_json,notify_channel,notify_to,"
+            "design_agent,dev_agent,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (run_id, ticket, repo_path, repo_url, "running", "INIT", description, prefs,
-             notify_channel, notify_to, now, now),
+             notify_channel, notify_to, design_agent, dev_agent, now, now),
         )
         await self._update_stage(run_id, "INIT", "REQ_COLLECTING")
         run = await self._get_run(run_id)

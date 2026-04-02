@@ -82,6 +82,18 @@ async def test_create_run(sm, tmp_path):
     assert run["status"] == "running"
 
 
+async def test_create_run_stores_agent_preferences(sm, tmp_path):
+    run = await sm.create_run("T-PREF", str(tmp_path), design_agent="codex", dev_agent="codex")
+    assert run["design_agent"] == "codex"
+    assert run["dev_agent"] == "codex"
+
+
+async def test_create_run_defaults_agent_from_config(sm, tmp_path):
+    run = await sm.create_run("T-DEF", str(tmp_path))
+    assert run["design_agent"] == "claude"
+    assert run["dev_agent"] == "claude"
+
+
 # ---------------------------------------------------------------------------
 # submit_requirement
 # ---------------------------------------------------------------------------

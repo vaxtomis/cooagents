@@ -16,6 +16,7 @@ async def create_run(req: CreateRunRequest, request: Request):
         req.ticket, req.repo_path, req.description, req.preferences,
         notify_channel=req.notify_channel, notify_to=req.notify_to,
         repo_url=req.repo_url,
+        design_agent=req.design_agent, dev_agent=req.dev_agent,
     )
     return result
 
