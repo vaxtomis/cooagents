@@ -63,11 +63,27 @@ Both `_tick_design_queued()` and `_tick_dev_queued()` change from hardcoded agen
 
 Replace hardcoded agent type strings in `close_session()` and `send_followup()` with the actual agent type from the job record's `agent_type` field.
 
-### 6. Executor (`acpx_executor.py`)
+### 6. Host Health Check Enhancement (`host_manager.py`)
+
+Current `health_check()` only verifies that `acpx` or any CLI exists, without validating the specific agent type the host claims to support. A host configured as `agent_type: "claude"` but missing the `claude` CLI would pass health check, then fail at dispatch.
+
+**Enhanced validation:**
+- `agent_type: "claude"` — verify `claude` CLI is available
+- `agent_type: "codex"` — verify `codex` CLI is available
+- `agent_type: "both"` — verify both `claude` and `codex` CLIs are available
+- For remote hosts, SSH check verifies the corresponding CLI(s) via `which`
+- If the required CLI is missing, set host status to `offline`
+
+This check runs:
+- On host registration/update (`register()`)
+- During periodic health checks (`health_check()`)
+- At startup when loading from config (`load_from_config()`)
+
+### 7. Executor (`acpx_executor.py`)
 
 No changes needed. `_resolve_agent()` and `_get_allowed_tools()` already route correctly based on the passed `agent_type` parameter.
 
-### 7. Route Layer (`routes/runs.py`)
+### 8. Route Layer (`routes/runs.py`)
 
 Pass `design_agent` and `dev_agent` from the request to `sm.create_run()`.
 
@@ -81,6 +97,7 @@ Pass `design_agent` and `dev_agent` from the request to `sm.create_run()`.
 | `db/schema.sql` | Add columns to `runs` table |
 | `routes/runs.py` | Pass new fields to `create_run()` |
 | `src/state_machine.py` | `create_run()`, `_tick_design_queued()`, `_tick_dev_queued()`, `_tick_design_running()`, `_tick_dev_running()` |
+| `src/host_manager.py` | `health_check()` — validate CLI availability per `agent_type` |
 
 ## Constraints
 
