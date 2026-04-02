@@ -934,8 +934,17 @@ class AcpxExecutor:
             handle.write(json.dumps({"raw": line_text}) + "\n")
         handle.flush()
 
+    _STREAM_IDLE_TIMEOUT = 60  # seconds — check for completion when stdout goes quiet
+
     async def _parse_ndjson_stream(self, process, job_id, run_id, events_file):
-        """Parse NDJSON lines from process stdout, append to events file."""
+        """Parse NDJSON lines from process stdout, append to events file.
+
+        Includes an idle-timeout mechanism: when no data arrives on stdout
+        for ``_STREAM_IDLE_TIMEOUT`` seconds, the already-flushed events
+        file is checked for ``stopReason: end_turn``.  If found, the prompt
+        completed but the acpx CLI is lingering (e.g. leaked socket handle),
+        so the reader exits early instead of blocking until the process dies.
+        """
         stdout = getattr(process, "stdout", None)
         if stdout is None:
             return
@@ -946,7 +955,23 @@ class AcpxExecutor:
 
         with open(events_file, "a", encoding="utf-8") as handle:
             while True:
-                chunk = await stdout.read(read_size)
+                try:
+                    chunk = await asyncio.wait_for(
+                        stdout.read(read_size),
+                        timeout=self._STREAM_IDLE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    # Stdout went quiet.  If the events file already contains
+                    # end_turn the prompt is done — stop waiting for the CLI.
+                    if self._events_file_has_stop_reason(str(events_file), "end_turn"):
+                        logger.info(
+                            f"Prompt completed (end_turn in events) but acpx "
+                            f"CLI idle for {self._STREAM_IDLE_TIMEOUT}s, "
+                            f"stopping stream reader for job {job_id}"
+                        )
+                        break
+                    continue  # prompt still running, keep reading
+
                 if not chunk:
                     break
                 pending += chunk
