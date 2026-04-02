@@ -1267,3 +1267,36 @@ async def test_dev_running_keeps_running_when_session_probe_recovers(sm, db, moc
     assert job["ended_at"] is None
     assert executor.get_session_status.await_count == 2
     sleep_mock.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# dev_queued fallback
+# ---------------------------------------------------------------------------
+
+async def test_dev_queued_falls_back_when_preferred_unavailable(sm, mocks, db, tmp_path):
+    """When preferred dev agent has no host, fall back to the other agent."""
+    _, _, host_mgr, _ = mocks
+
+    run = await sm.create_run("T-FB-DEV", str(tmp_path), dev_agent="codex")
+    rid = run["run_id"]
+    await sm.submit_requirement(rid, "# Req")
+    await sm.approve(rid, "req", "user1")
+
+    # Tick design phase through (uses default host mock)
+    await sm.tick(rid)  # DESIGN_QUEUED -> DESIGN_DISPATCHED
+
+    # Force stage to DEV_QUEUED for testing dev dispatch
+    now = "2026-03-20T00:00:00+00:00"
+    await db.execute("UPDATE runs SET current_stage='DEV_QUEUED', updated_at=? WHERE id=?", (now, rid))
+
+    # Dev phase: preferred (codex) returns None, fallback (claude) returns a host
+    host_mgr.select_host = AsyncMock(side_effect=[None, {"id": "local", "host": "local"}])
+
+    run = await sm.tick(rid)
+    assert run["current_stage"] == "DEV_DISPATCHED"
+
+    events = await db.fetchall(
+        "SELECT * FROM events WHERE run_id=? AND event_type='agent.fallback'",
+        (rid,),
+    )
+    assert len(events) >= 1

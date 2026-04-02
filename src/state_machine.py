@@ -621,14 +621,28 @@ class StateMachine:
             if self.jobs and await self.jobs.get_active_job(run["id"]):
                 return
 
-            host = await self.hosts.select_host("codex")
+            preferred = run.get("dev_agent") or "claude"
+            fallback = "codex" if preferred == "claude" else "claude"
+
+            host = await self.hosts.select_host(preferred)
+            actual_agent = preferred
+            if not host:
+                host = await self.hosts.select_host(fallback)
+                actual_agent = fallback
             if not host:
                 await self._emit_limited(run["id"], "host.unavailable", {
                     "stage": "DEV_QUEUED",
-                    "agent_type": "codex",
+                    "agent_type": preferred,
                     "ticket": run["ticket"],
                 }, limit_keys=("stage",))
                 return
+            if actual_agent != preferred:
+                await self._emit(run["id"], "agent.fallback", {
+                    "stage": "DEV_QUEUED",
+                    "preferred": preferred,
+                    "actual": actual_agent,
+                    "ticket": run["ticket"],
+                })
 
             branch, wt = await self._resolve_worktree(run["repo_path"], run["ticket"], "dev")
 
@@ -668,9 +682,9 @@ class StateMachine:
             timeout_sec = self._execution_timeout("dev")
             try:
                 if hasattr(self.executor, 'start_session'):
-                    await self.executor.start_session(run["id"], host, "codex", task_path, wt, timeout_sec)
+                    await self.executor.start_session(run["id"], host, actual_agent, task_path, wt, timeout_sec)
                 else:
-                    await self.executor.dispatch(run["id"], host, "codex", task_path, wt, timeout_sec)
+                    await self.executor.dispatch(run["id"], host, actual_agent, task_path, wt, timeout_sec)
             except asyncio.TimeoutError:
                 job = await self.db.fetchone(
                     "SELECT * FROM jobs WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
@@ -722,6 +736,7 @@ class StateMachine:
 
         turn = job.get("turn_count") or 1
         wt = run.get("dev_worktree", "")
+        job_agent = job.get("agent_type", "codex")
 
         await self.artifacts.scan_and_register(run["id"], run["ticket"], "DEV_RUNNING", wt)
         all_artifacts = await self.artifacts.get_by_run(run["id"])
@@ -730,7 +745,7 @@ class StateMachine:
         if verdict == "accept" or turn >= self._dev_max_turns:
             await self.artifacts.submit_all(run["id"], "DEV_RUNNING")
             if hasattr(self.executor, 'close_session'):
-                await self.executor.close_session(run["id"], "codex")
+                await self.executor.close_session(run["id"], job_agent)
             await self._update_stage(run["id"], "DEV_RUNNING", "DEV_REVIEW")
         elif verdict == "revise":
             revision_path = os.path.join(self.coop_dir, "runs", run["id"], f"TURN-dev-fix-{turn+1}.md")
@@ -743,12 +758,12 @@ class StateMachine:
             )
             await self._emit(run["id"], "turn.completed", {"turn_num": turn, "verdict": verdict, "detail": detail})
             if hasattr(self.executor, 'send_followup'):
-                await self._emit(run["id"], "turn.started", {"turn_num": turn + 1, "agent_type": "codex"})
+                await self._emit(run["id"], "turn.started", {"turn_num": turn + 1, "agent_type": job_agent})
                 if self.jobs:
                     await self.jobs.increment_turn(job["id"])
                     await self.jobs.record_turn(job["id"], turn, revision_path, verdict, detail)
                 await self.executor.send_followup(
-                    run["id"], "codex", revision_path, wt, self._execution_timeout("dev")
+                    run["id"], job_agent, revision_path, wt, self._execution_timeout("dev")
                 )
 
     async def _tick_merge_queued(self, run: dict) -> None:
