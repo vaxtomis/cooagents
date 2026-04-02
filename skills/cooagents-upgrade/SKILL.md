@@ -112,11 +112,11 @@ exec uname -s 2>/dev/null || echo Windows
 
 - **Linux / Darwin（macOS）：**
   ```bash
-  exec cd {repo_path} && nohup .venv/bin/uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &
+  exec cd {repo_path} && nohup .venv/bin/uvicorn src.app:app --host 0.0.0.0 --port 8321 > cooagents.log 2>&1 &
   ```
 - **Windows（Git Bash）：**
   ```bash
-  exec cd {repo_path} && (.venv/Scripts/python -m uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &)
+  exec cd {repo_path} && (.venv/Scripts/python -m uvicorn src.app:app --host 0.0.0.0 --port 8321 > cooagents.log 2>&1 &)
   ```
 
 **venv 未创建时：**
@@ -163,9 +163,9 @@ exec cat {repo_path}/cooagents.log
 
 ```
 ✅ cooagents 已升级
-- 服务地址：http://127.0.0.1:8321
+- 服务地址：http://0.0.0.0:8321
 - 健康状态：ok
-- Dashboard：http://127.0.0.1:8321/（返回 HTML）
+- Dashboard：http://0.0.0.0:8321/（返回 HTML）
 - 旧版本：{old_commit}
 - 新版本：{new_commit}
 - Skills：已随启动自动重新部署

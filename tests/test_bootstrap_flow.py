@@ -21,6 +21,7 @@ def test_setup_skill_requires_dashboard_root_validation():
     skill = Path("skills/cooagents-setup/SKILL.md").read_text(encoding="utf-8")
 
     assert "exec curl -s http://127.0.0.1:8321/" in skill
+    assert "--host 0.0.0.0 --port 8321" in skill
     assert "<html" in skill
 
 
@@ -28,6 +29,7 @@ def test_upgrade_skill_requires_dashboard_root_validation():
     skill = Path("skills/cooagents-upgrade/SKILL.md").read_text(encoding="utf-8")
 
     assert "exec curl -s http://127.0.0.1:8321/" in skill
+    assert "--host 0.0.0.0 --port 8321" in skill
     assert "<html" in skill
 
 
