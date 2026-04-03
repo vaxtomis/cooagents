@@ -4,10 +4,15 @@
 
 ```mermaid
 flowchart LR
-    OC(["OpenClaw (Feishu)"]) -->|HTTP| API["cooagents API"]
-    API -->|"acpx / SSH"| Agent["Claude Code / Codex"]
+    OC(["🦉 OpenClaw<br/>(Feishu)"]):::client -->|HTTP| API["⚙️ cooagents API"]:::core
+    DASH(["🖥️ Dashboard"]):::client -->|HTTP| API
+    API -->|"acpx / SSH"| Agent["🤖 Claude Code / Codex"]:::agent
     Agent -.->|artifacts| API
     API -.->|webhook| OC
+
+    classDef client fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff
+    classDef core fill:#1a1a2e,stroke:#a855f7,color:#f5f5f5
+    classDef agent fill:#14532d,stroke:#4ade80,color:#dcfce7
 ```
 
 ## 目录
@@ -32,10 +37,12 @@ flowchart LR
 ## 核心特性
 
 - **16 阶段状态机** — 从需求收集到代码合并，每个阶段可观测、可控制
+- **需求文档上传** — 支持上传 `.md` / `.docx` 需求文档直接跳过需求阶段，`.docx` 自动通过 pandoc 转换
 - **多轮评估循环** — RUNNING 阶段自动评估产物质量，不达标则向 Agent 发送修订指令（设计最多 3 轮，开发最多 5 轮）
 - **acpx Session 管理** — 基于 acpx CLI 的持久化会话，支持多轮交互、断点恢复、超时控制
 - **三级审批 Gate** — 需求 / 设计 / 开发各设独立审批节点，支持驳回重做
-- **产物版本管理** — 需求文档、设计文档、ADR、测试报告等产物自动扫描、哈希校验、版本追踪
+- **产物版本管理** — 需求文档、设计文档、ADR、测试报告等产物自动扫描、哈希校验、版本追踪；弹框查看支持 Markdown 渲染，下载支持 `.md` / `.docx` 格式
+- **Dashboard** — React + TypeScript 前端，任务列表、创建任务（含文件拖拽上传）、运行详情、产物查看、Agent 输出、事件追踪
 - **多主机 Agent 池** — 支持本地 + SSH 远程主机，按负载自动选择，独立健康检查
 - **优先级合并队列** — FIFO + 优先级排序，冲突检测，自动 rebase
 - **Webhook 事件通知** — HMAC 签名、事件过滤、失败重试，24 种事件类型
@@ -46,26 +53,34 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    OC(["OpenClaw (Feishu)"]) <-->|"HTTP / Webhook"| APP
+    OC(["🦉 OpenClaw (Feishu)"]):::client <-->|"HTTP / Webhook"| APP
+    DASH(["🖥️ Dashboard (React)"]):::client <-->|HTTP| APP
 
-    subgraph APP["cooagents API"]
+    subgraph APP["⚙️ cooagents API (FastAPI)"]
         direction TB
-        SM["State Machine"] --- AE["Acpx Executor"]
-        SM --- AM["Artifact Manager"]
-        SM --- MM["Merge Manager"]
-        HM["Host Manager"] --- AE
-        JM["Job Manager"] --- AE
-        WH["Webhook Notifier"]
-        SCH["Scheduler"]
-        TE["Trace Emitter"]
-        DB[("SQLite (aiosqlite)")]
+        SM["State Machine"]:::engine --- AE["Acpx Executor"]:::engine
+        SM --- AM["Artifact Manager"]:::engine
+        SM --- MM["Merge Manager"]:::engine
+        SM --- FC["File Converter"]:::engine
+        HM["Host Manager"]:::engine --- AE
+        JM["Job Manager"]:::engine --- AE
+        WH["Webhook Notifier"]:::support
+        SCH["Scheduler"]:::support
+        TE["Trace Emitter"]:::support
+        DB[("SQLite")]:::db
     end
 
-    AE -->|"acpx session"| CC["Claude Code\n(设计阶段)"]
-    AE -->|"acpx session"| CX["Codex\n(开发阶段)"]
+    AE -->|"acpx session"| CC["🤖 Claude Code<br/>(设计阶段)"]:::agent
+    AE -->|"acpx session"| CX["🤖 Codex<br/>(开发阶段)"]:::agent
+
+    classDef client fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff
+    classDef engine fill:#1a1a2e,stroke:#a855f7,color:#f5f5f5
+    classDef support fill:#1a1a2e,stroke:#525252,color:#a1a1aa
+    classDef db fill:#1c1917,stroke:#f59e0b,color:#fef3c7
+    classDef agent fill:#14532d,stroke:#4ade80,color:#dcfce7
 ```
 
-**技术栈：** FastAPI + aiosqlite + asyncssh + Jinja2 + Pydantic v2
+**技术栈：** FastAPI + aiosqlite + asyncssh + Jinja2 + Pydantic v2 + React + TypeScript + Tailwind CSS
 
 **角色分工：**
 
@@ -199,36 +214,43 @@ COOAGENTS_COOP_DIR=.coop     # 运行时状态目录
 
 ```mermaid
 flowchart LR
-    INIT:::auto --> RC["REQ_COLLECTING"]
-    RC --> RR{"REQ_REVIEW 🚦"}
-    RR -->|approve| DQ["DESIGN_QUEUED"]
+    INIT:::auto --> RC["REQ_COLLECTING"]:::stage
+    UP["📄 上传需求文档"] -.->|跳过| DQ
+
+    RC --> RR{"REQ_REVIEW<br/>🚦"}:::gate
+    RR -->|approve| DQ["DESIGN_QUEUED"]:::stage
     RR -->|reject| RC
 
-    DQ --> DD["DESIGN_DISPATCHED"]:::auto --> DR["DESIGN_RUNNING"]
+    DQ --> DD["DESIGN_DISPATCHED"]:::auto --> DR["DESIGN_RUNNING"]:::running
     DR -->|"revise ≤3轮"| DR
-    DR --> DRV{"DESIGN_REVIEW 🚦"}
-    DRV -->|approve| VQ["DEV_QUEUED"]
+    DR --> DRV{"DESIGN_REVIEW<br/>🚦"}:::gate
+    DRV -->|approve| VQ["DEV_QUEUED"]:::stage
     DRV -->|reject| DQ
 
-    VQ --> VD["DEV_DISPATCHED"]:::auto --> VR["DEV_RUNNING"]
+    VQ --> VD["DEV_DISPATCHED"]:::auto --> VR["DEV_RUNNING"]:::running
     VR -->|"revise ≤5轮"| VR
-    VR --> VRV{"DEV_REVIEW 🚦"}
+    VR --> VRV{"DEV_REVIEW<br/>🚦"}:::gate
     VRV -->|approve| MQ["MERGE_QUEUED"]:::auto
     VRV -->|reject| VQ
 
     MQ --> MG["MERGING"]:::auto
-    MG --> MD(["MERGED"])
-    MG --> MC{"MERGE_CONFLICT 🚦"}
+    MG --> MD(["✅ MERGED"]):::done
+    MG --> MC{"MERGE_CONFLICT<br/>🚦"}:::gate
     MC -->|resolve| MQ
 
-    DR -->|"job failed/timeout"| FL(["FAILED"]):::fail
-    VR -->|"job failed/timeout"| FL
+    DR -->|"failed / timeout"| FL(["❌ FAILED"]):::fail
+    VR -->|"failed / timeout"| FL
 
-    classDef auto fill:#e8f5e9,stroke:#4caf50
-    classDef fail fill:#ffebee,stroke:#e53935
+    classDef stage fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff
+    classDef gate fill:#2d1b4e,stroke:#c084fc,color:#f5f5f5
+    classDef running fill:#14532d,stroke:#4ade80,color:#dcfce7
+    classDef auto fill:#1a2e1a,stroke:#4ade80,color:#bbf7d0,stroke-dasharray:5 5
+    classDef done fill:#14532d,stroke:#22c55e,color:#dcfce7
+    classDef fail fill:#450a0a,stroke:#ef4444,color:#fecaca
 ```
 
 - **🚦 审批 Gate** — 需要调用 `approve` 或 `reject` 端点通过
+- **📄 上传需求文档** — 上传 `.md` / `.docx` 文件直接跳过 REQ 阶段进入 DESIGN_QUEUED
 - **revise** — 自动检查产物完整性，不通过则发送修订指令继续
 
 ### 各阶段详细说明
@@ -236,7 +258,7 @@ flowchart LR
 | 阶段 | 触发方式 | 说明 |
 |------|----------|------|
 | `INIT` | 系统自动 | 创建 run 后立即转入 REQ_COLLECTING |
-| `REQ_COLLECTING` | `submit-requirement` | 等待提交需求文档 |
+| `REQ_COLLECTING` | `submit-requirement` | 等待提交需求文档；也可通过 `upload-requirement` 上传文件直接跳到 DESIGN_QUEUED |
 | `REQ_REVIEW` | `approve` / `reject` | 人工审批需求 |
 | `DESIGN_QUEUED` | `tick` | 等待可用 Claude 主机 |
 | `DESIGN_DISPATCHED` | 自动 | acpx session 已启动 |
@@ -272,6 +294,7 @@ flowchart LR
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `POST` | `/runs` | 创建任务 |
+| `POST` | `/runs/upload-requirement` | 上传需求文档创建任务（multipart，支持 `.md` / `.docx`，跳过 REQ 阶段） |
 | `GET` | `/runs` | 列出任务（支持 `status`/`limit`/`offset` 过滤） |
 | `GET` | `/runs/{id}` | 任务详情（含 steps、approvals、events、artifacts） |
 | `POST` | `/runs/{id}/tick` | 推进一步 |
@@ -291,6 +314,7 @@ flowchart LR
 | `GET` | `/artifacts/{aid}` | 产物元数据 |
 | `GET` | `/artifacts/{aid}/content` | 产物内容 |
 | `GET` | `/artifacts/{aid}/diff` | 与上一版本的 diff |
+| `GET` | `/artifacts/{aid}/download` | 下载产物（`?format=md\|docx`，docx 通过 pandoc 转换） |
 
 ### Job 与合并 (`/api/v1/runs/{id}`)
 
@@ -352,6 +376,12 @@ curl -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/submit-requirement \
   -H "Content-Type: application/json" \
   -d '{"content": "# 需求标题\n## 背景\n..."}'
 
+# 上传需求文档创建任务（跳过 REQ 阶段）
+curl -X POST http://127.0.0.1:8321/api/v1/runs/upload-requirement \
+  -F "file=@/path/to/REQ-PROJ-42.md" \
+  -F "ticket=PROJ-42" \
+  -F "repo_path=/path/to/repo"
+
 # 审批通过设计
 curl -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/approve \
   -H "Content-Type: application/json" \
@@ -391,47 +421,50 @@ SQLite 数据库包含 10 张表：
 
 ```mermaid
 erDiagram
-    RUNS ||--o{ STEPS : has
-    RUNS ||--o{ EVENTS : logs
-    RUNS ||--o{ APPROVALS : has
-    RUNS ||--o{ ARTIFACTS : produces
-    RUNS ||--o{ JOBS : dispatches
-    RUNS ||--o{ MERGE_QUEUE : enqueues
-    JOBS ||--o{ TURNS : tracks
+    RUNS ||--o{ STEPS : "阶段转换"
+    RUNS ||--o{ EVENTS : "事件日志"
+    RUNS ||--o{ APPROVALS : "审批决策"
+    RUNS ||--o{ ARTIFACTS : "产出产物"
+    RUNS ||--o{ JOBS : "调度任务"
+    RUNS ||--o{ MERGE_QUEUE : "入队合并"
+    JOBS ||--o{ TURNS : "轮次追踪"
 
     RUNS {
-        text id PK
-        text ticket
-        text repo_path
-        text status
-        text current_stage
+        text id PK "run UUID"
+        text ticket "工单号"
+        text repo_path "仓库路径"
+        text status "running / completed / failed / cancelled"
+        text current_stage "当前阶段（16 阶段之一）"
+        text design_agent "设计 Agent（claude / codex）"
+        text dev_agent "开发 Agent"
     }
     JOBS {
-        text id PK
+        text id PK "job UUID"
         text run_id FK
         text host_id FK
-        text agent_type
-        text session_name
-        int turn_count
+        text agent_type "claude / codex"
+        text session_name "acpx session"
+        int turn_count "已执行轮次"
     }
     ARTIFACTS {
         int id PK
         text run_id FK
-        text kind
-        int version
-        text status
+        text kind "req / design / adr / test-report"
+        int version "版本号（驳回重做递增）"
+        text status "submitted / approved / rejected"
+        text content_hash "SHA256"
     }
     AGENT_HOSTS {
         text id PK
-        text host
-        text agent_type
-        int max_concurrent
+        text host "local 或 user＠ip"
+        text agent_type "claude / codex / both"
+        int max_concurrent "最大并发"
     }
     WEBHOOKS {
         int id PK
-        text url
-        text events_json
-        text status
+        text url "回调地址"
+        text events_json "事件过滤列表"
+        text status "active / disabled"
     }
 ```
 
@@ -577,7 +610,7 @@ curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
 | 追踪 | `request.received` `request.completed` `request.error` `stage.transition` `run.failed` |
 | 调度器 | `scheduler.health_check_error` `scheduler.timeout_enforcement_error` |
 | 数据库 | `db.lock_retry` |
-| 其他 | `review.reminder` `requirement.submitted` |
+| 其他 | `review.reminder` `requirement.submitted` `requirement.uploaded` |
 
 ### OpenClaw Skill 部署
 
@@ -616,29 +649,32 @@ pytest tests/test_e2e.py -v
 pytest tests/test_acpx_executor.py -v
 ```
 
-测试覆盖（230 个测试）：
+测试覆盖（285 个测试）：
 
 | 模块 | 测试数 | 说明 |
 |------|--------|------|
-| `test_state_machine.py` | 56 | 状态转换、Gate、多轮评估、reconciliation |
-| `test_acpx_executor.py` | 43 | 命令构建、session 管理、exit code |
+| `test_state_machine.py` | 63 | 状态转换、Gate、多轮评估、reconciliation、需求上传跳阶段 |
+| `test_acpx_executor.py` | 42 | 命令构建、session 管理、exit code |
 | `test_openclaw_hooks.py` | 19 | OpenClaw hooks 事件推送 |
-| `test_api.py` | 13 | HTTP 端点集成测试 |
-| `test_host_manager.py` | 10 | 选择、负载、健康检查 |
-| `test_database.py` | 9 | 连接、事务、tracing schema migration |
+| `test_api.py` | 19 | HTTP 端点集成测试（含上传需求文档） |
+| `test_host_manager.py` | 14 | 选择、负载、健康检查 |
+| `test_diagnostics.py` | 13 | 诊断 API（run trace、job diagnosis、trace lookup） |
+| `test_run_brief.py` | 12 | Run 摘要视图 |
+| `test_database.py` | 10 | 连接、事务、tracing schema migration |
+| `test_config.py` | 9 | 配置加载、默认值、TracingConfig |
+| `test_webhook_notifier.py` | 8 | 订阅、过滤、投递 |
 | `test_scheduler.py` | 8 | 启动、停止、超时执行 |
+| `test_merge_manager.py` | 8 | 队列、优先级、冲突 |
 | `test_artifact_manager.py` | 7 | 注册、版本、Jinja2 渲染 |
-| `test_merge_manager.py` | 7 | 队列、优先级、冲突 |
-| `test_config.py` | 7 | 配置加载、默认值、TracingConfig |
+| `test_job_manager.py` | 7 | session、轮次追踪 |
 | `test_trace_emitter.py` | 6 | 事件发射器、队列消费、format_error |
-| `test_webhook_notifier.py` | 6 | 订阅、过滤、投递 |
 | `test_skill_deployer.py` | 6 | Skill 部署、覆盖、SSH 降级 |
-| `test_job_manager.py` | 6 | session、轮次追踪 |
 | `test_git_utils.py` | 6 | worktree、冲突检测 |
+| `test_file_converter.py` | 6 | 上传验证、docx 转换 |
 | `test_trace_context.py` | 5 | contextvars 传播、任务隔离 |
 | `test_ensure_repo.py` | 5 | ensure_repo init/clone/exists |
+| `test_bootstrap_flow.py` | 5 | 启动引导流程 |
 | `test_e2e.py` | 4 | 完整流程、驳回重做、取消、重试 |
-| `test_diagnostics.py` | 4 | 诊断 API（run trace、job diagnosis、trace lookup） |
 | `test_trace_middleware.py` | 3 | X-Trace-Id 中间件 |
 
 ## 项目结构
@@ -655,6 +691,8 @@ cooagents/
 │   ├── openclaw-tools.json    # OpenClaw API 参考（16 函数）
 │   ├── design/                # 设计文档模板
 │   └── dev/                   # 开发文档模板
+├── pencil/
+│   └── dashboard.pen          # Dashboard 设计稿（Pencil 格式）
 ├── skills/                    # OpenClaw Skills（启动时部署）
 │   ├── cooagents-workflow/
 │   │   ├── SKILL.md           # 核心决策逻辑
@@ -666,19 +704,20 @@ cooagents/
 │       ├── SKILL.md           # 5 阶段升级流程
 │       └── references/        # 排查文档（troubleshooting）
 ├── routes/                    # FastAPI 路由
-│   ├── runs.py                # 工作流端点
-│   ├── artifacts.py           # 产物端点
-│   ├── repos.py               # Job/合并端点
+│   ├── runs.py                # 工作流端点（含 upload-requirement）
+│   ├── artifacts.py           # 产物端点（含下载 / docx 转换）
+│   ├── repos.py               # 仓库 / 合并端点
 │   ├── agent_hosts.py         # 主机管理端点
 │   ├── webhooks.py            # Webhook 端点
-│   └── diagnostics.py         # 诊断 API 端点（trace/diagnosis）
+│   └── diagnostics.py         # 诊断 API 端点（trace / diagnosis）
 ├── src/                       # 核心模块
 │   ├── app.py                 # FastAPI 应用入口
 │   ├── state_machine.py       # 16 阶段状态机
-│   ├── acpx_executor.py       # acpx session 执行器（唯一执行器）
+│   ├── acpx_executor.py       # acpx session 执行器
 │   ├── artifact_manager.py    # 产物版本管理
+│   ├── file_converter.py      # 文件验证与格式转换（md ↔ docx，pandoc）
 │   ├── host_manager.py        # 多主机管理
-│   ├── job_manager.py         # Job/轮次追踪
+│   ├── job_manager.py         # Job / 轮次追踪
 │   ├── merge_manager.py       # 合并队列
 │   ├── webhook_notifier.py    # Webhook 通知
 │   ├── scheduler.py           # 后台调度器
@@ -691,8 +730,18 @@ cooagents/
 │   ├── models.py              # Pydantic 模型
 │   ├── git_utils.py           # Git 操作工具
 │   └── exceptions.py          # 自定义异常
+├── web/                       # Dashboard 前端
+│   ├── src/
+│   │   ├── api/               # API 客户端（apiFetch、runs、client）
+│   │   ├── components/        # 通用组件（StageProgress、StatusBadge 等）
+│   │   ├── pages/             # 页面（RunsListPage、RunDetailPage 等）
+│   │   ├── hooks/             # 自定义 Hooks（useSSE、usePolling）
+│   │   ├── types/             # TypeScript 类型定义
+│   │   └── index.css          # Tailwind 主题 + Markdown prose 样式
+│   ├── package.json
+│   └── vite.config.ts         # Vite + React + Tailwind v4
 ├── templates/                 # Jinja2 任务模板
-├── tests/                     # 测试套件（230 tests）
+├── tests/                     # 测试套件（285 tests）
 ├── scripts/
 │   └── bootstrap.sh           # 初始化脚本
 ├── requirements.txt
@@ -711,6 +760,13 @@ cooagents/
 | jinja2 | >=3.1 | 模板渲染 |
 | pyyaml | >=6.0 | YAML 配置 |
 | httpx | >=0.27 | HTTP 客户端（Webhook） |
+| python-multipart | >=0.0.9 | 文件上传（multipart/form-data） |
+
+**可选依赖：**
+
+| 工具 | 用途 |
+|------|------|
+| pandoc | `.docx` ↔ `.md` 格式转换（上传需求文档、下载产物为 Word） |
 
 ## License
 
