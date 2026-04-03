@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,8 +83,23 @@ class JobManager:
     async def get_output(self, job_id):
         events_path = self.coop_dir / "jobs" / job_id / "events.jsonl"
         if events_path.exists():
-            return events_path.read_text(encoding="utf-8")
+            return self._normalize_ndjson(events_path.read_text(encoding="utf-8"))
         log_path = self.coop_dir / "jobs" / job_id / "stdout.log"
         if log_path.exists():
             return log_path.read_text(encoding="utf-8")
         return ""
+
+    @staticmethod
+    def _normalize_ndjson(raw: str) -> str:
+        """Re-serialize NDJSON lines so unicode escapes render as real characters."""
+        lines = []
+        for line in raw.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                obj = json.loads(stripped)
+                lines.append(json.dumps(obj, ensure_ascii=False))
+            except (json.JSONDecodeError, ValueError):
+                lines.append(line)
+        return "\n".join(lines)

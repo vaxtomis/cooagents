@@ -43,7 +43,7 @@ def create_sse_router(db=None, broadcaster=None):
                         continue
 
                     yield f"event: {message['event']}\n"
-                    yield f"data: {json.dumps(message['data'])}\n\n"
+                    yield f"data: {json.dumps(message['data'], ensure_ascii=False)}\n\n"
 
                     if await request.is_disconnected():
                         break

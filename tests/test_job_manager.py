@@ -123,4 +123,18 @@ async def test_get_output_uses_configured_coop_dir(db, tmp_path):
 
     output = await jm.get_output("job-out")
 
-    assert output == '{"event":"ok"}\n'
+    assert output == '{"event": "ok"}'
+
+
+async def test_get_output_decodes_unicode_escapes(db, tmp_path):
+    """Existing NDJSON files with \\uXXXX escapes should render as real characters."""
+    jm = JobManager(db, coop_dir=str(tmp_path / ".coop"))
+    events_path = tmp_path / ".coop" / "jobs" / "job-cn" / "events.jsonl"
+    events_path.parent.mkdir(parents=True)
+    # Simulate old output written with ensure_ascii=True
+    events_path.write_text('{"raw":"\\u4f60\\u597d"}\n', encoding="utf-8")
+
+    output = await jm.get_output("job-cn")
+
+    assert "你好" in output
+    assert "\\u4f60" not in output

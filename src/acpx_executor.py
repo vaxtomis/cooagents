@@ -922,16 +922,16 @@ class AcpxExecutor:
                 "separator": separator,
                 "truncated": True,
             }
-            handle.write(json.dumps(record) + "\n")
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
             handle.flush()
             await self._emit_output_warning(run_id, job_id, len(normalized), chunk_limit, separator)
             return
 
         try:
             msg = json.loads(line_text)
-            handle.write(json.dumps(msg) + "\n")
+            handle.write(json.dumps(msg, ensure_ascii=False) + "\n")
         except json.JSONDecodeError:
-            handle.write(json.dumps({"raw": line_text}) + "\n")
+            handle.write(json.dumps({"raw": line_text}, ensure_ascii=False) + "\n")
         handle.flush()
 
     _STREAM_IDLE_TIMEOUT = 60  # seconds — check for completion when stdout goes quiet
