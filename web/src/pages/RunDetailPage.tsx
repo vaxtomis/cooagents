@@ -246,7 +246,7 @@ function ArtifactModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-[28px] border border-white/8 bg-panel shadow-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="flex max-h-[85vh] w-full max-w-[800px] flex-col overflow-hidden rounded-[28px] border border-white/8 bg-panel shadow-panel" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/6 px-6 py-4">
           <div className="min-w-0 flex-1">
@@ -254,7 +254,7 @@ function ArtifactModal({
           </div>
           <div className="flex items-center gap-2">
             <button
-              className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:opacity-40"
+              className="rounded-full border border-white/10 bg-white/4 px-3.5 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:opacity-40"
               disabled={artifactState.loading || !artifactState.content}
               onClick={handleDownload}
               type="button"
@@ -262,7 +262,7 @@ function ArtifactModal({
               下载
             </button>
             <button
-              className="rounded-full border border-white/10 bg-white/4 px-2 py-2 text-xs text-muted transition hover:border-white/20 hover:bg-white/8"
+              className="rounded-full border border-white/10 bg-white/4 px-2.5 py-2 text-xs text-muted transition hover:border-white/20 hover:bg-white/8"
               onClick={onClose}
               type="button"
             >
@@ -273,7 +273,7 @@ function ArtifactModal({
 
         {/* Tabs */}
         {!artifactState.loading && !artifactState.error && (artifactState.content || artifactState.diff) ? (
-          <div className="flex gap-1 border-b border-white/6 px-6 pt-2">
+          <div className="flex gap-1 border-b border-white/6 px-6">
             <button
               className={`rounded-t-lg px-4 py-2 text-xs font-medium transition ${tab === "content" ? "border-b-2 border-accent text-white" : "text-muted hover:text-white"}`}
               onClick={() => setTab("content")}
