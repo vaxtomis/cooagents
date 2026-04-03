@@ -248,9 +248,13 @@ describe("RunDetailPage", () => {
     expect(screen.getByRole("tab", { name: "事件追踪" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "阶段历史" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "查看 docs/plan.md" }));
-    expect(await screen.findByText((_, element) => element?.textContent === "# Plan\nship it")).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent === "@@ -1 +1 @@\n- old\n+ new")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看" }));
+    const contentMatches = await screen.findAllByText((_, element) => element?.tagName === "PRE" && element?.textContent === "# Plan\nship it");
+    expect(contentMatches.length).toBeGreaterThan(0);
+    // Switch to diff tab to verify diff content
+    fireEvent.click(screen.getByRole("button", { name: "差异" }));
+    const diffMatches = screen.getAllByText((_, element) => element?.tagName === "PRE" && element?.textContent === "@@ -1 +1 @@\n- old\n+ new");
+    expect(diffMatches.length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("tab", { name: "Agent输出" }));
     fireEvent.click(screen.getByRole("button", { name: "加载输出 job-dev-1" }));

@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, type ReactNode } from "react";
+﻿import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import useSWR from "swr";
 import { getRunTrace } from "../api/diagnostics";
@@ -213,14 +213,117 @@ function ApprovalHistory({ approvals, currentStage }: { approvals: ApprovalRecor
   );
 }
 
+function ArtifactModal({
+  artifactState,
+  onClose,
+}: {
+  artifactState: {
+    artifactId: number | null;
+    runId: string;
+    content: string;
+    diff: string;
+    error: string | null;
+    loading: boolean;
+    path: string;
+  };
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<"content" | "diff">("content");
+
+  const handleDownload = useCallback(() => {
+    if (!artifactState.content) return;
+    const blob = new Blob([artifactState.content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const filename = artifactState.path.split("/").pop() || "artifact.txt";
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [artifactState.content, artifactState.path]);
+
+  if (artifactState.artifactId === null) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-[28px] border border-white/8 bg-panel shadow-panel" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-white/6 px-6 py-4">
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-mono text-sm font-medium text-white">{artifactState.path}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:opacity-40"
+              disabled={artifactState.loading || !artifactState.content}
+              onClick={handleDownload}
+              type="button"
+            >
+              下载
+            </button>
+            <button
+              className="rounded-full border border-white/10 bg-white/4 px-2 py-2 text-xs text-muted transition hover:border-white/20 hover:bg-white/8"
+              onClick={onClose}
+              type="button"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        {!artifactState.loading && !artifactState.error && (artifactState.content || artifactState.diff) ? (
+          <div className="flex gap-1 border-b border-white/6 px-6 pt-2">
+            <button
+              className={`rounded-t-lg px-4 py-2 text-xs font-medium transition ${tab === "content" ? "border-b-2 border-accent text-white" : "text-muted hover:text-white"}`}
+              onClick={() => setTab("content")}
+              type="button"
+            >
+              内容
+            </button>
+            {artifactState.diff ? (
+              <button
+                className={`rounded-t-lg px-4 py-2 text-xs font-medium transition ${tab === "diff" ? "border-b-2 border-accent text-white" : "text-muted hover:text-white"}`}
+                onClick={() => setTab("diff")}
+                type="button"
+              >
+                差异
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Body */}
+        <div className="flex-1 overflow-auto p-6">
+          {artifactState.loading ? (
+            <div className="flex items-center justify-center py-12">
+              <span className="text-sm text-muted">加载中...</span>
+            </div>
+          ) : artifactState.error ? (
+            <p className="text-sm text-danger">{artifactState.error}</p>
+          ) : tab === "content" && artifactState.content ? (
+            <pre className="overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.content}</pre>
+          ) : tab === "diff" && artifactState.diff ? (
+            <pre className="overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.diff}</pre>
+          ) : (
+            <p className="py-12 text-center text-sm text-muted">暂无内容</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ArtifactsPanel({
   artifacts,
   artifactState,
   onInspect,
+  onCloseModal,
 }: {
   artifacts: ArtifactRecord[];
   artifactState: {
     artifactId: number | null;
+    runId: string;
     content: string;
     diff: string;
     error: string | null;
@@ -228,6 +331,7 @@ function ArtifactsPanel({
     path: string;
   };
   onInspect: (artifact: ArtifactRecord) => void | Promise<void>;
+  onCloseModal: () => void;
 }) {
   return (
     <div>
@@ -249,7 +353,7 @@ function ArtifactsPanel({
                   onClick={() => void onInspect(artifact)}
                   type="button"
                 >
-                  {`查看 ${artifact.path}`}
+                  查看
                 </button>
               </div>
             </article>
@@ -257,17 +361,7 @@ function ArtifactsPanel({
         </div>
       )}
 
-      {artifactState.artifactId !== null ? (
-        <div className="mt-4 rounded-[24px] border border-white/6 bg-black/20 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-medium text-white">{artifactState.path}</p>
-            {artifactState.loading ? <span className="text-xs text-muted">加载中...</span> : null}
-          </div>
-          {artifactState.error ? <p className="mt-3 text-sm text-danger">{artifactState.error}</p> : null}
-          {artifactState.content ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.content}</pre> : null}
-          {artifactState.diff ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.diff}</pre> : null}
-        </div>
-      ) : null}
+      <ArtifactModal artifactState={artifactState} onClose={onCloseModal} />
     </div>
   );
 }
@@ -373,12 +467,13 @@ export function RunDetailPage() {
   const [cancelMessage, setCancelMessage] = useState<string | null>(null);
   const [artifactState, setArtifactState] = useState<{
     artifactId: number | null;
+    runId: string;
     content: string;
     diff: string;
     error: string | null;
     loading: boolean;
     path: string;
-  }>({ artifactId: null, content: "", diff: "", error: null, loading: false, path: "" });
+  }>({ artifactId: null, runId: "", content: "", diff: "", error: null, loading: false, path: "" });
   const [jobOutputs, setJobOutputs] = useState<Record<string, { error?: string; loading?: boolean; output?: string }>>({});
 
   const run = useSWR(runId ? ["run", runId] : null, () => getRun(runId!), { revalidateOnFocus: false });
@@ -454,7 +549,7 @@ export function RunDetailPage() {
   const activeGate = REVIEW_GATE_BY_STAGE[runData.current_stage];
 
   async function handleInspectArtifact(artifact: ArtifactRecord) {
-    setArtifactState({ artifactId: artifact.id, content: "", diff: "", error: null, loading: true, path: artifact.path });
+    setArtifactState({ artifactId: artifact.id, runId: resolvedRunId, content: "", diff: "", error: null, loading: true, path: artifact.path });
     try {
       const [content, diff] = await Promise.all([
         getArtifactContent(resolvedRunId, artifact.id),
@@ -462,6 +557,7 @@ export function RunDetailPage() {
       ]);
       setArtifactState({
         artifactId: artifact.id,
+        runId: resolvedRunId,
         content: content.content,
         diff: diff.diff,
         error: null,
@@ -471,6 +567,7 @@ export function RunDetailPage() {
     } catch (loadError) {
       setArtifactState({
         artifactId: artifact.id,
+        runId: resolvedRunId,
         content: "",
         diff: "",
         error: loadError instanceof Error ? loadError.message : "产物详情加载失败",
@@ -478,6 +575,10 @@ export function RunDetailPage() {
         path: artifact.path,
       });
     }
+  }
+
+  function handleCloseArtifactModal() {
+    setArtifactState({ artifactId: null, runId: "", content: "", diff: "", error: null, loading: false, path: "" });
   }
 
   async function handleLoadOutput(job: JobRecord) {
@@ -579,7 +680,7 @@ export function RunDetailPage() {
           </div>
 
           <div aria-labelledby={`run-detail-tab-${activeTab}`} className="mt-5" id={`run-detail-panel-${activeTab}`} role="tabpanel">
-            {activeTab === "artifacts" ? <ArtifactsPanel artifactState={artifactState} artifacts={artifacts.data} onInspect={handleInspectArtifact} /> : null}
+            {activeTab === "artifacts" ? <ArtifactsPanel artifactState={artifactState} artifacts={artifacts.data} onCloseModal={handleCloseArtifactModal} onInspect={handleInspectArtifact} /> : null}
             {activeTab === "jobs" ? <JobsPanel jobOutputs={jobOutputs} jobs={jobs.data} onLoadOutput={handleLoadOutput} /> : null}
             {activeTab === "trace" ? <TraceEvents trace={trace.data} /> : null}
             {activeTab === "history" ? <StageHistoryPanel steps={runData.steps} /> : null}
