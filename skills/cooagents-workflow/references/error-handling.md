@@ -4,15 +4,17 @@
 
 ## 异常决策表
 
+升级通知统一使用 `feishu-interaction.md` §2 的人工确认消息格式（`📋 {ticket} · 需要介入`）。
+
 | 事件 | 自动响应 | 升级条件 |
 |------|----------|----------|
-| `job.timeout` | `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/recover -H "Content-Type: application/json" -d '{"action":"resume"}'`，最多 3 次 | 连续 3 次 → 回复通知用户 |
-| `job.failed` | `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/retry -H "Content-Type: application/json" -d '{"by":"agent","note":"自动重试"}'`，最多 2 次 | 重试仍失败 → 回复通知用户 |
+| `job.timeout` | `curl -s -X POST .../recover -d '{"action":"resume"}'`，最多 3 次 | 连续 3 次 → §2 格式通知用户 |
+| `job.failed` | `curl -s -X POST .../retry -d '{"by":"agent","note":"自动重试"}'`，最多 2 次 | 重试仍失败 → §2 格式通知用户 |
 | `job.interrupted` | 同 `job.failed` | 同上 |
-| `merge.conflict` | exec `curl GET /conflicts` 获取冲突文件列表 → 回复通知用户 → 用户解决后执行 `curl POST /resolve-conflict` | — |
-| `host.offline` | 等待 `host.online` 事件后执行 `curl POST .../tick` | >30 分钟 → 回复通知用户 |
-| curl 4xx 响应 | 记录错误，不重试 | 回复通知用户 |
-| curl 5xx / 网络错误 | 等 10s 重试 1 次 | 仍失败 → 回复通知用户 |
+| `merge.conflict` | exec `curl GET /conflicts` 获取冲突文件列表 | §2 格式通知用户（`label` 填"合并冲突"） |
+| `host.offline` | 等待 `host.online` 事件后执行 `curl POST .../tick` | >30 分钟 → §2 格式通知用户 |
+| curl 4xx 响应 | 记录错误，不重试 | §2 格式通知用户 |
+| curl 5xx / 网络错误 | 等 10s 重试 1 次 | 仍失败 → §2 格式通知用户 |
 
 ## 诊断 API 排查
 
@@ -43,13 +45,18 @@ Agent 在对话上下文中按 run_id 追踪重试次数。每次自动恢复操
 
 ## 升级通知格式
 
-使用 `feishu-interaction.md` 中的异常升级模板：
+使用 `feishu-interaction.md` §2 的统一人工确认消息格式，`label` 填 "需要介入"：
 
 ```
-⚠️ 任务 {ticket} 需要人工介入
+📋 {ticket} · 需要介入
+
 原因：{reason}
-当前阶段：{stage}
+阶段：{stage}
 建议：{suggestion}
+
+请回复：
+- "重试" — 再次尝试
+- 其他处理方案 — 人工介入
 ```
 
 ## curl 错误检测

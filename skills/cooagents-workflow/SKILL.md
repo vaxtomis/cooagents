@@ -67,12 +67,12 @@ metadata:
 当阶段为 `*_REVIEW` 或 `MERGE_CONFLICT` 时：
 
 1. exec `curl GET /runs/{run_id}/artifacts` 获取产物列表
-2. 若阶段为 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW`，先按 `references/feishu-interaction.md` 中的“审批云文件发送规则”选择对应产物并获取完整正文
-3. 使用飞书技能把正文上传为云文件并发送给用户
-4. 云文件发送成功后，再使用 `references/feishu-interaction.md` 中的审批模板发送审批说明
+2. 若阶段为 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW`，按 `references/feishu-interaction.md` 中的”审批云文件发送规则”选择对应产物并获取完整正文
+3. 使用 `feishu_doc` 工具创建飞书云文件并写入正文（create → write，详见 `references/feishu-interaction.md` §1 的”feishu_doc 调用步骤”）
+4. 使用 `references/feishu-interaction.md` §2 的统一人工确认消息格式发送给用户（所有需要人工操作的场景格式一致：`📋 {ticket} · {label}` + body + 回复选项）
 5. `MERGE_CONFLICT` 不发送云文件，先查询冲突文件列表：
    exec `curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}/conflicts`
-   然后发送冲突通知，附冲突文件列表
+   然后使用同一 §2 格式发送冲突通知，`label` 填”合并冲突”
 6. **等待用户下一条消息 — 不得自主决策**
 7. 解析用户回复：
    - 肯定回复（"通过"、"可以"、"approve"）：
@@ -109,6 +109,7 @@ metadata:
 | `host.online`         | 对所有等待中的任务执行 tick                 |
 | `host.offline`        | 健康检查发现主机离线                        |
 | `host.unavailable`    | 分派任务时无可用主机                        |
+| `agent.fallback`      | 首选 Agent 无可用主机，已自动切换到备选 Agent；通知用户实际使用的 Agent 类型 |
 
 仅通过通用 webhook 推送的事件（不经过 OpenClaw hooks）：
 
@@ -121,28 +122,15 @@ metadata:
 
 ## E. 诊断 API（自主排查）
 
-当任务出现异常时，可通过诊断 API 主动拉取链路信息，无需等待 webhook 推送：
+当任务出现异常时，可通过诊断 API 主动拉取链路信息，无需等待 webhook 推送。
 
-```bash
-# 查看 run 的完整事件链路（含阶段转换、错误、耗时）
-exec curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}/trace
-# 可选参数：?level=error（只看错误）、?span_type=job（只看 job 事件）、?limit=50
+具体的 curl 命令和响应格式见 `references/api-playbook.md` §13。
 
-# 查看 job 的故障诊断（含错误摘要、轮次、主机状态、输出片段）
-exec curl -s http://127.0.0.1:8321/api/v1/jobs/{job_id}/diagnosis
-
-# 通过 trace_id 追踪完整请求链路（从 HTTP 请求到 run 到 job）
-exec curl -s http://127.0.0.1:8321/api/v1/traces/{trace_id}
-```
-
-**排查流程：**
+**排查决策：**
 
 1. 收到 `job.failed` / `job.timeout` 事件后，先调用 `/runs/{run_id}/trace?level=error` 查看错误事件
-2. 从 trace 结果的 `summary.jobs` 中找到失败的 job_id
-3. 调用 `/jobs/{job_id}/diagnosis` 获取详细诊断：`error_summary`（错误摘要）、`error_detail`（完整堆栈）、`last_output_excerpt`（最后输出）
-4. 根据诊断结果决定 retry/recover 或通知用户
-
-**注意：** 所有 API 响应和 webhook 事件都会携带 `X-Trace-Id` 响应头，可用于跨请求关联。
+2. 从 trace 结果的 `summary.jobs` 中找到失败的 job_id，调用 `/jobs/{job_id}/diagnosis`
+3. 根据 `diagnosis.error_summary` 决定：自动 retry/recover（参见 `references/error-handling.md`）或使用 §2 统一格式通知用户
 
 ## F. 参考文档
 
@@ -155,7 +143,7 @@ exec curl -s http://127.0.0.1:8321/api/v1/traces/{trace_id}
 
 - **最小干预**：能自动推进的阶段不打扰用户
 - **审批必须等待**：`*_REVIEW` 和 `MERGE_CONFLICT` 阶段必须等用户明确回复后再操作
-- **云文件优先**：进入 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW` 后，必须先通过飞书技能发送完整正文云文件，再发送审批文本
+- **云文件优先**：进入 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW` 后，必须先通过 `feishu_doc` 工具创建云文件并写入正文，再发送审批文本
 - **幂等重试**：网络错误时可重试 tick，状态机保证幂等
 - **错误上报**：FAILED 阶段参考 error-handling.md 处理，必要时告知用户
 - **审计留痕**：approve/reject 请求中的 `by` 字段必须填写真实用户标识
@@ -176,16 +164,11 @@ stage: {current_stage}
 注意：你在隔离会话中运行，处理完即结束。你的回复会通过 deliver 机制自动投递到用户的消息渠道。
 
 对于审批类事件（`gate.waiting`）：
-1. exec `curl GET /api/v1/runs/{run_id}/artifacts` 获取产物内容
-2. 按 gate 选择产物：
-   - `req` → 最新 `kind=req`
-   - `design` → 最新 `kind=design`
-   - `dev` → 最新 `kind=test-report`
-3. exec `curl GET /api/v1/runs/{run_id}/artifacts/{artifact_id}/content` 获取完整正文
-4. 将正文写入临时 Markdown 文件，并通过飞书技能上传为云文件发送给用户
-5. 云文件发送成功后，使用 `references/feishu-interaction.md` 中的模板发送审批请求
-6. 如果云文件发送失败，必须先回复失败告警，再附审批说明，不能静默跳过云文件
-7. 你不需要等待用户回复 — 用户的回复会由主会话 Agent 处理
+1. 按 `references/feishu-interaction.md` §1 执行完整的云文件发送流程（获取产物 → 创建 `feishu_doc` → 写入正文）
+2. 隔离会话中 `owner_open_id` 使用 run 数据的 `notify_to` 字段（详见 §1 "隔离会话中的 owner_open_id"）
+3. 使用 `references/feishu-interaction.md` §2 统一格式发送审批消息
+4. 如果 `feishu_doc` 调用失败，必须先回复失败告警（"⚠️ 飞书云文件创建失败"），再用 §2 格式发送审批消息（body 中注明云文件不可用），不能静默跳过
+5. 你不需要等待用户回复 — 用户的回复会由主会话 Agent 处理
 
 对于通知类事件（`run.completed`、`merge.conflict` 等）：
 1. 格式化通知消息
@@ -193,10 +176,10 @@ stage: {current_stage}
 
 ## I. 审批回复处理（主会话）
 
-当用户在对话中回复审批相关内容时（如"通过"、"驳回：原因..."），参考聊天记录中的审批请求消息，识别对应的 ticket 和 gate，然后执行审批操作。
+当用户在对话中回复审批相关内容时（如"通过"、"驳回：原因..."），参考聊天记录中的 §2 格式审批消息，识别对应的 ticket 和 gate，然后执行审批操作。
 
 示例场景：
-- 聊天记录中有 "📋 任务 PROJ-42 等待审批 (design)"
+- 聊天记录中有 "📋 PROJ-42 · 设计审批"
 - 用户回复 "通过"
 - 你应执行：
   1. exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/approve -H "Content-Type: application/json" -d '{"gate":"design","by":"用户标识"}'`

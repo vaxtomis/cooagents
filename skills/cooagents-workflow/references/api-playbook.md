@@ -22,6 +22,8 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs \
   -d '{"ticket":"PROJ-123","repo_path":"/path/to/repo","repo_url":"git@github.com:user/project.git","description":"任务描述"}'
 # repo_url 可选，仅做记录；repo_path 必须是已有的 git 仓库，否则返回 400
 # 可选字段：preferences（dict）、notify_channel（通知渠道）、notify_to（通知目标）
+# 可选字段：design_agent（"claude"/"codex"，设计阶段 Agent）、dev_agent（"claude"/"codex"，开发阶段 Agent）
+# 不指定时使用 config 中的 preferred_design_agent / preferred_dev_agent 默认值
 # Response: {"id":"<run_id>","current_stage":"REQ_COLLECTING",...}
 # 注：create 会自动推进 INIT → REQ_COLLECTING，响应中 current_stage 已为 REQ_COLLECTING
 
@@ -57,7 +59,7 @@ curl -s http://127.0.0.1:8321/api/v1/runs
   "id": "<run_id>",
   "ticket": "PROJ-123",
   "current_stage": "REQ_REVIEW",
-  "status": "active",
+  "status": "running",
   "created_at": "2026-03-17T10:00:00Z",
   "updated_at": "2026-03-17T10:05:00Z"
 }
@@ -140,7 +142,7 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/tick
 
 **预期响应：**
 ```json
-{"id":"<run_id>","current_stage":"DESIGN_QUEUED","status":"active"}
+{"id":"<run_id>","current_stage":"DESIGN_QUEUED","status":"running"}
 ```
 
 ---
@@ -165,7 +167,7 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/reject \
 
 **预期响应：**
 ```json
-{"id":"<run_id>","current_stage":"DESIGN_QUEUED","status":"active"}
+{"id":"<run_id>","current_stage":"DESIGN_QUEUED","status":"running"}
 ```
 
 ---
@@ -222,7 +224,7 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/recover \
 
 **预期响应：**
 ```json
-{"id":"<run_id>","current_stage":"DEV_QUEUED","status":"active"}
+{"id":"<run_id>","current_stage":"DEV_QUEUED","status":"running"}
 ```
 
 ---
@@ -258,7 +260,7 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/tick
 {
   "id": "<run_id>",
   "current_stage": "DESIGN_QUEUED",
-  "status": "active",
+  "status": "running",
   "updated_at": "2026-03-17T10:15:00Z"
 }
 ```
