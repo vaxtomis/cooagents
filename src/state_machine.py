@@ -776,6 +776,9 @@ class StateMachine:
         """Check merge result and advance to MERGED or MERGE_CONFLICT."""
         if self.merge:
             status = await self.merge.get_status(run["id"])
+            if status in ("waiting", "merging"):
+                await self.merge.process_next()
+                status = await self.merge.get_status(run["id"])
             if status == "merged":
                 await self._update_stage(run["id"], "MERGING", "MERGED")
                 now = datetime.now(timezone.utc).isoformat()

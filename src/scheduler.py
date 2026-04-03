@@ -153,7 +153,7 @@ class Scheduler:
         runnable = await self.db.fetchall(
             "SELECT id FROM runs WHERE status='running' AND current_stage IN "
             "('DESIGN_QUEUED','DESIGN_DISPATCHED','DESIGN_RUNNING',"
-            "'DEV_QUEUED','DEV_DISPATCHED','DEV_RUNNING')"
+            "'DEV_QUEUED','DEV_DISPATCHED','DEV_RUNNING','MERGE_QUEUED','MERGING')"
         )
         for run in runnable:
             try:

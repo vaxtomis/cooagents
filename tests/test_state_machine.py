@@ -1022,6 +1022,23 @@ async def test_merging_to_merged_records_step(sm, mocks, db, tmp_path):
     assert step["from_stage"] == "MERGING"
 
 
+async def test_merging_calls_process_next_when_waiting(sm, mocks, db, tmp_path):
+    """MERGING should call process_next() when merge_queue status is 'waiting'."""
+    _, _, _, merge_mgr = mocks
+
+    # First get_status returns "waiting", process_next runs, second get_status returns "merged"
+    merge_mgr.get_status = AsyncMock(side_effect=["waiting", "merged"])
+    merge_mgr.process_next = AsyncMock()
+
+    run = await sm.create_run("T-MPN", str(tmp_path))
+    rid = run["run_id"]
+    await db.execute("UPDATE runs SET current_stage='MERGING' WHERE id=?", (rid,))
+
+    run = await sm.tick(rid)
+    assert run["current_stage"] == "MERGED"
+    merge_mgr.process_next.assert_awaited_once()
+
+
 # ------------------------------------------------------------------
 # DISPATCHED → FAILED on job failure (GitHub issue #1)
 # ------------------------------------------------------------------

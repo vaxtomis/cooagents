@@ -72,6 +72,8 @@ async def test_tick_runnable_runs_includes_dispatched_and_running_stages():
         {"id": "run-dev-queued"},
         {"id": "run-dev-dispatched"},
         {"id": "run-dev-running"},
+        {"id": "run-merge-queued"},
+        {"id": "run-merging"},
     ])
 
     sched = Scheduler(db, hm, jm, ae, wh, FakeConfig(), state_machine=sm)
@@ -82,7 +84,9 @@ async def test_tick_runnable_runs_includes_dispatched_and_running_stages():
     assert "DESIGN_RUNNING" in fetched_sql
     assert "DEV_DISPATCHED" in fetched_sql
     assert "DEV_RUNNING" in fetched_sql
-    assert sm.tick.await_count == 6
+    assert "MERGE_QUEUED" in fetched_sql
+    assert "MERGING" in fetched_sql
+    assert sm.tick.await_count == 8
 
 
 async def test_notify_limited_caps_review_reminder_to_three(db):
