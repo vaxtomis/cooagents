@@ -68,3 +68,24 @@ async def test_only_one_merging(mm, db):
     await db.execute("UPDATE merge_queue SET status='merging' WHERE run_id=?", ("r1",))
     result = await mm.process_next()
     assert result is None  # Can't start another while one is merging
+
+
+async def test_process_next_crash_resets_to_conflict(mm, db):
+    """If _execute_merge crashes, queue item must not stay stuck at 'merging'."""
+    await mm.enqueue("r1", "feat/T-1-dev")
+
+    async def _boom(item):
+        raise RuntimeError("git exploded")
+
+    mm._execute_merge = _boom
+
+    with pytest.raises(RuntimeError):
+        await mm.process_next()
+
+    status = await mm.get_status("r1")
+    assert status == "conflict"  # not stuck at 'merging'
+
+    # Queue is unblocked — r2 can be picked up
+    await mm.enqueue("r2", "feat/T-2-dev")
+    waiting = await db.fetchone("SELECT * FROM merge_queue WHERE run_id='r2' AND status='waiting'")
+    assert waiting is not None

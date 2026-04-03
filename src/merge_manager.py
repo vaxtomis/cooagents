@@ -44,12 +44,31 @@ class MergeManager:
             (now, item["id"])
         )
 
+        try:
+            return await self._execute_merge(item)
+        except Exception:
+            # Ensure queue item never stays stuck at 'merging' on crash
+            now = datetime.now(timezone.utc).isoformat()
+            await self.db.execute(
+                "UPDATE merge_queue SET status='conflict', updated_at=? WHERE id=?",
+                (now, item["id"])
+            )
+            raise
+
+    async def _execute_merge(self, item):
         # Get the run to find repo_path
         run = await self.db.fetchone("SELECT * FROM runs WHERE id=?", (item["run_id"],))
         if not run:
-            return None
+            now = datetime.now(timezone.utc).isoformat()
+            await self.db.execute(
+                "UPDATE merge_queue SET status='conflict', updated_at=? WHERE id=?",
+                (now, item["id"])
+            )
+            return {"status": "conflict", "error": "run not found"}
 
         from src.git_utils import check_conflicts, rebase_on_main, merge_to_main
+
+        now = datetime.now(timezone.utc).isoformat()
 
         # Try rebase first
         dev_worktree = run.get("dev_worktree")
