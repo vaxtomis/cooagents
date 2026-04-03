@@ -249,8 +249,9 @@ describe("RunDetailPage", () => {
     expect(screen.getByRole("tab", { name: "阶段历史" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "查看" }));
-    const contentMatches = await screen.findAllByText((_, element) => element?.tagName === "PRE" && element?.textContent === "# Plan\nship it");
-    expect(contentMatches.length).toBeGreaterThan(0);
+    // Content is rendered as markdown: "# Plan\nship it" → <h1>Plan</h1><p>ship it</p>
+    expect(await screen.findByRole("heading", { name: "Plan" })).toBeInTheDocument();
+    expect(screen.getByText("ship it")).toBeInTheDocument();
     // Switch to diff tab to verify diff content
     fireEvent.click(screen.getByRole("button", { name: "差异" }));
     const diffMatches = screen.getAllByText((_, element) => element?.tagName === "PRE" && element?.textContent === "@@ -1 +1 @@\n- old\n+ new");

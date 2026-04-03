@@ -19,6 +19,25 @@ def validate_upload(filename: str) -> str:
     return suffix
 
 
+async def convert_md_to_docx(input_path: Path, output_path: Path) -> None:
+    """Convert a .md file to docx using pandoc.
+
+    Raises RuntimeError if pandoc is not installed or conversion fails.
+    """
+    if not shutil.which("pandoc"):
+        raise RuntimeError(
+            "pandoc is required for .docx conversion but not found on PATH"
+        )
+    proc = await asyncio.create_subprocess_exec(
+        "pandoc", "-f", "markdown", "-t", "docx", "-o", str(output_path), str(input_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"Document conversion failed: {stderr.decode()}")
+
+
 async def convert_docx_to_md(input_path: Path, output_path: Path) -> None:
     """Convert a .docx file to markdown using pandoc.
 

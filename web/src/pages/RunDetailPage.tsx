@@ -1,5 +1,7 @@
 ﻿import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 import { getRunTrace } from "../api/diagnostics";
 import {
@@ -13,6 +15,7 @@ import {
   listArtifacts,
   listJobs,
 } from "../api/runs";
+import { apiPath } from "../api/client";
 import { ApprovalAction } from "../components/ApprovalAction";
 import { StageProgress } from "../components/StageProgress";
 import { StatusBadge } from "../components/StatusBadge";
@@ -229,18 +232,15 @@ function ArtifactModal({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"content" | "diff">("content");
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
 
-  const handleDownload = useCallback(() => {
-    if (!artifactState.content) return;
-    const blob = new Blob([artifactState.content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const filename = artifactState.path.split("/").pop() || "artifact.txt";
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [artifactState.content, artifactState.path]);
+  const downloadUrl = useCallback(
+    (format: string) =>
+      artifactState.artifactId !== null
+        ? apiPath(`/runs/${artifactState.runId}/artifacts/${artifactState.artifactId}/download`, { format })
+        : "#",
+    [artifactState.runId, artifactState.artifactId],
+  );
 
   if (artifactState.artifactId === null) return null;
 
@@ -253,14 +253,35 @@ function ArtifactModal({
             <p className="truncate font-mono text-sm font-medium text-white">{artifactState.path}</p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              className="rounded-full border border-white/10 bg-white/4 px-3.5 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:opacity-40"
-              disabled={artifactState.loading || !artifactState.content}
-              onClick={handleDownload}
-              type="button"
-            >
-              下载
-            </button>
+            {/* Download dropdown */}
+            <div className="relative">
+              <button
+                className="rounded-full border border-white/10 bg-white/4 px-3.5 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:opacity-40"
+                disabled={artifactState.loading || !artifactState.content}
+                onClick={() => setShowDownloadMenu((v) => !v)}
+                type="button"
+              >
+                下载 ▾
+              </button>
+              {showDownloadMenu ? (
+                <div className="absolute right-0 top-full z-10 mt-1 min-w-[140px] rounded-xl border border-white/8 bg-panel-strong p-1 shadow-panel">
+                  <a
+                    className="block rounded-lg px-3 py-2 text-xs text-white transition hover:bg-white/8"
+                    href={downloadUrl("md")}
+                    onClick={() => setShowDownloadMenu(false)}
+                  >
+                    下载 Markdown
+                  </a>
+                  <a
+                    className="block rounded-lg px-3 py-2 text-xs text-white transition hover:bg-white/8"
+                    href={downloadUrl("docx")}
+                    onClick={() => setShowDownloadMenu(false)}
+                  >
+                    下载 Word (.docx)
+                  </a>
+                </div>
+              ) : null}
+            </div>
             <button
               className="rounded-full border border-white/10 bg-white/4 px-2.5 py-2 text-xs text-muted transition hover:border-white/20 hover:bg-white/8"
               onClick={onClose}
@@ -302,7 +323,9 @@ function ArtifactModal({
           ) : artifactState.error ? (
             <p className="text-sm text-danger">{artifactState.error}</p>
           ) : tab === "content" && artifactState.content ? (
-            <pre className="overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.content}</pre>
+            <div className="md-prose">
+              <Markdown remarkPlugins={[remarkGfm]}>{artifactState.content}</Markdown>
+            </div>
           ) : tab === "diff" && artifactState.diff ? (
             <pre className="overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.diff}</pre>
           ) : (
