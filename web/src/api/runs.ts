@@ -3,6 +3,7 @@ import type {
   ArtifactContentResponse,
   ArtifactDiffResponse,
   ArtifactRecord,
+  CreateRunPayload,
   JobOutputResponse,
   JobRecord,
   RejectPayload,
@@ -88,4 +89,24 @@ export async function getJobOutput(runId: string, jobId: string): Promise<JobOut
 
 export function getRunEventsStreamUrl(runId: string): string {
   return apiPath(`/runs/${runId}/events/stream`);
+}
+
+export async function createRun(payload: CreateRunPayload): Promise<RunRecord> {
+  return apiFetch<RunRecord>("/runs", { method: "POST", body: payload });
+}
+
+export async function createRunWithRequirement(formData: FormData): Promise<RunRecord> {
+  const response = await fetch("/api/v1/runs/upload-requirement", {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    const message =
+      data && typeof data === "object" && "message" in data
+        ? String(data.message)
+        : `Upload failed with status ${response.status}`;
+    throw new Error(message);
+  }
+  return response.json();
 }

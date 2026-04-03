@@ -1,11 +1,11 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import useSWR from "swr";
-import { listRuns } from "../api/runs";
+import { createRun, createRunWithRequirement, listRuns } from "../api/runs";
 import { StageProgress } from "../components/StageProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePolling } from "../hooks/usePolling";
-import { DASHBOARD_STAGE_FLOW, type RunRecord } from "../types";
+import { DASHBOARD_STAGE_FLOW, type CreateRunPayload, type RunRecord } from "../types";
 
 const PAGE_SIZE = 10;
 const DEFAULT_SORT_BY = "updated_at";
@@ -161,10 +161,154 @@ function RunRow({ run, onOpen }: { run: RunRecord; onOpen: (runId: string) => vo
   );
 }
 
+function CreateRunDialog({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (runId: string) => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const dropped = e.dataTransfer.files[0];
+    if (dropped) setFile(dropped);
+  }, []);
+
+  if (!open) return null;
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+
+    const fd = new FormData(e.currentTarget);
+    const ticket = (fd.get("ticket") as string).trim();
+    const repo_path = (fd.get("repo_path") as string).trim();
+    if (!ticket || !repo_path) {
+      setError("工单和仓库路径为必填项");
+      setSubmitting(false);
+      return;
+    }
+
+    try {
+      let result: { id: string };
+      if (file) {
+        const upload = new FormData();
+        upload.append("file", file);
+        upload.append("ticket", ticket);
+        upload.append("repo_path", repo_path);
+        const desc = (fd.get("description") as string)?.trim();
+        if (desc) upload.append("description", desc);
+        const da = fd.get("design_agent") as string;
+        if (da) upload.append("design_agent", da);
+        const dva = fd.get("dev_agent") as string;
+        if (dva) upload.append("dev_agent", dva);
+        result = await createRunWithRequirement(upload);
+      } else {
+        const payload: CreateRunPayload = { ticket, repo_path };
+        const desc = (fd.get("description") as string)?.trim();
+        if (desc) payload.description = desc;
+        const da = fd.get("design_agent") as string;
+        if (da) payload.design_agent = da;
+        const dva = fd.get("dev_agent") as string;
+        if (dva) payload.dev_agent = dva;
+        result = await createRun(payload);
+      }
+      onCreated(result.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "创建失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-[28px] border border-white/8 bg-panel p-6 shadow-panel" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-white">创建任务</h2>
+        <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
+          <label className="block space-y-1 text-sm text-muted">
+            <span>工单 <span className="text-red-400">*</span></span>
+            <input name="ticket" required className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none focus:border-accent/40" placeholder="PROJ-123" />
+          </label>
+          <label className="block space-y-1 text-sm text-muted">
+            <span>仓库路径 <span className="text-red-400">*</span></span>
+            <input name="repo_path" required className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none focus:border-accent/40" placeholder="/path/to/repo" />
+          </label>
+          <label className="block space-y-1 text-sm text-muted">
+            <span>描述</span>
+            <textarea name="description" rows={2} className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none focus:border-accent/40" />
+          </label>
+
+          {/* File drop zone */}
+          <div className="space-y-1 text-sm text-muted">
+            <span>需求文档（可选，上传后跳过需求阶段）</span>
+            <div
+              className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-4 py-6 transition ${file ? "border-accent/50 bg-accent/5" : "border-white/10 bg-black/10 hover:border-white/20"}`}
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+            >
+              {file ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-white">{file.name}</span>
+                  <button type="button" className="text-xs text-red-400 hover:underline" onClick={(e) => { e.stopPropagation(); setFile(null); }}>移除</button>
+                </div>
+              ) : (
+                <>
+                  <p className="text-muted">拖拽文件到此处或点击选择</p>
+                  <p className="mt-1 text-xs text-muted/60">支持 .md 和 .docx 文件</p>
+                </>
+              )}
+              <input ref={fileRef} type="file" accept=".md,.docx" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block space-y-1 text-sm text-muted">
+              <span>设计 Agent</span>
+              <select name="design_agent" className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none [&_option]:bg-panel-strong">
+                <option value="">默认</option>
+                <option value="claude">Claude</option>
+                <option value="codex">Codex</option>
+              </select>
+            </label>
+            <label className="block space-y-1 text-sm text-muted">
+              <span>开发 Agent</span>
+              <select name="dev_agent" className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none [&_option]:bg-panel-strong">
+                <option value="">默认</option>
+                <option value="claude">Claude</option>
+                <option value="codex">Codex</option>
+              </select>
+            </label>
+          </div>
+
+          {error && <p className="rounded-xl bg-red-500/10 px-4 py-2 text-sm text-red-400">{error}</p>}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="rounded-full border border-white/10 bg-white/4 px-5 py-2.5 text-sm font-medium text-white hover:bg-white/8">取消</button>
+            <button type="submit" disabled={submitting} className="rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black hover:bg-white/90 disabled:opacity-50">
+              {submitting ? "创建中..." : "创建"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function RunsListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const polling = usePolling(15_000);
+  const [showCreate, setShowCreate] = useState(false);
   const page = parsePage(searchParams);
   const applied = readDraft(searchParams);
   const [draft, setDraft] = useState<FilterDraft>(() => applied);
@@ -288,6 +432,13 @@ export function RunsListPage() {
           >
             刷新
           </button>
+          <button
+            className="rounded-full bg-accent px-4 py-3 text-sm font-medium text-white transition hover:bg-accent/90"
+            onClick={() => setShowCreate(true)}
+            type="button"
+          >
+            创建任务
+          </button>
         </form>
       </SectionPanel>
 
@@ -337,6 +488,15 @@ export function RunsListPage() {
           )}
         </div>
       </SectionPanel>
+
+      <CreateRunDialog
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={(runId) => {
+          setShowCreate(false);
+          navigate(`/runs/${runId}`);
+        }}
+      />
     </div>
   );
 }

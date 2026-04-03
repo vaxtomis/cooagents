@@ -10,6 +10,7 @@ External dependencies that do not exist yet are mocked:
 """
 import asyncio
 import pytest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.database import Database
 from src.artifact_manager import ArtifactManager
@@ -92,6 +93,44 @@ async def test_create_run_defaults_agent_from_config(sm, tmp_path):
     run = await sm.create_run("T-DEF", str(tmp_path))
     assert run["design_agent"] == "claude"
     assert run["dev_agent"] == "claude"
+
+
+# ---------------------------------------------------------------------------
+# create_run_with_requirement
+# ---------------------------------------------------------------------------
+
+async def test_create_run_with_requirement_skips_to_design_queued(sm, db, tmp_path):
+    """Uploading a requirement should skip REQ_COLLECTING and REQ_REVIEW."""
+    run = await sm.create_run_with_requirement(
+        "T-UPLOAD", str(tmp_path), "# My Requirement\nDetails here", "req.md",
+    )
+    assert run["current_stage"] == "DESIGN_QUEUED"
+
+    # Requirement file written to disk
+    req_path = Path(tmp_path) / "docs" / "req" / "REQ-T-UPLOAD.md"
+    assert req_path.exists()
+    assert "My Requirement" in req_path.read_text(encoding="utf-8")
+
+    # Artifact registered
+    arts = await db.fetchall(
+        "SELECT * FROM artifacts WHERE run_id=? AND kind='req'", (run["id"],)
+    )
+    assert len(arts) == 1
+
+    # Auto-approval recorded
+    approvals = await db.fetchall(
+        "SELECT * FROM approvals WHERE run_id=? AND gate='req'", (run["id"],)
+    )
+    assert len(approvals) == 1
+    assert approvals[0]["decision"] == "approved"
+    assert approvals[0]["by"] == "upload"
+
+    # Upload event emitted
+    events = await db.fetchall(
+        "SELECT * FROM events WHERE run_id=? AND event_type='requirement.uploaded'",
+        (run["id"],),
+    )
+    assert len(events) == 1
 
 
 # ---------------------------------------------------------------------------

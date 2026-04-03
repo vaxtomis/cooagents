@@ -383,3 +383,25 @@ async def test_spa_serves_static_assets_from_dist(tmp_path):
 
     assert resp.status_code == 200
     assert resp.text == "console.log('dashboard');"
+
+
+async def test_upload_requirement_creates_run_at_design_queued(client, tmp_path):
+    """POST /runs/upload-requirement with .md file should skip to DESIGN_QUEUED."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+
+    md_content = b"# Requirement\nDetails"
+    response = await client.post(
+        "/api/v1/runs/upload-requirement",
+        files={"file": ("REQ-TEST.md", md_content, "text/markdown")},
+        data={"ticket": "UPLOAD-1", "repo_path": str(repo)},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["current_stage"] == "DESIGN_QUEUED"
+
+    # Verify file was written
+    req_path = repo / "docs" / "req" / "REQ-UPLOAD-1.md"
+    assert req_path.exists()
+    assert "Requirement" in req_path.read_text(encoding="utf-8")

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Request, Response, HTTPException
+from fastapi import APIRouter, Request, Response, HTTPException, UploadFile, Form
 from src.models import (
     CreateRunRequest, ApproveRequest, RejectRequest, RetryRequest,
     RecoverRequest, SubmitRequirementRequest, ResolveConflictRequest,
 )
 from src.exceptions import NotFoundError, ConflictError, BadRequestError
+from src.file_converter import validate_upload, convert_docx_to_md
 from src.run_brief import build_brief, resolve_run_by_ticket
 
 router = APIRouter(tags=["runs"])
@@ -17,6 +18,46 @@ async def create_run(req: CreateRunRequest, request: Request):
         notify_channel=req.notify_channel, notify_to=req.notify_to,
         repo_url=req.repo_url,
         design_agent=req.design_agent, dev_agent=req.dev_agent,
+    )
+    return result
+
+
+@router.post("/runs/upload-requirement", status_code=201)
+async def create_run_with_requirement(
+    request: Request,
+    file: UploadFile,
+    ticket: str = Form(...),
+    repo_path: str = Form(...),
+    description: str | None = Form(None),
+    notify_channel: str | None = Form(None),
+    notify_to: str | None = Form(None),
+    repo_url: str | None = Form(None),
+    design_agent: str | None = Form(None),
+    dev_agent: str | None = Form(None),
+):
+    import tempfile
+    from pathlib import Path
+
+    ext = validate_upload(file.filename or "")
+    sm = request.app.state.sm
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_input = Path(tmp_dir) / f"upload.{ext}"
+        content = await file.read()
+        tmp_input.write_bytes(content)
+
+        if ext == "docx":
+            tmp_output = Path(tmp_dir) / "converted.md"
+            await convert_docx_to_md(tmp_input, tmp_output)
+            req_content = tmp_output.read_text(encoding="utf-8")
+        else:
+            req_content = tmp_input.read_text(encoding="utf-8")
+
+    result = await sm.create_run_with_requirement(
+        ticket, repo_path, req_content, file.filename or "unknown",
+        description=description,
+        notify_channel=notify_channel, notify_to=notify_to,
+        repo_url=repo_url, design_agent=design_agent, dev_agent=dev_agent,
     )
     return result
 

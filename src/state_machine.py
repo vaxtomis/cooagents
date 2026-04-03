@@ -173,6 +173,61 @@ class StateMachine:
             run["warning"] = warning
         return run
 
+    async def create_run_with_requirement(
+        self,
+        ticket: str,
+        repo_path: str,
+        req_content: str,
+        original_filename: str,
+        description: str | None = None,
+        preferences: dict | None = None,
+        notify_channel: str | None = None,
+        notify_to: str | None = None,
+        repo_url: str | None = None,
+        design_agent: str | None = None,
+        dev_agent: str | None = None,
+    ) -> dict:
+        """Create a run with an already-written requirement, skipping REQ stages.
+
+        Writes the requirement to disk, creates the run, registers the artifact,
+        records an auto-approval for the req gate, and advances directly to
+        DESIGN_QUEUED.
+        """
+        # Write requirement file
+        req_dir = Path(repo_path) / "docs" / "req"
+        req_dir.mkdir(parents=True, exist_ok=True)
+        req_path = req_dir / f"REQ-{ticket}.md"
+        req_path.write_text(req_content, encoding="utf-8")
+
+        # Create the run (starts at REQ_COLLECTING)
+        run = await self.create_run(
+            ticket, repo_path, description, preferences,
+            notify_channel=notify_channel, notify_to=notify_to,
+            repo_url=repo_url, design_agent=design_agent, dev_agent=dev_agent,
+        )
+        run_id = run["id"]
+
+        # Register artifact
+        await self.artifacts.register(run_id, "req", str(req_path), "REQ_COLLECTING")
+
+        # Auto-approve req gate
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            "INSERT INTO approvals(run_id,gate,decision,by,comment,created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (run_id, "req", "approved", "upload", f"Uploaded: {original_filename}", now),
+        )
+        await self._emit(run_id, "gate.approved", {"gate": "req", "by": "upload"})
+
+        # Skip REQ_COLLECTING → REQ_REVIEW → DESIGN_QUEUED
+        await self._update_stage(run_id, "REQ_COLLECTING", "DESIGN_QUEUED")
+        await self._emit(run_id, "requirement.uploaded", {
+            "path": str(req_path),
+            "original_filename": original_filename,
+        })
+
+        return await self._get_run(run_id)
+
     async def tick(self, run_id: str) -> dict:
         """Advance the run one step if there is an automatic transition available.
 

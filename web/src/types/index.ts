@@ -276,6 +276,17 @@ export interface MergeQueueItem {
   updated_at: string;
 }
 
+export interface CreateRunPayload {
+  ticket: string;
+  repo_path: string;
+  description?: string;
+  notify_channel?: string;
+  notify_to?: string;
+  repo_url?: string;
+  design_agent?: string;
+  dev_agent?: string;
+}
+
 export interface ApprovePayload {
   gate: GateName;
   by: string;

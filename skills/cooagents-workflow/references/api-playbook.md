@@ -37,6 +37,21 @@ curl -s -X POST http://127.0.0.1:8321/api/v1/runs/<run_id>/tick
 # Response: {"id":"<run_id>","current_stage":"REQ_REVIEW",...}
 ```
 
+### 1b. 上传需求文档创建任务（跳过需求阶段）
+
+**前置条件：** 已有需求文档文件（.md 或 .docx），服务已运行。
+
+```bash
+# 上传需求文档并创建任务（跳过 REQ_COLLECTING 和 REQ_REVIEW）
+curl -s -X POST http://127.0.0.1:8321/api/v1/runs/upload-requirement \
+  -F "file=@/path/to/REQ-PROJ-123.md" \
+  -F "ticket=PROJ-123" \
+  -F "repo_path=/path/to/repo"
+# 可选字段（均通过 -F 传递）：description、notify_channel、notify_to、repo_url、design_agent、dev_agent
+# .docx 文件会自动通过 pandoc 转换为 markdown（需要主机安装 pandoc）
+# Response: {"id":"<run_id>","current_stage":"DESIGN_QUEUED",...}
+```
+
 ---
 
 ## 2. 查询状态
