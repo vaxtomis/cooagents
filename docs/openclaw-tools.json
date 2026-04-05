@@ -52,14 +52,36 @@
       }
     },
     {
+      "name": "upload_requirement",
+      "description": "上传已有的需求文档文件创建任务 — 跳过需求收集和需求审批阶段，直接进入设计。适用于用户已经编写好需求文档（.md 或 .docx）的场景，无需人工审批需求内容",
+      "method": "POST",
+      "endpoint": "/api/v1/runs/upload-requirement",
+      "content_type": "multipart/form-data",
+      "parameters": {
+        "file": {"type": "file", "description": "需求文档文件（.md 或 .docx，docx 会自动转为 markdown）", "required": true},
+        "ticket": {"type": "string", "description": "任务标识符", "required": true},
+        "repo_path": {"type": "string", "description": "代码仓库路径", "required": true},
+        "description": {"type": "string", "description": "任务描述"},
+        "notify_channel": {"type": "string", "description": "通知渠道"},
+        "notify_to": {"type": "string", "description": "通知目标"},
+        "repo_url": {"type": "string", "description": "远程仓库 URL（仅记录）"},
+        "design_agent": {"type": "string", "enum": ["claude", "codex"], "description": "设计阶段 Agent"},
+        "dev_agent": {"type": "string", "enum": ["claude", "codex"], "description": "开发阶段 Agent"}
+      },
+      "response": {"id": "<run_id>", "current_stage": "DESIGN_QUEUED"},
+      "note": "此接口创建任务并自动审批需求，跳过 REQ_COLLECTING → REQ_REVIEW，直接到达 DESIGN_QUEUED"
+    },
+    {
       "name": "submit_requirement",
-      "description": "提交需求文档内容",
+      "description": "提交需求文档内容并进入需求审批环节 — 适用于 Agent 与用户对话过程中生成的需求文档，提交后进入 REQ_REVIEW 阶段等待用户审批确认",
       "method": "POST",
       "endpoint": "/api/v1/runs/{run_id}/submit-requirement",
       "parameters": {
         "run_id": {"type": "string", "description": "任务运行ID", "required": true},
         "content": {"type": "string", "description": "需求文档内容（Markdown格式）", "required": true}
-      }
+      },
+      "response": {"id": "<run_id>", "current_stage": "REQ_REVIEW"},
+      "note": "提交后需 tick 推进到 REQ_REVIEW，用户审批通过后才进入设计阶段"
     },
     {
       "name": "approve_gate",
