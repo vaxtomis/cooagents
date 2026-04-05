@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -47,6 +48,22 @@ async def wn_with_hooks(db):
     )
     n = WebhookNotifier(db, openclaw_hooks=hooks_cfg)
     yield n
+    await n.close()
+
+
+@pytest.fixture
+async def wn_with_artifacts(db, tmp_path):
+    """WebhookNotifier with OpenClaw hooks AND artifact_manager enabled."""
+    hooks_cfg = OpenclawHooksConfig(
+        enabled=True,
+        url="http://localhost:18789/hooks/agent",
+        token="test-token",
+        default_channel="feishu",
+        default_to="ou_default",
+    )
+    am = ArtifactManager(db, project_root=tmp_path)
+    n = WebhookNotifier(db, openclaw_hooks=hooks_cfg, artifact_manager=am)
+    yield n, am, tmp_path
     await n.close()
 
 
@@ -149,7 +166,7 @@ async def test_openclaw_delivery_skipped_when_disabled(wn_no_hooks):
 
 
 async def test_openclaw_message_format(wn_with_hooks, db):
-    """The OpenClaw message should carry both event identity and explicit workflow instructions."""
+    """The OpenClaw gate.waiting message should contain action plan and key identifiers."""
     await db.execute(
         "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
         "notify_channel,notify_to,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -171,19 +188,171 @@ async def test_openclaw_message_format(wn_with_hooks, db):
     mock_client.post = mock_post
     wn_with_hooks._client = mock_client
 
-    await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r1"})
+    await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r1", "gate": "design"})
 
     assert captured["url"] == "http://localhost:18789/hooks/agent"
     assert "Authorization" in captured["headers"]
     assert captured["headers"]["Authorization"] == "Bearer test-token"
     body = captured["body"]
-    assert "[cooagents:gate.waiting]" in body["message"]
-    assert "Do NOT just summarize this webhook." in body["message"]
-    assert "Create a Feishu cloud doc with feishu_doc" in body["message"]
+    msg = body["message"]
+    # Action plan present
+    assert "Action plan" in msg
+    assert "feishu_doc" in msg
+    # Key identifiers
+    assert "PROJ-42" in msg
+    assert "DESIGN_REVIEW" in msg
+    assert "DES-PROJ-42" in msg
+    # Approval template embedded
+    assert "设计审批" in msg
+    assert "设计文档" in msg
+    # Anti-summarization directive
+    assert "Do NOT summarize" in msg
+    # Delivery config
     assert body["channel"] == "feishu"
     assert body["to"] == "ou_user1"
     assert body["deliver"] is True
     assert "idempotencyKey" in body
+
+
+async def test_openclaw_gate_waiting_with_artifact(wn_with_artifacts, db):
+    """When artifact is available, message should embed content inline."""
+    wn, am, tmp_path = wn_with_artifacts
+
+    # Create run and artifact
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
+        "notify_channel,notify_to,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("r-art", "PROJ-50", "/repo", "running", "DESIGN_REVIEW",
+         "feishu", "ou_user1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+    )
+    design_file = tmp_path / "docs" / "design" / "DES-PROJ-50.md"
+    design_file.parent.mkdir(parents=True, exist_ok=True)
+    design_file.write_text("# Design Doc\n\nThis is the design content.", encoding="utf-8")
+    await am.register("r-art", "design", str(design_file), "DESIGN_REVIEW")
+
+    captured = {}
+
+    async def mock_post(url, content, headers):
+        captured["body"] = json.loads(content)
+        resp = MagicMock()
+        resp.status_code = 200
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.post = mock_post
+    wn._client = mock_client
+
+    await wn._deliver_to_openclaw("gate.waiting", {"run_id": "r-art", "gate": "design"})
+
+    msg = captured["body"]["message"]
+    # Artifact content should be embedded
+    assert "--- artifact content (for step 2) ---" in msg
+    assert "# Design Doc" in msg
+    assert "This is the design content." in msg
+    assert "--- end artifact content ---" in msg
+    # Should NOT contain curl instructions for fetching artifacts
+    assert "/artifacts?kind=" not in msg
+
+
+async def test_openclaw_gate_waiting_fallback_without_artifact(wn_with_artifacts, db):
+    """When no artifact exists, message should include curl-based fallback steps."""
+    wn, am, tmp_path = wn_with_artifacts
+
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
+        "notify_channel,notify_to,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("r-noart", "PROJ-51", "/repo", "running", "REQ_REVIEW",
+         "feishu", "ou_user1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+    )
+
+    captured = {}
+
+    async def mock_post(url, content, headers):
+        captured["body"] = json.loads(content)
+        resp = MagicMock()
+        resp.status_code = 200
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.post = mock_post
+    wn._client = mock_client
+
+    await wn._deliver_to_openclaw("gate.waiting", {"run_id": "r-noart", "gate": "req"})
+
+    msg = captured["body"]["message"]
+    # Fallback: should contain curl instructions
+    assert "/artifacts?kind=req" in msg
+    assert "/artifacts/{artifact_id}/content" in msg
+    # Still contains action plan and feishu_doc
+    assert "Action plan" in msg
+    assert "feishu_doc" in msg
+    assert "REQ-PROJ-51" in msg
+    assert "需求审批" in msg
+
+
+async def test_openclaw_gate_doc_titles_per_gate(wn_with_hooks, db):
+    """Each gate type should produce the correct doc title prefix."""
+    cases = [
+        ("req", "REQ_REVIEW", "REQ-PROJ-60"),
+        ("design", "DESIGN_REVIEW", "DES-PROJ-60"),
+        ("dev", "DEV_REVIEW", "TEST-REPORT-PROJ-60"),
+    ]
+    for gate, stage, expected_title in cases:
+        await db.execute(
+            "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
+            "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (f"r-{gate}", "PROJ-60", "/repo", "running", stage,
+             "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+        )
+
+        captured = {}
+
+        async def mock_post(url, content, headers):
+            captured["body"] = json.loads(content)
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
+
+        mock_client = AsyncMock()
+        mock_client.post = mock_post
+        wn_with_hooks._client = mock_client
+
+        await wn_with_hooks._deliver_to_openclaw(
+            "gate.waiting", {"run_id": f"r-{gate}", "gate": gate}
+        )
+
+        assert expected_title in captured["body"]["message"], (
+            f"Expected '{expected_title}' in message for gate={gate}"
+        )
+
+
+async def test_openclaw_non_gate_event_message(wn_with_hooks, db):
+    """Non gate.waiting events should use simplified message format."""
+    await db.execute(
+        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
+        "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("r-evt", "PROJ-70", "/repo", "running", "MERGED",
+         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+    )
+
+    captured = {}
+
+    async def mock_post(url, content, headers):
+        captured["body"] = json.loads(content)
+        resp = MagicMock()
+        resp.status_code = 200
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.post = mock_post
+    wn_with_hooks._client = mock_client
+
+    await wn_with_hooks._deliver_to_openclaw("run.completed", {"run_id": "r-evt"})
+
+    msg = captured["body"]["message"]
+    assert "[cooagents:run.completed]" in msg
+    assert "PROJ-70" in msg
+    assert "Do NOT summarize" in msg
 
 
 async def test_openclaw_uses_global_defaults_when_run_has_no_notify(wn_with_hooks, db):
@@ -340,8 +509,8 @@ async def test_openclaw_idempotency_key_changes_even_with_same_second(wn_with_ho
     wn_with_hooks._client = mock_client
 
     with patch("src.webhook_notifier.datetime", FixedDateTime):
-        await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r4"})
-        await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r4"})
+        await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r4", "gate": "req"})
+        await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r4", "gate": "req"})
 
     assert len(captured) == 2
     assert captured[0]["idempotencyKey"] != captured[1]["idempotencyKey"]
@@ -385,14 +554,14 @@ async def test_gate_waiting_emitted_on_review_stage(sm, db, tmp_path):
 
 
 async def test_gate_waiting_emitted_on_approve_to_next_review(sm, db, tmp_path):
-    """Approving req gate → DESIGN flow → eventually DESIGN_REVIEW should emit gate.waiting."""
+    """Approving req gate -> DESIGN flow -> eventually DESIGN_REVIEW should emit gate.waiting."""
     run = await sm.create_run("T-GW2", str(tmp_path))
     run_id = run["id"]
 
     # Advance to REQ_REVIEW
     await sm.submit_requirement(run_id, "req content")
 
-    # Approve req → should go to DESIGN_QUEUED (no gate.waiting for DESIGN_QUEUED)
+    # Approve req -> should go to DESIGN_QUEUED (no gate.waiting for DESIGN_QUEUED)
     await sm.approve(run_id, "req", "tester")
     updated = await db.fetchone("SELECT current_stage FROM runs WHERE id=?", (run_id,))
     assert updated["current_stage"] == "DESIGN_QUEUED"
@@ -409,7 +578,7 @@ async def test_no_gate_waiting_for_auto_stages(sm, db, tmp_path):
     run = await sm.create_run("T-NGW", str(tmp_path))
     run_id = run["id"]
 
-    # create_run goes INIT → REQ_COLLECTING, neither should emit gate.waiting
+    # create_run goes INIT -> REQ_COLLECTING, neither should emit gate.waiting
     rows = await db.fetchall(
         "SELECT * FROM events WHERE run_id=? AND event_type='gate.waiting'", (run_id,)
     )

@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
         db,
         openclaw_hooks=settings.openclaw.hooks if settings.openclaw.hooks.enabled else None,
         trace_emitter=trace_emitter,
+        artifact_manager=artifacts,
     )
     merger = MergeManager(db, webhooks)
 

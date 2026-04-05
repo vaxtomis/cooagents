@@ -3,8 +3,11 @@ import hmac
 import hashlib
 import asyncio
 import uuid
+import logging
 from datetime import datetime, timezone
 
+
+log = logging.getLogger(__name__)
 
 # Events that should be pushed to OpenClaw /hooks/agent
 OPENCLAW_EVENTS = frozenset({
@@ -21,13 +24,24 @@ OPENCLAW_EVENTS = frozenset({
     "host.unavailable",
 })
 
+# Gate → artifact kind / doc title prefix / UI labels
+_GATE_ARTIFACT_KIND = {"req": "req", "design": "design", "dev": "test-report"}
+_GATE_DOC_PREFIX = {"req": "REQ", "design": "DES", "dev": "TEST-REPORT"}
+_GATE_LABEL = {"req": "需求审批", "design": "设计审批", "dev": "开发审批"}
+_GATE_DOC_TYPE = {"req": "需求文档", "design": "设计文档", "dev": "测试报告"}
+_GATE_NEXT = {"req": "设计阶段", "design": "开发阶段", "dev": "合并阶段"}
+
+# Max artifact content bytes to embed (leave room for message envelope within 256KB limit)
+_MAX_ARTIFACT_BYTES = 180_000
+
 
 class WebhookNotifier:
-    def __init__(self, db, openclaw_hooks=None, trace_emitter=None):
+    def __init__(self, db, openclaw_hooks=None, trace_emitter=None, artifact_manager=None):
         self.db = db
         self._client = None
         self._openclaw_hooks = openclaw_hooks
         self._trace = trace_emitter
+        self._artifacts = artifact_manager
 
     async def _trace_event(self, event_type, payload=None, level="info", error_detail=None):
         if self._trace:
@@ -96,6 +110,109 @@ class WebhookNotifier:
             key = key[:256]
         return key
 
+    async def _fetch_gate_artifact(self, run_id, gate):
+        """Pre-fetch the latest artifact content for a review gate.
+
+        Returns a dict with artifact_id, kind, content on success, or None.
+        """
+        if not self._artifacts or gate not in _GATE_ARTIFACT_KIND:
+            return None
+        try:
+            kind = _GATE_ARTIFACT_KIND[gate]
+            arts = await self._artifacts.get_by_run(run_id, kind=kind)
+            if not arts:
+                return None
+            latest = arts[-1]  # ordered by created_at, last = newest
+            content = await self._artifacts.get_content(latest["id"])
+            # Truncate oversized content to stay within OpenClaw 256KB body limit
+            if len(content.encode("utf-8")) > _MAX_ARTIFACT_BYTES:
+                content = content[:60_000] + "\n\n…（内容过长，已截断）…"
+            return {"artifact_id": latest["id"], "kind": kind, "content": content}
+        except Exception as exc:
+            log.warning("Failed to pre-fetch artifact for run=%s gate=%s: %s", run_id, gate, exc)
+            return None
+
+    def _build_gate_waiting_message(self, ticket, stage, run_id, gate, to, artifact):
+        """Build a self-contained action-plan message for gate.waiting events.
+
+        When *artifact* is provided the message embeds the full content so the
+        isolated session only needs to call feishu_doc (no curl required).
+        When *artifact* is None a fallback message instructs the session to
+        query the cooagents API first.
+        """
+        label = _GATE_LABEL.get(gate, "审批")
+        doc_type = _GATE_DOC_TYPE.get(gate, "文档")
+        next_stage = _GATE_NEXT.get(gate, "下一阶段")
+        doc_title = f"{_GATE_DOC_PREFIX.get(gate, 'DOC')}-{ticket}"
+
+        owner_line = f', "owner_open_id": "{to}"' if to else ""
+
+        approval_tpl = (
+            f"📋 {ticket} · {label}\n\n"
+            f"📄 {doc_type}：{{url}}\n\n"
+            f"请回复：\n"
+            f"- \"通过\" — 推进到{next_stage}\n"
+            f"- 驳回原因 — 打回给 Agent 修订"
+        )
+
+        if artifact:
+            # ── Primary path: artifact content pre-fetched ──
+            return (
+                f"Task: cooagents workflow — gate.waiting → 创建飞书云文档并发送审批消息\n"
+                f"Do NOT summarize. Execute the action plan below.\n\n"
+                f"Action plan (execute steps 1–3 in order):\n\n"
+                f"1. Create Feishu cloud document:\n"
+                f'   feishu_doc({{"action": "create", "title": "{doc_title}"{owner_line}}})\n'
+                f"   Save the returned doc_token and url.\n\n"
+                f"2. Write content to the document:\n"
+                f'   feishu_doc({{"action": "write", "doc_token": "{{doc_token from step 1}}", '
+                f'"content": "{{artifact content below}}"}})\n\n'
+                f"3. Reply with this approval message (auto-delivered to user):\n"
+                f"{approval_tpl}\n"
+                f"   Replace {{url}} with the url returned in step 1.\n\n"
+                f"On feishu_doc failure: reply \"⚠️ 飞书云文件创建失败\" then send approval text without doc URL.\n"
+                f"You do not need to wait for user reply — another session handles it.\n\n"
+                f"Event:\n"
+                f"[cooagents:{gate}.waiting] {ticket} {stage}\n"
+                f"run_id: {run_id}\n"
+                f"ticket: {ticket}\n"
+                f"stage: {stage}\n"
+                f"gate: {gate}\n"
+                f"notify_to: {to or ''}\n\n"
+                f"--- artifact content (for step 2) ---\n"
+                f"{artifact['content']}\n"
+                f"--- end artifact content ---"
+            )
+        else:
+            # ── Fallback: no artifact available, session must query API ──
+            kind = _GATE_ARTIFACT_KIND.get(gate, "req")
+            return (
+                f"Task: cooagents workflow — gate.waiting → 创建飞书云文档并发送审批消息\n"
+                f"Do NOT summarize. Execute the action plan below.\n\n"
+                f"Action plan:\n\n"
+                f"1. Fetch artifact list:\n"
+                f"   exec curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}/artifacts?kind={kind}\n\n"
+                f"2. Get content of the latest artifact (highest id):\n"
+                f"   exec curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}/artifacts/{{artifact_id}}/content\n\n"
+                f"3. Create Feishu cloud document:\n"
+                f'   feishu_doc({{"action": "create", "title": "{doc_title}"{owner_line}}})\n'
+                f"   Save the returned doc_token and url.\n\n"
+                f"4. Write artifact content to the document:\n"
+                f'   feishu_doc({{"action": "write", "doc_token": "{{doc_token}}", "content": "{{content from step 2}}"}})\n\n'
+                f"5. Reply with this approval message (auto-delivered to user):\n"
+                f"{approval_tpl}\n"
+                f"   Replace {{url}} with the url returned in step 3.\n\n"
+                f"On feishu_doc failure: reply \"⚠️ 飞书云文件创建失败\" then send approval text without doc URL.\n"
+                f"You do not need to wait for user reply — another session handles it.\n\n"
+                f"Event:\n"
+                f"[cooagents:{gate}.waiting] {ticket} {stage}\n"
+                f"run_id: {run_id}\n"
+                f"ticket: {ticket}\n"
+                f"stage: {stage}\n"
+                f"gate: {gate}\n"
+                f"notify_to: {to or ''}"
+            )
+
     async def _deliver_to_openclaw_once(self, event_type, payload, idem_key):
         """POST a single attempt to OpenClaw /hooks/agent endpoint."""
         cfg = self._openclaw_hooks
@@ -115,42 +232,21 @@ class WebhookNotifier:
                 channel = run.get("notify_channel") or cfg.default_channel
                 to = run.get("notify_to") or cfg.default_to
 
-        # Format structured message.
-        # Important: OpenClaw hook ingress wraps webhook payloads in a generic
-        # "external/untrusted" envelope that often biases the model toward
-        # plain summarization. To make cooagents review gates reliable without
-        # changing OpenClaw itself, we embed an explicit, self-contained task
-        # contract here so the downstream hook session is much more likely to
-        # execute the cooagents workflow skill instead of merely summarizing.
-        instruction_lines = [
-            "This is a cooagents workflow event.",
-            "Do NOT just summarize this webhook.",
-            "Treat it as an internal workflow trigger and follow the installed cooagents-workflow skill.",
-        ]
+        # Build message based on event type
         if event_type == "gate.waiting":
-            instruction_lines.extend([
-                "This event requires action.",
-                "If stage is REQ_REVIEW / DESIGN_REVIEW / DEV_REVIEW, you must:",
-                "1. Query the run/artifacts from cooagents API.",
-                "2. Fetch the latest required artifact content for the gate.",
-                "3. Create a Feishu cloud doc with feishu_doc and write the full content.",
-                "4. Send the approval message with the doc URL.",
-                "Never reply with only a summary when gate.waiting is received.",
-            ])
+            gate = payload.get("gate", "")
+            artifact = await self._fetch_gate_artifact(run_id, gate) if run_id else None
+            message = self._build_gate_waiting_message(ticket, stage, run_id, gate, to, artifact)
         else:
-            instruction_lines.append(
-                "Process this event according to the cooagents-workflow skill and deliver the result to the user."
+            message = (
+                f"Task: cooagents workflow event handler\n"
+                f"Do NOT summarize. Treat as internal workflow trigger and follow cooagents-workflow skill.\n\n"
+                f"Event:\n"
+                f"[cooagents:{event_type}] {ticket} {stage}\n"
+                f"run_id: {run_id or 'unknown'}\n"
+                f"ticket: {ticket}\n"
+                f"stage: {stage}"
             )
-
-        message = (
-            f"Task: cooagents workflow event handler\n"
-            f"Required behavior:\n- " + "\n- ".join(instruction_lines) + "\n\n"
-            f"Event:\n"
-            f"[cooagents:{event_type}] {ticket} {stage}\n"
-            f"run_id: {run_id or 'unknown'}\n"
-            f"ticket: {ticket}\n"
-            f"stage: {stage}"
-        )
 
         body = json.dumps({
             "message": message,
