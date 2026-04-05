@@ -2073,6 +2073,31 @@
                               "fontWeight": "500"
                             }
                           ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "8j9nu",
+                          "name": "createBtn",
+                          "fill": "$accent",
+                          "cornerRadius": 99,
+                          "padding": [
+                            12,
+                            20
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "vtPXG",
+                              "name": "createTxt",
+                              "fill": "#FFFFFF",
+                              "content": "创建任务",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "500"
+                            }
+                          ]
                         }
                       ]
                     }
@@ -7335,6 +7360,852 @@
               "fontFamily": "Inter",
               "fontSize": 13,
               "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "HRWsi",
+      "x": 1560,
+      "y": 2260,
+      "name": "06 - Create Run Dialog",
+      "width": 1440,
+      "height": 1050,
+      "fill": "$void",
+      "children": [
+        {
+          "type": "frame",
+          "id": "yYSob",
+          "name": "overlay",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "#00000099",
+          "layout": "none",
+          "children": [
+            {
+              "type": "frame",
+              "id": "d3owY",
+              "x": 480,
+              "y": 150,
+              "name": "dialog",
+              "width": 480,
+              "fill": "$panel",
+              "cornerRadius": 28,
+              "stroke": {
+                "align": "inside",
+                "thickness": 1,
+                "fill": "$white-8"
+              },
+              "layout": "vertical",
+              "gap": 20,
+              "padding": 24,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "STuhS",
+                  "name": "dialogTitle",
+                  "fill": "#FFFFFF",
+                  "content": "创建任务",
+                  "fontFamily": "Inter",
+                  "fontSize": 18,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "oues9",
+                  "name": "ticketField",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "BOVvy",
+                      "name": "ticketLabel",
+                      "fill": "$muted",
+                      "content": "工单 *",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Qm8XZ",
+                      "name": "ticketInput",
+                      "width": "fill_container",
+                      "fill": "#00000030",
+                      "cornerRadius": 16,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "$white-8"
+                      },
+                      "padding": [
+                        12,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "R1G9v",
+                          "name": "ticketPlaceholder",
+                          "fill": "$muted-75",
+                          "content": "PROJ-123",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "mXeiP",
+                  "name": "repoField",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "GL742",
+                      "name": "repoLabel",
+                      "fill": "$muted",
+                      "content": "仓库路径 *",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "fRnrH",
+                      "name": "repoInput",
+                      "width": "fill_container",
+                      "fill": "#00000030",
+                      "cornerRadius": 16,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "$white-8"
+                      },
+                      "padding": [
+                        12,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "5aGiL",
+                          "name": "repoPlaceholder",
+                          "fill": "$muted-75",
+                          "content": "/path/to/repo",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "oiEmj",
+                  "name": "descField",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "cp7uH",
+                      "name": "descLabel",
+                      "fill": "$muted",
+                      "content": "描述",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ecPDc",
+                      "name": "descInput",
+                      "width": "fill_container",
+                      "height": 60,
+                      "fill": "#00000030",
+                      "cornerRadius": 16,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "$white-8"
+                      },
+                      "padding": [
+                        12,
+                        16
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "izFi6",
+                  "name": "dropSection",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "UjZLv",
+                      "name": "dropLabel",
+                      "fill": "$muted",
+                      "content": "需求文档（可选，上传后跳过需求阶段）",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "mv22p",
+                      "name": "dropZone",
+                      "width": "fill_container",
+                      "height": 100,
+                      "cornerRadius": 16,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "$white-8"
+                      },
+                      "layout": "vertical",
+                      "gap": 6,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Sb1wH",
+                          "name": "dropMainText",
+                          "fill": "$muted",
+                          "content": "拖拽文件到此处或点击选择",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "EzN6z",
+                          "name": "dropSubText",
+                          "fill": "#a1a1aa99",
+                          "content": "支持 .md 和 .docx 文件",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "x8bnC",
+                  "name": "agentRow",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "GcVdp",
+                      "name": "designAgentField",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "zct70",
+                          "name": "daLabel",
+                          "fill": "$muted",
+                          "content": "设计 Agent",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "xQX9h",
+                          "name": "daSelect",
+                          "width": "fill_container",
+                          "fill": "$panel-strong",
+                          "cornerRadius": 16,
+                          "stroke": {
+                            "align": "inside",
+                            "thickness": 1,
+                            "fill": "$white-8"
+                          },
+                          "padding": [
+                            12,
+                            16
+                          ],
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "LjeeG",
+                              "name": "daValue",
+                              "fill": "#FFFFFF",
+                              "content": "默认",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "Nutu2",
+                              "name": "daChevron",
+                              "fill": "$muted",
+                              "content": "▾",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "muO8r",
+                      "name": "devAgentField",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "AhId3",
+                          "name": "dvLabel",
+                          "fill": "$muted",
+                          "content": "开发 Agent",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "MOV8q",
+                          "name": "dvSelect",
+                          "width": "fill_container",
+                          "fill": "$panel-strong",
+                          "cornerRadius": 16,
+                          "stroke": {
+                            "align": "inside",
+                            "thickness": 1,
+                            "fill": "$white-8"
+                          },
+                          "padding": [
+                            12,
+                            16
+                          ],
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "jxoij",
+                              "name": "dvValue",
+                              "fill": "#FFFFFF",
+                              "content": "默认",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "mLhHC",
+                              "name": "dvChevron",
+                              "fill": "$muted",
+                              "content": "▾",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "3dKPb",
+                  "name": "buttonRow",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "padding": [
+                    8,
+                    0,
+                    0,
+                    0
+                  ],
+                  "justifyContent": "end",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "QtWKZ",
+                      "name": "cancelBtn",
+                      "fill": "$white-4",
+                      "cornerRadius": 99,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "$white-8"
+                      },
+                      "padding": [
+                        10,
+                        20
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "zFVhu",
+                          "name": "cancelTxt",
+                          "fill": "#FFFFFF",
+                          "content": "取消",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "f5HrT",
+                      "name": "submitBtn",
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 99,
+                      "padding": [
+                        10,
+                        20
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "9gcwf",
+                          "name": "submitTxt",
+                          "fill": "#09090b",
+                          "content": "创建",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "tOfzY",
+      "x": 3120,
+      "y": 1240,
+      "name": "07 - Artifact Modal",
+      "width": 1440,
+      "height": 1200,
+      "fill": "$void",
+      "children": [
+        {
+          "type": "frame",
+          "id": "OeTvC",
+          "name": "overlay",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "#00000099",
+          "layout": "none",
+          "children": [
+            {
+              "type": "frame",
+              "id": "lAyWG",
+              "x": 320,
+              "y": 100,
+              "name": "artifactDialog",
+              "clip": true,
+              "width": 800,
+              "height": 700,
+              "fill": "$panel",
+              "cornerRadius": 28,
+              "stroke": {
+                "align": "inside",
+                "thickness": 1,
+                "fill": "$white-8"
+              },
+              "layout": "vertical",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "njhUo",
+                  "name": "modalHeader",
+                  "width": "fill_container",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": {
+                      "bottom": 1
+                    },
+                    "fill": "$border-white6"
+                  },
+                  "padding": [
+                    16,
+                    24
+                  ],
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Isrov",
+                      "name": "modalPath",
+                      "fill": "#FFFFFF",
+                      "content": "docs/req/REQ-PROJ-210.md",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ZfBbZ",
+                      "name": "headerBtns",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "ZFSOK",
+                          "name": "downloadBtn",
+                          "fill": "$white-4",
+                          "cornerRadius": 99,
+                          "stroke": {
+                            "align": "inside",
+                            "thickness": 1,
+                            "fill": "$white-8"
+                          },
+                          "padding": [
+                            8,
+                            14
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "kDHIW",
+                              "name": "dlTxt",
+                              "fill": "#FFFFFF",
+                              "content": "下载",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "zXutD",
+                          "name": "closeBtn",
+                          "fill": "$white-4",
+                          "cornerRadius": 99,
+                          "stroke": {
+                            "align": "inside",
+                            "thickness": 1,
+                            "fill": "$white-8"
+                          },
+                          "padding": [
+                            8,
+                            10
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "0uLLI",
+                              "name": "closeTxt",
+                              "fill": "$muted",
+                              "content": "✕",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "a7joi",
+                  "name": "modalTabBar",
+                  "width": "fill_container",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": {
+                      "bottom": 1
+                    },
+                    "fill": "$border-white6"
+                  },
+                  "gap": 4,
+                  "padding": [
+                    0,
+                    24
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "DjslA",
+                      "name": "tabContent",
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": {
+                          "bottom": 2
+                        },
+                        "fill": "$accent"
+                      },
+                      "padding": [
+                        10,
+                        16,
+                        8,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Vfosc",
+                          "name": "tabContentTxt",
+                          "fill": "#FFFFFF",
+                          "content": "内容",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Z9K8L",
+                      "name": "tabDiff",
+                      "padding": [
+                        10,
+                        16,
+                        8,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ptnDS",
+                          "name": "tabDiffTxt",
+                          "fill": "$muted",
+                          "content": "差异",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "p3hMY",
+                  "name": "modalBody",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "padding": 24,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "cYo9g",
+                      "name": "codeBlock",
+                      "width": "fill_container",
+                      "height": "fill_container",
+                      "fill": "#00000050",
+                      "cornerRadius": 16,
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "GndC9",
+                          "name": "line1",
+                          "fill": "#FFFFFF",
+                          "content": "# REQ-PROJ-210 需求文档",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "w4q8z",
+                          "name": "line2",
+                          "fill": "$muted",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "UO0RI",
+                          "name": "line3",
+                          "fill": "#FFFFFF",
+                          "content": "## 1. 背景",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "0lfp7",
+                          "name": "line4",
+                          "fill": "$muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "用户需要在创建任务时上传需求文档，跳过需求收集阶段，",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "CVQMF",
+                          "name": "line5",
+                          "fill": "$muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "直接进入设计阶段，以提高工作流效率。",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "fRrtG",
+                          "name": "line6",
+                          "fill": "$muted",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "EsSJ1",
+                          "name": "line7",
+                          "fill": "#FFFFFF",
+                          "content": "## 2. 功能需求",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "gtaM7",
+                          "name": "line8",
+                          "fill": "$muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "- 支持 .md 和 .docx 文件上传",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "aCJ0F",
+                          "name": "line9",
+                          "fill": "$muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "- .docx 文件自动通过 pandoc 转换为 markdown",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "5vSVv",
+                          "name": "line10",
+                          "fill": "$muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "- 上传后自动注册产物并记录审批",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "OLFx4",
+                          "name": "line11",
+                          "fill": "$muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "- 跳过 REQ_COLLECTING 和 REQ_REVIEW 阶段",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "KO2Tm",
+                          "name": "line12",
+                          "fill": "$muted",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "sA1oA",
+                          "name": "line13",
+                          "fill": "#FFFFFF",
+                          "content": "## 3. API 设计",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Dv8oI",
+                          "name": "line14",
+                          "fill": "$muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "POST /api/v1/runs/upload-requirement (multipart/form-data)",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
