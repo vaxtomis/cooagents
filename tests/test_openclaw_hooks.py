@@ -149,7 +149,7 @@ async def test_openclaw_delivery_skipped_when_disabled(wn_no_hooks):
 
 
 async def test_openclaw_message_format(wn_with_hooks, db):
-    """The OpenClaw message should follow [cooagents:{event}] format."""
+    """The OpenClaw message should carry both event identity and explicit workflow instructions."""
     await db.execute(
         "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
         "notify_channel,notify_to,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -178,6 +178,8 @@ async def test_openclaw_message_format(wn_with_hooks, db):
     assert captured["headers"]["Authorization"] == "Bearer test-token"
     body = captured["body"]
     assert "[cooagents:gate.waiting]" in body["message"]
+    assert "Do NOT just summarize this webhook." in body["message"]
+    assert "Create a Feishu cloud doc with feishu_doc" in body["message"]
     assert body["channel"] == "feishu"
     assert body["to"] == "ou_user1"
     assert body["deliver"] is True
