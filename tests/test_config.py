@@ -30,8 +30,10 @@ def test_acpx_config_defaults():
 def test_turns_config_defaults():
     from src.config import Settings
     s = Settings()
-    assert s.turns.design_max_turns == 1
-    assert s.turns.dev_max_turns == 1
+    # Defaults enable the revise branch (turn_count starts at 1, force-accept
+    # fires on ``turn >= max_turns``). 3 = initial turn + up to 2 revisions.
+    assert s.turns.design_max_turns == 3
+    assert s.turns.dev_max_turns == 3
 
 def test_tracing_config_defaults():
     s = Settings()

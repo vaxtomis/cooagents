@@ -317,6 +317,11 @@ class StateMachine:
             If the run is not in the expected stage for the given gate.
         """
         run = await self._get_run(run_id)
+        if run["status"] != "running":
+            raise ConflictError(
+                f"Cannot approve {gate}: run status is {run['status']}",
+                run["current_stage"],
+            )
         expected = GATE_STAGES.get(gate)
         if run["current_stage"] != expected:
             raise ConflictError(
@@ -353,6 +358,11 @@ class StateMachine:
             If the run is not in the expected stage for the given gate.
         """
         run = await self._get_run(run_id)
+        if run["status"] != "running":
+            raise ConflictError(
+                f"Cannot reject {gate}: run status is {run['status']}",
+                run["current_stage"],
+            )
         expected = GATE_STAGES.get(gate)
         if run["current_stage"] != expected:
             raise ConflictError(
@@ -394,8 +404,32 @@ class StateMachine:
         await self._update_stage(run_id, "MERGE_CONFLICT", "MERGE_QUEUED")
         return await self._get_run(run_id)
 
+    # Stages that retry should rewind to a re-queueable predecessor. Anything
+    # not listed stays at ``failed_at_stage`` so the scheduler's normal
+    # handlers can decide what to do next tick.
+    _RETRY_RESTORE_STAGES = {
+        "INIT": "INIT",
+        "REQ_COLLECTING": "REQ_COLLECTING",
+        "REQ_REVIEW": "REQ_REVIEW",
+        "DESIGN_QUEUED": "DESIGN_QUEUED",
+        "DESIGN_DISPATCHED": "DESIGN_QUEUED",
+        "DESIGN_RUNNING": "DESIGN_QUEUED",
+        "DESIGN_REVIEW": "DESIGN_REVIEW",
+        "DEV_QUEUED": "DEV_QUEUED",
+        "DEV_DISPATCHED": "DEV_QUEUED",
+        "DEV_RUNNING": "DEV_QUEUED",
+        "DEV_REVIEW": "DEV_REVIEW",
+        "MERGE_QUEUED": "MERGE_QUEUED",
+        "MERGING": "MERGE_QUEUED",
+        "MERGE_CONFLICT": "MERGE_QUEUED",
+    }
+
     async def retry(self, run_id: str, by: str, note: str | None = None) -> dict:
         """Retry a failed run, restoring it to the stage where it failed.
+
+        Cancels any still-active jobs (``starting`` / ``running``) for this run
+        so a subsequent dispatch can claim the queued stage instead of bailing
+        out on ``get_active_job``.
 
         Raises
         ------
@@ -407,17 +441,27 @@ class StateMachine:
             raise ConflictError("Can only retry failed runs", run["current_stage"])
 
         failed_stage = run.get("failed_at_stage") or "INIT"
-        restore_stage = {
-            "DESIGN_DISPATCHED": "DESIGN_QUEUED",
-            "DESIGN_RUNNING": "DESIGN_QUEUED",
-            "DEV_DISPATCHED": "DEV_QUEUED",
-            "DEV_RUNNING": "DEV_QUEUED",
-        }.get(failed_stage, failed_stage)
+        restore_stage = self._RETRY_RESTORE_STAGES.get(failed_stage, failed_stage)
         now = datetime.now(timezone.utc).isoformat()
-        await self.db.execute(
-            "UPDATE runs SET status='running', current_stage=?, updated_at=? WHERE id=?",
+
+        # CAS-guard on status='failed' so two concurrent retries cannot both
+        # emit run.retried or both race through the restore transition.
+        rowcount = await self.db.execute_rowcount(
+            "UPDATE runs SET status='running', current_stage=?, updated_at=? "
+            "WHERE id=? AND status='failed'",
             (restore_stage, now, run_id),
         )
+        if rowcount != 1:
+            return await self._get_run(run_id)
+
+        # Retire any stale active jobs — otherwise the next dispatch tick sees
+        # them via ``get_active_job`` and refuses to start a fresh job.
+        await self.db.execute(
+            "UPDATE jobs SET status='cancelled', ended_at=? "
+            "WHERE run_id=? AND status IN ('starting','running')",
+            (now, run_id),
+        )
+
         await self._emit(run_id, "run.retried", {"by": by, "note": note, "restored_to": restore_stage})
         return await self._get_run(run_id)
 
@@ -429,7 +473,20 @@ class StateMachine:
             (now, run_id),
         )
         await self._emit(run_id, "run.cancelled", {})
+        self._release_run_locks(run_id)
         return await self._get_run(run_id)
+
+    def _release_run_locks(self, run_id: str) -> None:
+        """Drop per-run asyncio locks once a run has reached a terminal state.
+
+        Why: these dicts are keyed by run_id and grow unbounded in a long-lived
+        process. Dropping them on terminal transitions is safe because
+        ``_tick_unlocked`` short-circuits on non-``running`` runs, so any
+        future lock acquisition on the same run_id is a no-op. If ``retry``
+        revives the run, ``setdefault`` will lazily recreate the locks.
+        """
+        self._dispatch_locks.pop(run_id, None)
+        self._progression_locks.pop(run_id, None)
 
     async def submit_requirement(self, run_id: str, content: str) -> dict:
         """Write requirement content to disk, register as artifact, and advance stage.
@@ -842,19 +899,28 @@ class StateMachine:
                     (now, run["id"]),
                 )
                 await self._emit(run["id"], "run.completed", {})
+                self._release_run_locks(run["id"])
             elif status == "conflict":
                 await self._update_stage(run["id"], "MERGING", "MERGE_CONFLICT")
 
     async def _transition_to_failed(self, run: dict, job: dict) -> None:
-        """Transition a run to FAILED status when its job has a terminal failure."""
+        """Transition a run to FAILED when its job has a terminal failure.
+
+        CAS-guarded on ``(id, status='running', current_stage=from_stage)`` so
+        that concurrent tick paths observing the same terminal job cannot emit
+        duplicate ``run.failed`` events or insert duplicate steps rows.
+        """
         run_id = run["id"]
         from_stage = run["current_stage"]
         now = datetime.now(timezone.utc).isoformat()
-        await self.db.execute(
+        rowcount = await self.db.execute_rowcount(
             "UPDATE runs SET status='failed', current_stage='FAILED', "
-            "failed_at_stage=?, updated_at=? WHERE id=?",
-            (from_stage, now, run_id),
+            "failed_at_stage=?, updated_at=? "
+            "WHERE id=? AND status='running' AND current_stage=?",
+            (from_stage, now, run_id, from_stage),
         )
+        if rowcount != 1:
+            return
         await self.db.execute(
             "INSERT INTO steps(run_id,from_stage,to_stage,triggered_by,created_at) "
             "VALUES(?,?,?,?,?)",
@@ -868,6 +934,7 @@ class StateMachine:
         })
         await self._trace_event("run.failed", {"failed_at_stage": from_stage}, level="error")
         await self._snapshot(run_id)
+        self._release_run_locks(run_id)
 
     # ------------------------------------------------------------------
     # Evaluators
@@ -1032,18 +1099,18 @@ class StateMachine:
     ) -> bool:
         """Persist a stage transition, record a step row, emit an event, and snapshot.
 
-        Uses compare-and-swap: the UPDATE only takes effect when the run is
-        still in ``from_stage``.  Returns ``True`` if the transition was
-        applied, ``False`` if it was pre-empted by a concurrent transition.
+        Uses compare-and-swap via ``cursor.rowcount``: the UPDATE only takes
+        effect when the run is still in ``from_stage``.  Returns ``True`` if
+        this call actually made the transition, ``False`` if it was pre-empted
+        by a concurrent writer (including another writer targeting the same
+        ``to_stage``).
         """
         now = datetime.now(timezone.utc).isoformat()
-        await self.db.execute(
+        rowcount = await self.db.execute_rowcount(
             "UPDATE runs SET current_stage=?, updated_at=? WHERE id=? AND current_stage=?",
             (to_stage, now, run_id, from_stage),
         )
-        # Verify the CAS succeeded (another path may have transitioned first)
-        run = await self.db.fetchone("SELECT current_stage FROM runs WHERE id=?", (run_id,))
-        if not run or run["current_stage"] != to_stage:
+        if rowcount != 1:
             return False
 
         await self.db.execute(

@@ -33,8 +33,8 @@ acpx:
   allowed_tools_dev: null          # 开发阶段工具白名单
 
 turns:
-  design_max_turns: 1
-  dev_max_turns: 1
+  design_max_turns: 3
+  dev_max_turns: 3
 
 preferred_design_agent: "claude"
 preferred_dev_agent: "claude"

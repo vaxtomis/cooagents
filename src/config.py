@@ -50,8 +50,12 @@ class AcpxConfig(BaseModel):
 
 
 class TurnsConfig(BaseModel):
-    design_max_turns: int = 1
-    dev_max_turns: int = 1
+    # Why: tick_*_running accepts on ``turn >= max_turns``; turn_count starts
+    # at 1, so ``1 >= 1`` force-accepted immediately and made the revise branch
+    # dead code. Default of 3 lets the evaluator request up to 2 follow-ups
+    # before force-accepting, matching the bundled TURN-revision templates.
+    design_max_turns: int = 3
+    dev_max_turns: int = 3
 
 
 class OpenclawTarget(BaseModel):

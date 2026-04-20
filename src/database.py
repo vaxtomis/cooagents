@@ -183,6 +183,28 @@ class Database:
 
         return await self._retry_locked_operation(_execute_once)
 
+    async def execute_rowcount(self, sql: str, params: tuple[Any, ...] | None = None) -> int:
+        """Execute a write statement and return ``cursor.rowcount``.
+
+        Use this for compare-and-swap style updates where the caller needs to
+        know whether the WHERE clause matched a row.
+        """
+        conn = self._ensure_connected()
+
+        async def _execute_once() -> int:
+            try:
+                async with conn.execute(sql, params or ()) as cursor:
+                    rowcount = cursor.rowcount
+                if not self._in_transaction:
+                    await conn.commit()
+                return rowcount
+            except sqlite3.OperationalError:
+                if not self._in_transaction:
+                    await conn.rollback()
+                raise
+
+        return await self._retry_locked_operation(_execute_once)
+
     async def fetchone(self, sql: str, params: tuple[Any, ...] | None = None) -> dict[str, Any] | None:
         """Execute a query and return the first row as a dict, or None."""
         conn = self._ensure_connected()
