@@ -9,6 +9,10 @@ metadata:
         "emoji": "🔄",
         "always": false,
         "requires": { "bins": ["curl"] }
+      },
+    "hermes":
+      {
+        "tags": ["cooagents", "upgrade", "update"]
       }
   }
 ---
@@ -170,7 +174,7 @@ exec cat {repo_path}/cooagents.log
 - Dashboard：http://127.0.0.1:8321/（返回 HTML）
 - 旧版本：{old_commit}
 - 新版本：{new_commit}
-- Skills：已随启动自动重新部署
+- Skills：已随启动自动重新部署到所有启用的宿主（OpenClaw `~/.openclaw/skills/`、Hermes `~/.hermes/skills/`）
 
 如有运行中的任务中断，可使用 /cooagents-workflow 查看状态并恢复。
 ```

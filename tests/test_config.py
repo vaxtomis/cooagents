@@ -43,6 +43,24 @@ def test_tracing_config_defaults():
     assert s.tracing.orphan_retention_days == 3
     assert s.tracing.cleanup_interval_hours == 24
 
+
+def test_hermes_config_defaults():
+    s = Settings()
+    assert s.hermes.enabled is False
+    assert s.hermes.deploy_skills is True
+    assert s.hermes.skills_dir == "~/.hermes/skills"
+    assert s.hermes.webhook.enabled is False
+    assert s.hermes.webhook.url == "http://127.0.0.1:8644/webhook/cooagents"
+    assert s.hermes.webhook.events == []
+
+
+def test_hermes_webhook_secret_env_fallback(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_WEBHOOK_SECRET", "env-hermes-secret")
+    cfg = tmp_path / "settings.yaml"
+    cfg.write_text("hermes:\n  enabled: true\n  webhook:\n    enabled: true\n")
+    s = load_settings(cfg)
+    assert s.hermes.webhook.secret == "env-hermes-secret"
+
 def test_tracing_config_from_dict():
     s = Settings.model_validate({"tracing": {"enabled": False, "retention_days": 14}})
     assert s.tracing.enabled is False

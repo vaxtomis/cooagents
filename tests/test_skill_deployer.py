@@ -2,7 +2,13 @@ import pytest
 from unittest.mock import patch
 from pathlib import Path
 
-from src.config import Settings, OpenclawConfig, OpenclawTarget
+from src.config import (
+    HermesConfig,
+    HermesWebhookConfig,
+    OpenclawConfig,
+    OpenclawTarget,
+    Settings,
+)
 from src.skill_deployer import deploy_skills, ROOT
 
 
@@ -131,3 +137,87 @@ async def test_deploy_no_targets(tmp_path):
         results = await deploy_skills(settings)
 
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_deploy_hermes_target_copies_files(tmp_path):
+    """When hermes is enabled, the same skill bundle lands in the hermes dir."""
+    src_skills = tmp_path / "skills"
+    src_skills.mkdir()
+    _make_skill(src_skills, "my-skill", "---\nname: my-skill\n---\n# Body")
+
+    hermes_dir = tmp_path / "hermes-skills"
+
+    settings = Settings(
+        openclaw=OpenclawConfig(deploy_skills=False, targets=[]),
+        hermes=HermesConfig(
+            enabled=True,
+            deploy_skills=True,
+            skills_dir=str(hermes_dir),
+            webhook=HermesWebhookConfig(enabled=False),
+        ),
+    )
+
+    with patch("src.skill_deployer.ROOT", tmp_path):
+        results = await deploy_skills(settings)
+
+    assert len(results) == 1
+    assert results[0].ok is True
+    assert results[0].target_type == "hermes"
+    assert (hermes_dir / "my-skill" / "SKILL.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_deploy_dual_runtime(tmp_path):
+    """Deploying to OpenClaw + Hermes fans out to both destinations."""
+    src_skills = tmp_path / "skills"
+    src_skills.mkdir()
+    _make_skill(src_skills, "my-skill")
+
+    openclaw_dir = tmp_path / "openclaw-skills"
+    hermes_dir = tmp_path / "hermes-skills"
+
+    settings = Settings(
+        openclaw=OpenclawConfig(
+            deploy_skills=True,
+            targets=[OpenclawTarget(type="local", skills_dir=str(openclaw_dir))],
+        ),
+        hermes=HermesConfig(
+            enabled=True,
+            deploy_skills=True,
+            skills_dir=str(hermes_dir),
+        ),
+    )
+
+    with patch("src.skill_deployer.ROOT", tmp_path):
+        results = await deploy_skills(settings)
+
+    assert {r.target_type for r in results} == {"local", "hermes"}
+    assert all(r.ok for r in results)
+    assert (openclaw_dir / "my-skill" / "SKILL.md").exists()
+    assert (hermes_dir / "my-skill" / "SKILL.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_deploy_hermes_disabled(tmp_path):
+    """hermes.enabled=False keeps the hermes dir untouched."""
+    src_skills = tmp_path / "skills"
+    src_skills.mkdir()
+    _make_skill(src_skills, "my-skill")
+
+    hermes_dir = tmp_path / "hermes-skills"
+
+    settings = Settings(
+        openclaw=OpenclawConfig(deploy_skills=False, targets=[]),
+        hermes=HermesConfig(
+            enabled=False,
+            deploy_skills=True,
+            skills_dir=str(hermes_dir),
+        ),
+    )
+
+    with patch("src.skill_deployer.ROOT", tmp_path):
+        results = await deploy_skills(settings)
+
+    assert results == []
+    assert not hermes_dir.exists()

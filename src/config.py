@@ -91,6 +91,41 @@ class OpenclawConfig(BaseModel):
     hooks: OpenclawHooksConfig = OpenclawHooksConfig()
 
 
+class HermesWebhookConfig(BaseModel):
+    """Outbound notification target for a Hermes Agent gateway.
+
+    Why: Hermes has no OpenClaw-style `/hooks/agent` ingress. Its generic
+    webhook platform (``gateway/platforms/webhook.py``) accepts HMAC-SHA256
+    signed POSTs on per-route secrets and can turn them into agent prompts.
+    cooagents already signs its generic webhooks with the per-subscription
+    secret, so a Hermes target is just a subscription URL + shared secret —
+    no new delivery code required.
+    """
+    enabled: bool = False
+    # Default route matches the suggestion in references/hermes-integration.md
+    url: str = "http://127.0.0.1:8644/webhook/cooagents"
+    # ``$ENV:VARNAME`` is resolved by webhook_notifier._resolve_secret.
+    secret: str = Field(default_factory=lambda: os.environ.get("HERMES_WEBHOOK_SECRET", ""))
+    # Event types pushed to Hermes; empty list means "all events the notifier
+    # normally sends to OpenClaw". The Hermes side decides which to act on.
+    events: list[str] = []
+
+
+class HermesConfig(BaseModel):
+    """Hermes Agent integration.
+
+    When ``enabled`` is true, cooagents deploys the same ``skills/`` bundle
+    it sends to OpenClaw into ``skills_dir`` (typically ``~/.hermes/skills``)
+    and, if ``webhook.enabled`` is true, makes sure an outbound webhook
+    subscription pointing at the Hermes webhook route is registered. The
+    cooagents-setup skill drives that registration during install.
+    """
+    enabled: bool = False
+    skills_dir: str = "~/.hermes/skills"
+    deploy_skills: bool = True
+    webhook: HermesWebhookConfig = HermesWebhookConfig()
+
+
 class SecurityConfig(BaseModel):
     """Security boundaries enforced at API layer.
 
@@ -120,6 +155,7 @@ class Settings(BaseModel):
     acpx: AcpxConfig = AcpxConfig()
     turns: TurnsConfig = TurnsConfig()
     openclaw: OpenclawConfig = OpenclawConfig()
+    hermes: HermesConfig = HermesConfig()
     tracing: TracingConfig = TracingConfig()
     security: SecurityConfig = SecurityConfig()
     preferred_design_agent: str = "claude"
@@ -157,6 +193,11 @@ def load_settings(path: Path | str | None = None) -> Settings:
         env_token = os.environ.get("OPENCLAW_HOOK_TOKEN", "")
         if env_token:
             settings.openclaw.hooks.token = env_token
+
+    if not settings.hermes.webhook.secret:
+        env_secret = os.environ.get("HERMES_WEBHOOK_SECRET", "")
+        if env_secret:
+            settings.hermes.webhook.secret = env_secret
 
     return settings
 
