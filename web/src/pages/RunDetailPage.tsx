@@ -2,6 +2,7 @@
 import { useParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 import useSWR from "swr";
 import { getRunTrace } from "../api/diagnostics";
 import {
@@ -324,7 +325,7 @@ function ArtifactModal({
             <p className="text-sm text-danger">{artifactState.error}</p>
           ) : tab === "content" && artifactState.content ? (
             <div className="md-prose">
-              <Markdown remarkPlugins={[remarkGfm]}>{artifactState.content}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{artifactState.content}</Markdown>
             </div>
           ) : tab === "diff" && artifactState.diff ? (
             <pre className="overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.diff}</pre>
@@ -733,7 +734,7 @@ export function RunDetailPage() {
                 <p className="text-sm text-white">审批门控</p>
                 <p className="mt-2 text-sm text-muted">{runData.current_stage} 等待审批决策中。</p>
                 <div className="mt-4">
-                  <ApprovalAction by="detail" gate={activeGate} onComplete={refreshAll} runId={resolvedRunId} />
+                  <ApprovalAction gate={activeGate} onComplete={refreshAll} runId={resolvedRunId} />
                 </div>
               </div>
             ) : null}

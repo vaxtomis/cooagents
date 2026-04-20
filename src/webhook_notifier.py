@@ -2,12 +2,30 @@ import json
 import hmac
 import hashlib
 import asyncio
+import os
 import uuid
 import logging
 from datetime import datetime, timezone
 
 
 log = logging.getLogger(__name__)
+
+_ENV_PREFIX = "$ENV:"
+
+
+def _resolve_secret(secret):
+    """Resolve a stored secret.
+
+    Why: plaintext secrets in SQLite are a standing risk. Values prefixed with
+    `$ENV:VARNAME` are redirected to environment variables so operators can
+    rotate them without touching the DB. Plain strings still work for
+    backwards compatibility but are discouraged.
+    """
+    if not secret:
+        return None
+    if isinstance(secret, str) and secret.startswith(_ENV_PREFIX):
+        return os.environ.get(secret[len(_ENV_PREFIX):], "") or None
+    return secret
 
 # Events that should be pushed to OpenClaw /hooks/agent
 OPENCLAW_EVENTS = frozenset({
@@ -311,8 +329,9 @@ class WebhookNotifier:
             body = json.dumps({"event": event_type, "payload": payload, "timestamp": datetime.now(timezone.utc).isoformat()})
             headers = {"Content-Type": "application/json"}
 
-            if webhook.get("secret"):
-                sig = hmac.new(webhook["secret"].encode(), body.encode(), hashlib.sha256).hexdigest()
+            resolved = _resolve_secret(webhook.get("secret"))
+            if resolved:
+                sig = hmac.new(resolved.encode(), body.encode(), hashlib.sha256).hexdigest()
                 headers["X-Webhook-Signature"] = sig
 
             resp = await client.post(webhook["url"], content=body, headers=headers)

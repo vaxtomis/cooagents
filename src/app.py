@@ -5,9 +5,14 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from src.acpx_executor import AcpxExecutor
 from src.artifact_manager import ArtifactManager
+from src.auth import AuthError, AuthSettings, get_current_user
+from src.request_utils import client_ip
 from src.config import load_agent_hosts, load_settings
 from src.database import Database
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
@@ -27,6 +32,8 @@ async def lifespan(app: FastAPI):
     project_root = Path(__file__).resolve().parents[1]
     coop_dir = project_root / ".coop"
     settings = load_settings()
+    # Fail fast if auth env is missing. Public deployment must not boot without it.
+    app.state.auth = AuthSettings.from_env()
     await deploy_skills(settings)
 
     sse_broadcaster = SSEBroadcaster()
@@ -163,6 +170,24 @@ def mount_dashboard_spa(app: FastAPI, project_root: Path | None = None) -> None:
 app = FastAPI(title="cooagents", version="0.2.0", lifespan=lifespan)
 app.add_middleware(TraceMiddleware)
 
+# Global rate limiter. Per-route overrides via @limiter.limit(...) decorator.
+# Why: public-web deployment needs resource protection on mutation + upload
+# endpoints. `client_ip` honours X-Forwarded-For from trusted proxies so
+# buckets actually separate per-user behind nginx/caddy.
+limiter = Limiter(key_func=client_ip, default_limits=["300/minute"])
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request, exc):
+    return JSONResponse(
+        status_code=429,
+        content={"error": "rate_limited", "message": "Too many requests"},
+    )
+
+
+app.add_middleware(SlowAPIMiddleware)
+
 
 @app.exception_handler(NotFoundError)
 async def not_found_handler(request, exc):
@@ -179,6 +204,14 @@ async def bad_request_handler(request, exc):
     return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(exc)})
 
 
+@app.exception_handler(AuthError)
+async def auth_error_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": "unauthenticated", "message": str(exc)},
+    )
+
+
 @app.get("/health")
 async def health(request: Request):
     db = request.app.state.db
@@ -193,8 +226,11 @@ async def health(request: Request):
     }
 
 
+from fastapi import Depends
+
 from routes.agent_hosts import router as hosts_router
 from routes.artifacts import router as artifacts_router
+from routes.auth import router as auth_router
 from routes.diagnostics import create_diagnostics_router
 from routes.events import create_events_router
 from routes.repos import router as repos_router
@@ -202,12 +238,16 @@ from routes.runs import router as runs_router
 from routes.sse import create_sse_router
 from routes.webhooks import router as webhooks_router
 
-app.include_router(runs_router, prefix="/api/v1")
-app.include_router(artifacts_router, prefix="/api/v1")
-app.include_router(hosts_router, prefix="/api/v1")
-app.include_router(webhooks_router, prefix="/api/v1")
-app.include_router(repos_router, prefix="/api/v1")
-app.include_router(create_events_router(), prefix="/api/v1")
-app.include_router(create_sse_router(), prefix="/api/v1")
-app.include_router(create_diagnostics_router(), prefix="/api/v1")
+# Auth endpoints are public. Everything else requires a valid session.
+auth_required = [Depends(get_current_user)]
+
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(runs_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(artifacts_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(hosts_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(webhooks_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(repos_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(create_events_router(), prefix="/api/v1", dependencies=auth_required)
+app.include_router(create_sse_router(), prefix="/api/v1", dependencies=auth_required)
+app.include_router(create_diagnostics_router(), prefix="/api/v1", dependencies=auth_required)
 mount_dashboard_spa(app)

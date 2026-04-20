@@ -112,7 +112,7 @@ class HostManager:
                 agent_type = host["agent_type"]
                 async with asyncssh.connect(
                     host["host"],
-                    known_hosts=None,
+                    # known_hosts omitted -> asyncssh uses ~/.ssh/known_hosts
                     client_keys=[host["ssh_key"]] if host.get("ssh_key") else None,
                 ) as conn:
                     if agent_type == "claude":

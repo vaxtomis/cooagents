@@ -281,7 +281,6 @@ describe("DashboardPage", () => {
 
     await waitFor(() => {
       expect(approveRun).toHaveBeenCalledWith("run-2", {
-        by: "dashboard",
         comment: undefined,
         gate: "req",
       });

@@ -1,5 +1,7 @@
 server:
-  host: "0.0.0.0"
+  # Bind to localhost only. Public access MUST go through a reverse proxy
+  # (Nginx/Caddy) that terminates HTTPS and forwards to this port.
+  host: "127.0.0.1"
   port: 8321
 
 database:
@@ -45,6 +47,7 @@ openclaw:
   hooks:
     enabled: false
     url: "http://127.0.0.1:18789/hooks/agent"
+    # token: read from env OPENCLAW_HOOK_TOKEN; do NOT commit a real value here.
     token: ""
     default_channel: "last"
     default_to: ""

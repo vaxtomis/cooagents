@@ -87,7 +87,19 @@ export async function getJobOutput(runId: string, jobId: string): Promise<JobOut
   return apiFetch<JobOutputResponse>(`/runs/${runId}/jobs/${jobId}/output`);
 }
 
+// Why: runId is embedded into a URL used by EventSource. Reject anything outside
+// the safe identifier alphabet to prevent path-traversal / header injection if a
+// route param is ever sourced from user-controllable input.
+const RUN_ID_RE = /^[A-Za-z0-9_\-]{1,128}$/;
+
+function assertSafeRunId(runId: string): void {
+  if (!RUN_ID_RE.test(runId)) {
+    throw new Error(`Invalid runId: ${runId}`);
+  }
+}
+
 export function getRunEventsStreamUrl(runId: string): string {
+  assertSafeRunId(runId);
   return apiPath(`/runs/${runId}/events/stream`);
 }
 
@@ -99,7 +111,11 @@ export async function createRunWithRequirement(formData: FormData): Promise<RunR
   const response = await fetch("/api/v1/runs/upload-requirement", {
     method: "POST",
     body: formData,
+    credentials: "include",
   });
+  if (response.status === 401 && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("auth:unauthenticated"));
+  }
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     const message =

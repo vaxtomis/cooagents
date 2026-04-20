@@ -2,8 +2,42 @@
 from __future__ import annotations
 
 import json
+import re
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
+
+
+# Patterns that look like secrets in diagnostic output. Why: agent stdout/stderr
+# and Python tracebacks can echo env vars, tokens, or URLs with credentials.
+_SECRET_PATTERNS = [
+    (re.compile(r"(sk-ant-[A-Za-z0-9_\-]{20,})"), "sk-ant-***"),
+    (re.compile(r"(sk-[A-Za-z0-9_\-]{16,})"), "sk-***"),
+    (re.compile(r"(AKIA[0-9A-Z]{16})"), "AKIA***"),
+    (re.compile(r"(ghp_[A-Za-z0-9]{20,})"), "ghp_***"),
+    (re.compile(r"(ghs_[A-Za-z0-9]{20,})"), "ghs_***"),
+    (re.compile(r"(xox[baprs]-[A-Za-z0-9\-]{10,})"), "xox***"),
+    (re.compile(r"-----BEGIN [A-Z ]+-----"), "-----BEGIN ***-----"),
+    (re.compile(r"(?i)(authorization:\s*bearer\s+)([A-Za-z0-9\-._~+/=]{10,})"), r"\1***"),
+    (re.compile(r"(?i)(x-api-key:\s*)([A-Za-z0-9\-._~+/=]{10,})"), r"\1***"),
+    (re.compile(r"(?i)(token|api[_-]?key|password|secret)\s*[=:]\s*([\"']?)([A-Za-z0-9\-._~+/=]{10,})\2"), r"\1=\2***\2"),
+    (re.compile(r"([a-zA-Z]+://[^\s:/@]+:)([^\s/@]+)(@)"), r"\1***\3"),
+]
+
+# Cap redact input to bound regex work. Diagnostic excerpts are small by design
+# (500 bytes in job_diagnosis). 64 KB is a safe ceiling to avoid ReDoS blowup
+# on any future caller that forgets to truncate.
+_REDACT_MAX_BYTES = 64 * 1024
+
+
+def _redact(text):
+    if not text or not isinstance(text, str):
+        return text
+    if len(text) > _REDACT_MAX_BYTES:
+        text = text[-_REDACT_MAX_BYTES:]
+    out = text
+    for pat, repl in _SECRET_PATTERNS:
+        out = pat.sub(repl, out)
+    return out
 
 
 def create_diagnostics_router(db=None):
@@ -161,22 +195,41 @@ def create_diagnostics_router(db=None):
             "SELECT error_detail FROM events WHERE job_id=? AND level='error' ORDER BY created_at DESC LIMIT 1",
             (job_id,),
         )
-        error_detail = error_event["error_detail"] if error_event else None
+        error_detail = _redact(error_event["error_detail"] if error_event else None)
         error_summary = error_detail.strip().split("\n")[-1] if error_detail else None
 
-        # Last output excerpt from events_file
+        # Last output excerpt from events_file. Containment check: the DB-stored
+        # path must sit under an expected root, otherwise a tampered row could
+        # coerce us into reading arbitrary files (e.g. /etc/passwd).
         last_output = None
         events_file = job.get("events_file")
         if events_file:
             try:
-                import os
-                if os.path.exists(events_file):
-                    with open(events_file, "r", encoding="utf-8", errors="replace") as f:
+                from pathlib import Path
+                candidate = Path(events_file).resolve(strict=False)
+                allowed_roots: list[Path] = []
+                try:
+                    coop_dir = request.app.state.executor.coop_dir  # type: ignore[attr-defined]
+                    if coop_dir:
+                        allowed_roots.append(Path(coop_dir).resolve())
+                except AttributeError:
+                    pass
+                try:
+                    settings = request.app.state.settings
+                    allowed_roots.append(Path(settings.database.path).resolve().parent)
+                except AttributeError:
+                    pass
+                within = any(
+                    str(candidate).startswith(str(root))
+                    for root in allowed_roots
+                )
+                if within and candidate.is_file():
+                    with candidate.open("r", encoding="utf-8", errors="replace") as f:
                         f.seek(0, 2)
                         size = f.tell()
                         read_start = max(0, size - 500)
                         f.seek(read_start)
-                        last_output = f.read()
+                        last_output = _redact(f.read())
             except Exception:
                 pass
 

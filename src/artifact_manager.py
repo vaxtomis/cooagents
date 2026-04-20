@@ -14,6 +14,21 @@ class ArtifactManager:
             path = self.project_root / path
         return path
 
+    def _assert_path_within_project(self, path) -> Path:
+        """Resolve path and assert it stays within project_root.
+
+        Why: artifact rows persist filesystem paths; if a row is tampered with
+        (or future code passes a user-supplied path), reading the content would
+        expose arbitrary files (e.g. /etc/passwd).
+        """
+        resolved = Path(path).resolve()
+        root = self.project_root.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            raise ValueError(f"Artifact path escapes project root: {path}")
+        return resolved
+
     async def register(self, run_id, kind, path, stage, git_ref=None) -> int:
         """Register artifact. Computes content_hash and byte_size. Returns artifact id.
         Auto-increments version if same run_id+kind has existing versions."""
@@ -89,7 +104,8 @@ class ArtifactManager:
         row = await self.db.fetchone("SELECT path FROM artifacts WHERE id=?", (artifact_id,))
         if row is None:
             raise ValueError(f"Artifact {artifact_id} not found")
-        return Path(row["path"]).read_text(encoding="utf-8")
+        safe_path = self._assert_path_within_project(row["path"])
+        return safe_path.read_text(encoding="utf-8")
 
     async def get_diff(self, artifact_id) -> str | None:
         """Diff against previous version of same run_id+kind. Returns None if v1."""
@@ -105,8 +121,8 @@ class ArtifactManager:
         # Simple line diff
         import difflib
 
-        old = Path(prev["path"]).read_text(encoding="utf-8").splitlines()
-        new = Path(row["path"]).read_text(encoding="utf-8").splitlines()
+        old = self._assert_path_within_project(prev["path"]).read_text(encoding="utf-8").splitlines()
+        new = self._assert_path_within_project(row["path"]).read_text(encoding="utf-8").splitlines()
         diff = difflib.unified_diff(old, new, lineterm="")
         return "\n".join(diff)
 
@@ -138,13 +154,14 @@ class ArtifactManager:
 
     async def render_task(self, template_path, variables: dict, output_path) -> str:
         """Render a task template with Jinja2."""
-        from jinja2 import Environment, FileSystemLoader
+        from jinja2 import Environment, FileSystemLoader, select_autoescape
 
         template_file = self._resolve_project_path(template_path)
         output_file = self._resolve_project_path(output_path)
         env = Environment(
             loader=FileSystemLoader(str(template_file.parent)),
             keep_trailing_newline=True,
+            autoescape=select_autoescape(enabled_extensions=("html", "htm", "xml"), default_for_string=False),
         )
         template = env.get_template(template_file.name)
         content = template.render(**variables)

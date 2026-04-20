@@ -5,17 +5,21 @@ import {
   CirclePlay,
   GitMerge,
   LayoutDashboard,
+  LogOut,
   Server,
 } from "lucide-react";
 import {
   NavLink,
+  Navigate,
   Outlet,
   createBrowserRouter,
   createMemoryRouter,
   useLocation,
 } from "react-router-dom";
+import { useAuth } from "./auth/AuthContext";
 import { AgentHostsPage } from "./pages/AgentHostsPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { LoginPage } from "./pages/LoginPage";
 import { MergeQueuePage } from "./pages/MergeQueuePage";
 import { RunDetailPage } from "./pages/RunDetailPage";
 import { RunsListPage } from "./pages/RunsListPage";
@@ -116,9 +120,26 @@ function ShellNavLink({ item, compact = false }: { item: NavItem; compact?: bool
   );
 }
 
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { status } = useAuth();
+  const location = useLocation();
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-void text-muted">
+        <span className="text-sm">加载会话...</span>
+      </div>
+    );
+  }
+  if (status === "unauthenticated") {
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  }
+  return <>{children}</>;
+}
+
 function ShellLayout() {
   const { pathname } = useLocation();
   const meta = resolvePageMeta(pathname);
+  const { user, logout } = useAuth();
 
   return (
     <div className="min-h-screen bg-void text-copy">
@@ -140,11 +161,27 @@ function ShellLayout() {
             ))}
           </nav>
 
-          <div className="mt-auto rounded-[24px] border border-white/6 bg-panel p-4 text-sm text-muted">
-            <p className="text-white">运维控制台已上线</p>
-            <p className="mt-2">
-              概览、Runs、主机管理与合并控制共享同一实时终端。
-            </p>
+          <div className="mt-auto space-y-3">
+            <div className="rounded-[24px] border border-white/6 bg-panel p-4 text-sm text-muted">
+              <p className="text-white">运维控制台已上线</p>
+              <p className="mt-2">
+                概览、Runs、主机管理与合并控制共享同一实时终端。
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-[24px] border border-white/6 bg-panel px-4 py-3 text-xs text-muted">
+              <div className="min-w-0 truncate">
+                <p className="text-[10px] uppercase tracking-[0.22em] text-muted/75">已登录</p>
+                <p className="truncate text-sm text-white">{user?.username ?? "-"}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="inline-flex items-center gap-1 rounded-full border border-white/10 px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
+              >
+                <LogOut className="size-3.5" strokeWidth={1.8} />
+                退出
+              </button>
+            </div>
           </div>
         </aside>
 
@@ -188,9 +225,14 @@ function ShellLayout() {
 }
 
 const routes = [
+  { path: "/login", element: <LoginPage /> },
   {
     path: "/",
-    element: <ShellLayout />,
+    element: (
+      <RequireAuth>
+        <ShellLayout />
+      </RequireAuth>
+    ),
     children: [
       { index: true, element: <DashboardPage /> },
       { path: "runs", element: <RunsListPage /> },

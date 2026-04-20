@@ -19,12 +19,16 @@ metadata:
 
 所有 API 调用的 Base URL 为 `http://127.0.0.1:8321/api/v1`。
 
+**认证（必需）：** 所有 `/api/v1/*` 请求必须携带 `X-Agent-Token: $AGENT_API_TOKEN` 头，否则返回 401。`AGENT_API_TOKEN` 由 cooagents 安装时生成并注入到 OpenClaw 的环境变量中（参见 cooagents-setup/SKILL.md）。
+
 调用模式：
-- GET:  exec `curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}`
-- POST: exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
-- POST+body: exec `curl -s -X POST URL -H "Content-Type: application/json" -d '{"key":"val"}'`
+- GET:  exec `curl -s -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/runs/{run_id}`
+- POST: exec `curl -s -X POST -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
+- POST+body: exec `curl -s -X POST URL -H "X-Agent-Token: $AGENT_API_TOKEN" -H "Content-Type: application/json" -d '{"key":"val"}'`
 
 完整调用参数见 `references/api-playbook.md`（使用 Read 工具读取）。
+
+**速率限制：** `/runs` POST 10/min、`/runs/upload-requirement` 5/min、`/repos/ensure` 10/min；其余 300/min 全局上限。超出返回 429，自动降级为"稍后重试"而非丢弃。
 
 ## B. 需求提交方式选择
 
@@ -92,26 +96,26 @@ metadata:
 
 当阶段为 `*_REVIEW` 或 `MERGE_CONFLICT` 时：
 
-1. exec `curl GET /runs/{run_id}/artifacts` 获取产物列表
+1. exec `curl GET -H "X-Agent-Token: $AGENT_API_TOKEN" /runs/{run_id}/artifacts` 获取产物列表
 2. 若阶段为 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW`，按 `references/feishu-interaction.md` 中的"审批云文件发送规则"选择对应产物并获取完整正文
 3. 使用 `feishu_doc` 工具创建飞书云文件并写入正文（create → write，详见 `references/feishu-interaction.md` §1 的"feishu_doc 调用步骤"）
 4. 使用 `references/feishu-interaction.md` §2 的统一人工确认消息格式发送给用户（所有需要人工操作的场景格式一致：`📋 {ticket} · {label}` + body + 回复选项）
-5. `MERGE_CONFLICT` 不发送云文件，先查询冲突文件列表��
-   exec `curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}/conflicts`
+5. `MERGE_CONFLICT` 不发送云文件，先查询冲突文件列表：
+   exec `curl -s -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/runs/{run_id}/conflicts`
    然后使用同一 §2 格式发送冲突通知，`label` 填"合并冲突"
 6. **等待用户下一条消息 — 不得自主决策**
 7. 解析用户回复：
    - 肯定回复（"通过"、"可以"、"approve"）：
-     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/approve -H "Content-Type: application/json" -d '{"gate":"当前 gate","by":"用户标识"}'`
-     然后 exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
+     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/approve -H "X-Agent-Token: $AGENT_API_TOKEN" -H "Content-Type: application/json" -d '{"gate":"当前 gate"}'`
+     然后 exec `curl -s -X POST -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
    - 否定回复（含具体原因）：
-     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/reject -H "Content-Type: application/json" -d '{"gate":"当前 gate","by":"用户标识","reason":"用户原文"}'`
+     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/reject -H "X-Agent-Token: $AGENT_API_TOKEN" -H "Content-Type: application/json" -d '{"gate":"当前 gate","reason":"用户原文"}'`
    - `MERGE_CONFLICT` 场景 — 用户确认冲突已解决：
-     exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/resolve-conflict -H "Content-Type: application/json" -d '{"by":"用户标识"}'`
-     然后 exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
+     exec `curl -s -X POST -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/runs/{run_id}/resolve-conflict`
+     然后 exec `curl -s -X POST -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
 8. 回复操作结果
 
-`by` 字段：使用消息发送方的用户名或 ID，用于审���追踪。
+**注意**：approve/reject/resolve-conflict/retry 请求不再接受 `by` 字段 — 后端从 `X-Agent-Token` 自动派生为 `"agent"` 作为审计身份，由 webhook 调用链追溯到具体用户。
 
 驳回后目标阶段：
 - `req` gate → REQ_COLLECTING
@@ -171,8 +175,8 @@ metadata:
 - **审批必须等待**：`*_REVIEW` 和 `MERGE_CONFLICT` 阶段必须等用户��确回复后再操作
 - **云文件优先**：进入 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW` 后，必须先通过 `feishu_doc` 工具创建���文件并写入正文，再发送审批文本
 - **幂等重试**：网络错误时可重试 tick，状态机保证幂等
-- **错误上报**：FAILED 阶段参考 error-handling.md 处理，必要时告��用户
-- **审计留痕**：approve/reject 请求中的 `by` 字段必须填写真实用户标识
+- **错误上报**：FAILED 阶段参考 error-handling.md 处理，必要时告知用户
+- **审计留痕**：approve/reject/resolve-conflict 的审计身份由服务端从 `X-Agent-Token` 自动派生为 `"agent"`；具体触发用户追溯到发起 webhook 的消息
 
 ## I. Webhook 事件消息（隔离会话）
 
@@ -190,8 +194,8 @@ metadata:
 3. 回复审批消息（含云文档链接）— 消息中已提供模板，替换 `{url}` 即可
 
 **如果消息中未包含 artifact content**（旧格式 fallback），则自行查询：
-1. `exec curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}/artifacts?kind={kind}` — 获取产物列表
-2. `exec curl -s http://127.0.0.1:8321/api/v1/runs/{run_id}/artifacts/{artifact_id}/content` — 获取正文
+1. `exec curl -s -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/runs/{run_id}/artifacts?kind={kind}` — 获取产物列表
+2. `exec curl -s -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/runs/{run_id}/artifacts/{artifact_id}/content` — 获取正文
 3. 然后执行 feishu_doc create → write → 回复审批消息
 
 gate → kind / 标题 / UI 标签映射：
@@ -230,5 +234,5 @@ gate → kind / 标题 / UI 标签映射：
 - 聊天记录中有 "📋 PROJ-42 · 设计审批"
 - 用户回复 "通过"
 - 你应执行：
-  1. exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/approve -H "Content-Type: application/json" -d '{"gate":"design","by":"用户标识"}'`
-  2. exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`
+  1. exec `curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/approve -H "X-Agent-Token: $AGENT_API_TOKEN" -H "Content-Type: application/json" -d '{"gate":"design"}'`
+  2. exec `curl -s -X POST -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/runs/{run_id}/tick`

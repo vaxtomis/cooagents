@@ -3,6 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      CSP is primarily enforced via the HTTP response headers set in vite.config.ts
+      (dev) and the production reverse proxy. This meta tag acts as a fallback for
+      static hosting that cannot set headers. 'unsafe-inline' for styles is required
+      by Tailwind JIT; keep script-src strict.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <title>Cooagents Dashboard</title>
   </head>
   <body>

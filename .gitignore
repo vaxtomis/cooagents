@@ -8,3 +8,6 @@ __pycache__/
 web/node_modules/
 web/dist/
 .worktrees/
+docs/plans/
+docs/superpowers/
+docs/internals/

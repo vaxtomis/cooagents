@@ -162,7 +162,6 @@ export function DashboardPage() {
                     </div>
                     <div className="mt-4">
                       <ApprovalAction
-                        by="dashboard"
                         gate={getGate(run.current_stage)}
                         onComplete={refreshAll}
                         reason={`${run.ticket} rejected from dashboard`}

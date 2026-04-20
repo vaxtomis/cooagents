@@ -16,8 +16,8 @@ async def db(tmp_path):
     await d.close()
 
 @pytest.fixture
-async def am(db):
-    return ArtifactManager(db)
+async def am(db, tmp_path):
+    return ArtifactManager(db, project_root=tmp_path)
 
 async def test_register_artifact(am, tmp_path):
     # Create a fake file
@@ -83,7 +83,7 @@ async def test_render_task(am, tmp_path):
     assert "Ticket: T-1" in content
 
 async def test_render_task_jinja2(db, tmp_path):
-    am = ArtifactManager(db)
+    am = ArtifactManager(db, project_root=tmp_path)
     template = tmp_path / "template.md"
     template.write_text("# Task for {{ ticket }}\n{% if feedback %}Feedback: {{ feedback }}{% endif %}")
     output = tmp_path / "out.md"

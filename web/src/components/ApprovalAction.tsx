@@ -7,14 +7,12 @@ const DEFAULT_REJECT_REASON = "Rejected from dashboard";
 export function ApprovalAction({
   runId,
   gate,
-  by,
   comment,
   reason,
   onComplete,
 }: {
   runId: string;
   gate: GateName;
-  by: string;
   comment?: string;
   reason?: string;
   onComplete?: () => void | Promise<void>;
@@ -26,7 +24,7 @@ export function ApprovalAction({
     setPendingAction("approve");
     setErrorMessage(null);
     try {
-      await approveRun(runId, { gate, by, comment });
+      await approveRun(runId, { gate, comment });
       await onComplete?.();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "批准失败");
@@ -39,7 +37,7 @@ export function ApprovalAction({
     setPendingAction("reject");
     setErrorMessage(null);
     try {
-      await rejectRun(runId, { gate, by, reason: reason?.trim() || DEFAULT_REJECT_REASON });
+      await rejectRun(runId, { gate, reason: reason?.trim() || DEFAULT_REJECT_REASON });
       await onComplete?.();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "驳回失败");

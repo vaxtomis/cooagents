@@ -17,6 +17,7 @@ from src.acpx_executor import AcpxExecutor
 from src.webhook_notifier import WebhookNotifier
 from src.merge_manager import MergeManager
 from src.state_machine import StateMachine
+from src.auth import get_current_user
 from src.config import load_settings
 from src.exceptions import NotFoundError, ConflictError, BadRequestError
 
@@ -28,6 +29,7 @@ async def setup(tmp_path):
     test_app = FastAPI(title="cooagents-e2e")
 
     settings = load_settings()
+    settings.security.workspace_root = str(tmp_path)
     db = Database(db_path=tmp_path / "test.db", schema_path="db/schema.sql")
     await db.connect()
 
@@ -67,6 +69,10 @@ async def setup(tmp_path):
     test_app.state.merger = merger
     test_app.state.settings = settings
     test_app.state.start_time = time.time()
+
+    # Auth is covered in dedicated tests; bypass here so behavioural e2e flows
+    # don't need token plumbing.
+    test_app.dependency_overrides[get_current_user] = lambda: "test"
 
     @test_app.exception_handler(NotFoundError)
     async def not_found_handler(request, exc):

@@ -50,14 +50,60 @@ async function parseResponseBody(response: Response): Promise<unknown> {
   return text.length > 0 ? text : null;
 }
 
+// Auth-aware fetch. On 401 the first try, attempt a silent /auth/refresh and
+// retry once. If refresh itself fails, dispatch an "auth:unauthenticated"
+// event so the app can redirect to the login page. credentials: "include" is
+// required so the httpOnly session cookies are sent.
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function attemptRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        // 5s cap so a hung server never blocks all concurrent 401 retries.
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          const r = await fetch(apiPath("/auth/refresh"), {
+            method: "POST",
+            credentials: "include",
+            signal: controller.signal,
+          });
+          return r.ok;
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        return false;
+      } finally {
+        setTimeout(() => {
+          refreshInFlight = null;
+        }, 0);
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
+function notifyUnauthenticated() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("auth:unauthenticated"));
+  }
+}
+
+async function rawFetch(path: string, init: RequestInit, query?: QueryParams): Promise<Response> {
+  return fetch(apiPath(path, query), { ...init, credentials: "include" });
+}
+
 export async function apiRequest<T>(
   path: string,
   options: Omit<RequestInit, "body"> & {
     body?: unknown;
     query?: QueryParams;
+    skipAuthRetry?: boolean;
   } = {},
 ): Promise<{ data: T; response: Response }> {
-  const { body, headers, query, ...init } = options;
+  const { body, headers, query, skipAuthRetry, ...init } = options;
   const resolvedHeaders = new Headers(headers);
   resolvedHeaders.set("Accept", "application/json");
 
@@ -67,11 +113,23 @@ export async function apiRequest<T>(
     payload = JSON.stringify(body);
   }
 
-  const response = await fetch(apiPath(path, query), {
+  const fetchInit: RequestInit = {
     ...init,
     body: payload,
     headers: resolvedHeaders,
-  });
+  };
+
+  let response = await rawFetch(path, fetchInit, query);
+
+  if (response.status === 401 && !skipAuthRetry) {
+    const refreshed = await attemptRefresh();
+    if (refreshed) {
+      response = await rawFetch(path, fetchInit, query);
+    }
+    if (response.status === 401) {
+      notifyUnauthenticated();
+    }
+  }
 
   const data = await parseResponseBody(response);
 
@@ -91,6 +149,7 @@ export async function apiFetch<T>(
   options: Omit<RequestInit, "body"> & {
     body?: unknown;
     query?: QueryParams;
+    skipAuthRetry?: boolean;
   } = {},
 ): Promise<T> {
   const { data } = await apiRequest<T>(path, options);

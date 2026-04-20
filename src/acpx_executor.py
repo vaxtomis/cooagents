@@ -371,7 +371,7 @@ class AcpxExecutor:
         import asyncssh
         import shlex
         remote_cmd = " ".join(shlex.quote(c) for c in cmd)
-        connect_args = {"host": host["host"], "known_hosts": None}
+        connect_args = {"host": host["host"]}  # known_hosts omitted -> asyncssh uses ~/.ssh/known_hosts
         if host.get("ssh_key"):
             connect_args["client_keys"] = [host["ssh_key"]]
         async with asyncssh.connect(**connect_args) as conn:
@@ -815,7 +815,7 @@ class AcpxExecutor:
         import asyncssh
         import shlex
         remote_cmd = " ".join(shlex.quote(c) for c in cmd)
-        connect_args = {"host": host["host"], "known_hosts": None}
+        connect_args = {"host": host["host"]}  # known_hosts omitted -> asyncssh uses ~/.ssh/known_hosts
         if host.get("ssh_key"):
             connect_args["client_keys"] = [host["ssh_key"]]
         conn = await asyncssh.connect(**connect_args)

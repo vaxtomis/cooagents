@@ -10,6 +10,8 @@ import { DASHBOARD_STAGE_FLOW, type CreateRunPayload, type RunRecord } from "../
 const PAGE_SIZE = 10;
 const DEFAULT_SORT_BY = "updated_at";
 const DEFAULT_SORT_ORDER = "desc" as const;
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB — must match backend limit
+const ALLOWED_UPLOAD_EXT = /\.(md|docx)$/i;
 
 const STATUS_OPTIONS = ["", "running", "completed", "failed", "cancelled"];
 const SORT_OPTIONS = [
@@ -175,11 +177,24 @@ function CreateRunDialog({
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const pickFile = useCallback((picked: File | null | undefined) => {
+    if (!picked) return;
+    if (!ALLOWED_UPLOAD_EXT.test(picked.name)) {
+      setError("仅支持 .md 或 .docx 文件");
+      return;
+    }
+    if (picked.size > MAX_UPLOAD_BYTES) {
+      setError(`文件不得超过 ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB`);
+      return;
+    }
+    setError(null);
+    setFile(picked);
+  }, []);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    const dropped = e.dataTransfer.files[0];
-    if (dropped) setFile(dropped);
-  }, []);
+    pickFile(e.dataTransfer.files[0]);
+  }, [pickFile]);
 
   if (!open) return null;
 
@@ -267,7 +282,7 @@ function CreateRunDialog({
                   <p className="mt-1 text-xs text-muted/60">支持 .md 和 .docx 文件</p>
                 </>
               )}
-              <input ref={fileRef} type="file" accept=".md,.docx" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              <input ref={fileRef} type="file" accept=".md,.docx" className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
             </div>
           </div>
 

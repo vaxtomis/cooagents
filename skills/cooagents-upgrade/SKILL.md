@@ -40,7 +40,7 @@ exec curl -s http://127.0.0.1:8321/health
 **1b. 检查是否有运行中的任务：**
 
 ```bash
-exec curl -s "http://127.0.0.1:8321/api/v1/runs?status=running"
+exec curl -s -H "X-Agent-Token: $AGENT_API_TOKEN" "http://127.0.0.1:8321/api/v1/runs?status=running"
 ```
 
 如果有运行中的任务，**警告用户**：升级会重启服务，运行中的任务将中断。等待用户确认后再继续。
@@ -108,16 +108,18 @@ exec sleep 3
 exec uname -s 2>/dev/null || echo Windows
 ```
 
-**venv 创建成功时：**
+**venv 创建成功时（启动前必须 source `.env` 加载 auth 环境变量）：**
 
 - **Linux / Darwin（macOS）：**
   ```bash
-  exec cd {repo_path} && nohup .venv/bin/uvicorn src.app:app --host 0.0.0.0 --port 8321 > cooagents.log 2>&1 &
+  exec cd {repo_path} && set -a && . ./.env && set +a && nohup .venv/bin/uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &
   ```
 - **Windows（Git Bash）：**
   ```bash
-  exec cd {repo_path} && (.venv/Scripts/python -m uvicorn src.app:app --host 0.0.0.0 --port 8321 > cooagents.log 2>&1 &)
+  exec cd {repo_path} && (set -a && . ./.env && set +a && .venv/Scripts/python -m uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &)
   ```
+
+如果使用 systemd,启动由单位文件管理,跳过本步骤的手动启动,改为 `sudo systemctl restart cooagents`。
 
 **venv 未创建时：**
 - 将 `.venv/bin/uvicorn` 替换为 `uvicorn`
@@ -163,9 +165,9 @@ exec cat {repo_path}/cooagents.log
 
 ```
 ✅ cooagents 已升级
-- 服务地址：http://0.0.0.0:8321
+- 服务地址：http://127.0.0.1:8321（公网访问经反向代理）
 - 健康状态：ok
-- Dashboard：http://0.0.0.0:8321/（返回 HTML）
+- Dashboard：http://127.0.0.1:8321/（返回 HTML）
 - 旧版本：{old_commit}
 - 新版本：{new_commit}
 - Skills：已随启动自动重新部署

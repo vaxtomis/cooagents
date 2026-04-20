@@ -8,13 +8,15 @@
 
 | 事件 | 自动响应 | 升级条件 |
 |------|----------|----------|
-| `job.timeout` | `curl -s -X POST .../recover -d '{"action":"resume"}'`，最多 3 次 | 连续 3 次 → §2 格式通知用户 |
-| `job.failed` | `curl -s -X POST .../retry -d '{"by":"agent","note":"自动重试"}'`，最多 2 次 | 重试仍失败 → §2 格式通知用户 |
+| `job.timeout` | `curl -s -X POST -H "X-Agent-Token: $AGENT_API_TOKEN" .../recover -H "Content-Type: application/json" -d '{"action":"resume"}'`，最多 3 次 | 连续 3 次 → §2 格式通知用户 |
+| `job.failed` | `curl -s -X POST -H "X-Agent-Token: $AGENT_API_TOKEN" .../retry -H "Content-Type: application/json" -d '{"note":"自动重试"}'`，最多 2 次 | 重试仍失败 → §2 格式通知用户 |
 | `job.interrupted` | 同 `job.failed` | 同上 |
-| `merge.conflict` | exec `curl GET /conflicts` 获取冲突文件列表 | §2 格式通知用户（`label` 填"合并冲突"） |
-| `host.offline` | 等待 `host.online` 事件后执行 `curl POST .../tick` | >30 分钟 → §2 格式通知用户 |
-| curl 4xx 响应 | 记录错误，不重试 | §2 格式通知用户 |
-| curl 5xx / 网络错误 | 等 10s 重试 1 次 | 仍失败 → §2 格式通知用户 |
+| `merge.conflict` | exec `curl GET -H "X-Agent-Token: $AGENT_API_TOKEN" /conflicts` 获取冲突文件列表 | §2 格式通知用户（`label` 填"合并冲突"） |
+| `host.offline` | 等待 `host.online` 事件后执行 `curl POST -H "X-Agent-Token: $AGENT_API_TOKEN" .../tick` | >30 分钟 → §2 格式通知用户 |
+| 401 响应 | 环境变量 `AGENT_API_TOKEN` 未正确注入，停止重试 | 立即 §2 格式通知用户并提示检查安装 |
+| 429 响应 | 等 60s 再重试 1 次 | 仍 429 → §2 格式通知用户（限流由 cooagents 服务侧管控） |
+| 4xx 其他响应 | 记录错误，不重试 | §2 格式通知用户 |
+| 5xx / 网络错误 | 等 10s 重试 1 次 | 仍失败 → §2 格式通知用户 |
 
 ## 诊断 API 排查
 
@@ -22,10 +24,10 @@
 
 ```bash
 # 查看错误事件链路
-curl -s "http://127.0.0.1:8321/api/v1/runs/{run_id}/trace?level=error"
+curl -s -H "X-Agent-Token: $AGENT_API_TOKEN" "http://127.0.0.1:8321/api/v1/runs/{run_id}/trace?level=error"
 
-# 获取 job 诊断（含错误摘要、堆栈、主机状态）
-curl -s http://127.0.0.1:8321/api/v1/jobs/{job_id}/diagnosis
+# 获取 job 诊断（含错误摘要、堆栈、主机状态；敏感字段已脱敏）
+curl -s -H "X-Agent-Token: $AGENT_API_TOKEN" http://127.0.0.1:8321/api/v1/jobs/{job_id}/diagnosis
 ```
 
 诊断结果中的关键字段：
@@ -62,8 +64,14 @@ Agent 在对话上下文中按 run_id 追踪重试次数。每次自动恢复操
 ## curl 错误检测
 
 ```bash
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/tick)
-if [ "$HTTP_CODE" -ge 400 ] && [ "$HTTP_CODE" -lt 500 ]; then
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+  -H "X-Agent-Token: $AGENT_API_TOKEN" \
+  http://127.0.0.1:8321/api/v1/runs/{run_id}/tick)
+if [ "$HTTP_CODE" -eq 401 ]; then
+  # 认证失败，检查 $AGENT_API_TOKEN 是否已注入
+elif [ "$HTTP_CODE" -eq 429 ]; then
+  # 触发限流，等 60s 后单次重试
+elif [ "$HTTP_CODE" -ge 400 ] && [ "$HTTP_CODE" -lt 500 ]; then
   # 4xx: 客户端错误，不重试
 elif [ "$HTTP_CODE" -ge 500 ]; then
   # 5xx: 服务端错误，等 10s 重试 1 次

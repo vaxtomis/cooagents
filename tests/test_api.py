@@ -2,6 +2,7 @@ import asyncio
 import json
 import pytest
 import time
+from datetime import timedelta
 from pathlib import Path
 from httpx import AsyncClient, ASGITransport
 from src.database import Database
@@ -13,7 +14,19 @@ from src.webhook_notifier import WebhookNotifier
 from src.merge_manager import MergeManager
 from src.state_machine import StateMachine
 from src.scheduler import Scheduler
+from src.auth import AuthSettings, get_current_user
 from src.config import load_settings
+
+
+def _test_auth_settings() -> AuthSettings:
+    return AuthSettings(
+        username="test",
+        password_hash="$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        jwt_secret="test-jwt-secret-must-be-at-least-32-chars!!",
+        cookie_secure=False,
+        access_ttl=timedelta(minutes=15),
+        refresh_ttl=timedelta(days=7),
+    )
 
 
 async def _make_test_repo(path: Path) -> None:
@@ -54,6 +67,9 @@ async def client(tmp_path):
     test_app = FastAPI(title="cooagents-test")
 
     settings = load_settings()
+    # Tests create repos under tmp_path; point workspace_root there so the
+    # security validators accept the ephemeral paths.
+    settings.security.workspace_root = str(tmp_path)
     db = Database(db_path=tmp_path / "test.db", schema_path="db/schema.sql")
     await db.connect()
 
@@ -75,7 +91,12 @@ async def client(tmp_path):
     test_app.state.webhooks = webhooks
     test_app.state.merger = merger
     test_app.state.settings = settings
+    test_app.state.auth = _test_auth_settings()
     test_app.state.start_time = time.time()
+
+    # Bypass auth in unit tests: force the authenticated user to "test".
+    # Auth behaviour itself is covered separately.
+    test_app.dependency_overrides[get_current_user] = lambda: "test"
 
     @test_app.exception_handler(NotFoundError)
     async def not_found_handler(request, exc):

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -65,7 +66,9 @@ class OpenclawTarget(BaseModel):
 class OpenclawHooksConfig(BaseModel):
     enabled: bool = False
     url: str = "http://127.0.0.1:18789/hooks/agent"
-    token: str = ""
+    # Why: committed YAML must never hold secrets. Prefer env var OPENCLAW_HOOK_TOKEN;
+    # fall back to YAML only if the env var is absent. A YAML value of "" means "read env".
+    token: str = Field(default_factory=lambda: os.environ.get("OPENCLAW_HOOK_TOKEN", ""))
     default_channel: str = "last"
     default_to: str = ""
 
@@ -84,6 +87,26 @@ class OpenclawConfig(BaseModel):
     hooks: OpenclawHooksConfig = OpenclawHooksConfig()
 
 
+class SecurityConfig(BaseModel):
+    """Security boundaries enforced at API layer.
+
+    Why: public-web deployment means untrusted input can reach `repo_path` /
+    `repo_url`. A workspace root and a host allowlist bound the blast radius
+    if any layer above (auth, validation) is ever bypassed.
+    """
+    workspace_root: str = "~/cooagents-workspace"
+    allowed_repo_hosts: list[str] = ["github.com", "gitee.com"]
+    allowed_repo_schemes: list[str] = ["https", "ssh", "git"]
+    # Proxies allowed to set X-Forwarded-For. Rate limiting and logging read
+    # the real client IP only when the immediate peer is on this list. Default
+    # loopback only — matches `host: 127.0.0.1` deployment behind nginx/caddy.
+    trusted_proxies: list[str] = ["127.0.0.1", "::1"]
+    allowed_origins: list[str] = []
+
+    def resolved_workspace_root(self) -> Path:
+        return Path(self.workspace_root).expanduser().resolve()
+
+
 class Settings(BaseModel):
     server: ServerConfig = ServerConfig()
     database: DatabaseConfig = DatabaseConfig()
@@ -94,6 +117,7 @@ class Settings(BaseModel):
     turns: TurnsConfig = TurnsConfig()
     openclaw: OpenclawConfig = OpenclawConfig()
     tracing: TracingConfig = TracingConfig()
+    security: SecurityConfig = SecurityConfig()
     preferred_design_agent: str = "claude"
     preferred_dev_agent: str = "claude"
 
@@ -122,7 +146,15 @@ def load_settings(path: Path | str | None = None) -> Settings:
     else:
         data = {}
 
-    return Settings.model_validate(data)
+    settings = Settings.model_validate(data)
+
+    # Env var overrides empty YAML token (so operators can ship the YAML without secrets).
+    if not settings.openclaw.hooks.token:
+        env_token = os.environ.get("OPENCLAW_HOOK_TOKEN", "")
+        if env_token:
+            settings.openclaw.hooks.token = env_token
+
+    return settings
 
 
 def load_agent_hosts(path: Path | str | None = None) -> list[dict[str, Any]]:

@@ -42,18 +42,17 @@ class EnsureRepoRequest(BaseModel):
 
 class ApproveRequest(BaseModel):
     gate: GateName
-    by: str
+    # `by` is intentionally absent: the server derives it from the authenticated
+    # session so clients cannot spoof audit log identity.
     comment: str | None = None
 
 
 class RejectRequest(BaseModel):
     gate: GateName
-    by: str
     reason: str
 
 
 class RetryRequest(BaseModel):
-    by: str
     note: str | None = None
 
 
@@ -66,7 +65,7 @@ class SubmitRequirementRequest(BaseModel):
 
 
 class ResolveConflictRequest(BaseModel):
-    by: str
+    pass
 
 
 class CreateWebhookRequest(BaseModel):

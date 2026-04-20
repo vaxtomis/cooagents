@@ -117,10 +117,11 @@ bash scripts/bootstrap.sh
 
 ```bash
 # 查看所有运行中的任务
-curl -s "http://127.0.0.1:8321/api/v1/runs?status=running"
+curl -s -H "X-Agent-Token: $AGENT_API_TOKEN" "http://127.0.0.1:8321/api/v1/runs?status=running"
 
 # 恢复中断的任务
 curl -s -X POST http://127.0.0.1:8321/api/v1/runs/{run_id}/recover \
+  -H "X-Agent-Token: $AGENT_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"action":"resume"}'
 ```

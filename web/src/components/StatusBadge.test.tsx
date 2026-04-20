@@ -30,7 +30,6 @@ describe("ApprovalAction", () => {
 
     render(
       <ApprovalAction
-        by="tester"
         gate="req"
         reason="Needs more detail"
         runId="run-1"
@@ -40,7 +39,6 @@ describe("ApprovalAction", () => {
     fireEvent.click(screen.getByRole("button", { name: "批准" }));
     await waitFor(() => {
       expect(approveRun).toHaveBeenCalledWith("run-1", {
-        by: "tester",
         comment: undefined,
         gate: "req",
       });
@@ -49,7 +47,6 @@ describe("ApprovalAction", () => {
     fireEvent.click(screen.getByRole("button", { name: "驳回" }));
     await waitFor(() => {
       expect(rejectRun).toHaveBeenCalledWith("run-1", {
-        by: "tester",
         gate: "req",
         reason: "Needs more detail",
       });

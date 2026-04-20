@@ -42,6 +42,12 @@ async def ensure_worktree(
         if not run_suffix
         else f"feat/{ticket}-{phase}-{run_suffix}"
     )
+    # Defense in depth: route-layer validates repo_path against workspace_root,
+    # but guard against a repo_path that resolves to a filesystem root (which
+    # would place the worktree directory outside any expected boundary).
+    resolved_repo = Path(repo_path).resolve()
+    if resolved_repo.parent == resolved_repo:
+        raise ValueError(f"repo_path cannot be a filesystem root: {repo_path}")
     wt_path = str(Path(repo_path).parent / f".worktrees/{ticket}-{phase}")
 
     # Check if worktree already exists.

@@ -162,6 +162,9 @@ cat {repo_path}/cooagents.log
 
 | 原因 | 修复 |
 |------|------|
+| 日志包含 `AuthConfigError: Missing required auth env vars` | 未加载 `.env`。启动命令前加 `set -a && . ./.env && set +a` 或使用 systemd EnvironmentFile |
+| 日志包含 `JWT_SECRET must be at least 32 characters` | 重新运行 `python scripts/generate_password_hash.py` 生成完整 env 并覆盖 `.env` |
+| 日志包含 `ADMIN_PASSWORD_HASH is not an argon2 hash` | `.env` 里的哈希被截断或手改过；重新生成 |
 | DB 初始化失败 | 检查 `.coop/state.db` 是否存在，重新执行初始化 |
 | import 错误（缺少依赖） | 重新执行 `pip install -r requirements.txt` |
 | uvicorn 未安装 | 确认 venv 激活后安装：`pip install uvicorn[standard]` |
@@ -210,3 +213,54 @@ cat {repo_path}/cooagents.log
 **原因：** 用户手动创建了目录结构而非通过 `git clone`
 
 **修复：** 必须从 git 仓库 clone 完整代码。手动创建目录结构不受支持。
+
+---
+
+## 14. API 调用返回 401
+
+**症状：** skill 执行 `curl ... /api/v1/...` 得到 `{"error":"unauthenticated"}`
+
+**诊断：**
+```bash
+echo $AGENT_API_TOKEN | head -c 8
+```
+应该输出非空前缀。
+
+**修复：**
+
+| 原因 | 修复 |
+|------|------|
+| OpenClaw 进程未注入 `AGENT_API_TOKEN` | 回到阶段 ⑥ 的"注入 AGENT_API_TOKEN 到 OpenClaw"步骤,重启 OpenClaw |
+| `.env` 丢失 `AGENT_API_TOKEN` 行 | `grep AGENT_API_TOKEN {repo_path}/.env`,缺则重新生成 |
+| cooagents 启动时未加载 `.env` | 改用 `set -a && . ./.env && set +a` 启动 |
+| OpenClaw 版本不支持 `env.*` 键 | 改写到 systemd EnvironmentFile 或启动脚本 |
+
+---
+
+## 15. API 调用返回 400 `repo_path must live under workspace_root`
+
+**症状：** 创建任务或 ensure 仓库时返回 400
+
+**修复：** 把仓库放到 `{workspace_root}`（默认 `~/cooagents-workspace`）下,或在 `config/settings.yaml` 里改 `security.workspace_root` 指向实际目录,然后重启 cooagents。
+
+---
+
+## 16. API 调用返回 400 `host not in allowlist`
+
+**症状：** `ensure_repo` 或 create_run 带 `repo_url` 时返回 400
+
+**原因：** `repo_url` 的 host 不在 `github.com` / `gitee.com` 白名单
+
+**修复：** 在 `config/settings.yaml` 的 `security.allowed_repo_hosts` 追加目标 host(如企业 GitLab),重启 cooagents。
+
+---
+
+## 17. API 调用返回 429
+
+**症状：** 连续调用后返回 `{"error":"rate_limited"}`
+
+**修复：** 等 60 秒再试。cooagents 的默认限流:
+- `/runs` POST 10/min
+- `/runs/upload-requirement` 5/min
+- `/repos/ensure` 10/min
+- 全局 300/min

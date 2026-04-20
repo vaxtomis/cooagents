@@ -287,14 +287,14 @@ export interface CreateRunPayload {
   dev_agent?: string;
 }
 
+// The server derives `by` from the authenticated session; clients must not
+// send it, so it's omitted from the payload shape.
 export interface ApprovePayload {
   gate: GateName;
-  by: string;
   comment?: string;
 }
 
 export interface RejectPayload {
   gate: GateName;
-  by: string;
   reason: string;
 }
