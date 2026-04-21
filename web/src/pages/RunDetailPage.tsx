@@ -56,7 +56,7 @@ function SectionPanel({
   return (
     <section className="rounded-[32px] border border-border bg-panel p-6 shadow-panel">
       <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
-      <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
+      <h2 className="mt-2 font-serif text-[1.6rem] font-medium leading-snug tracking-tight text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
   );
@@ -543,7 +543,7 @@ export function RunDetailPage() {
   if (!runId) {
     return (
       <section className="rounded-[32px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
-        <h2 className="text-lg font-semibold text-copy">缺少运行 ID</h2>
+        <h2 className="font-serif text-xl font-medium leading-tight tracking-tight text-copy">缺少运行 ID</h2>
         <p className="mt-2 text-sm text-muted">请从概览或运行列表进入以查看具体运行。</p>
       </section>
     );
@@ -553,7 +553,7 @@ export function RunDetailPage() {
   if (error) {
     return (
       <section className="rounded-[32px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
-        <h2 className="text-lg font-semibold text-copy">运行详情加载失败</h2>
+        <h2 className="font-serif text-xl font-medium leading-tight tracking-tight text-copy">运行详情加载失败</h2>
         <p className="mt-2 text-sm text-muted">重试查询以恢复产物、任务和追踪数据。</p>
         <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void refreshAll()} type="button">
           重试

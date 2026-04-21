@@ -29,7 +29,7 @@ function SectionPanel({
   return (
     <section className="rounded-[32px] border border-border bg-panel p-6 shadow-panel">
       <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
-      <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
+      <h2 className="mt-2 font-serif text-[1.6rem] font-medium leading-snug tracking-tight text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
   );
@@ -210,7 +210,7 @@ export function MergeQueuePage() {
       <SectionPanel kicker="队列清单" title="合并队列">
         {queueQuery.error || enrichedQuery.error ? (
           <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
-            <h3 className="text-base font-semibold text-copy">合并队列加载失败</h3>
+            <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">合并队列加载失败</h3>
             <p className="mt-2 text-sm text-muted">
               重试查询以恢复合并状态和运行上下文。
             </p>

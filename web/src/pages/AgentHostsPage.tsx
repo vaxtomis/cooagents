@@ -41,7 +41,7 @@ function SectionPanel({
   return (
     <section className="rounded-[32px] border border-border bg-panel p-6 shadow-panel">
       <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
-      <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
+      <h2 className="mt-2 font-serif text-[1.6rem] font-medium leading-snug tracking-tight text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
   );
@@ -219,7 +219,7 @@ export function AgentHostsPage() {
       <SectionPanel kicker="主机注册" title="Agent 主机配置">
         {hostsQuery.error ? (
           <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
-            <h3 className="text-base font-semibold text-copy">主机清单加载失败</h3>
+            <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">主机清单加载失败</h3>
             <p className="mt-2 text-sm text-muted">重试查询以恢复主机注册表。</p>
             <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void refreshHosts()} type="button">
               重试

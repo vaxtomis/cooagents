@@ -35,7 +35,7 @@ function SectionPanel({
   return (
     <section className="rounded-[32px] border border-border bg-panel p-6 shadow-panel">
       <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
-      <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
+      <h2 className="mt-2 font-serif text-[1.6rem] font-medium leading-snug tracking-tight text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
   );
@@ -43,6 +43,33 @@ function SectionPanel({
 
 function EmptyState({ copy }: { copy: string }) {
   return <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">{copy}</p>;
+}
+
+function HeroStat({
+  title,
+  value,
+  caption,
+}: {
+  title: string;
+  value: string;
+  caption: string;
+}) {
+  return (
+    <section className="relative overflow-hidden rounded-[32px] border border-[color:var(--color-border-dark)] bg-[color:var(--color-panel-deep)] p-8 shadow-panel">
+      <div className="pointer-events-none absolute -right-24 -top-24 size-72 rounded-full bg-accent/20 blur-3xl" aria-hidden />
+      <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-[color:var(--color-accent-soft)]">
+        {title}
+      </p>
+      <div className="mt-6 flex items-end gap-4">
+        <div className="font-serif text-[5rem] font-medium leading-none tracking-tight text-[color:var(--color-ink-invert)] [font-variant-numeric:tabular-nums]">
+          {value}
+        </div>
+      </div>
+      <p className="mt-5 max-w-md text-sm leading-relaxed text-[color:var(--color-ink-invert-soft)]">
+        {caption}
+      </p>
+    </section>
+  );
 }
 
 function getPendingApprovals(runs: RunRecord[]) {
@@ -87,7 +114,7 @@ export function DashboardPage() {
   if (hasError) {
     return (
       <section className="rounded-[32px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
-        <h2 className="text-lg font-semibold text-copy">仪表盘数据加载失败</h2>
+        <h2 className="font-serif text-xl font-medium leading-tight tracking-tight text-copy">仪表盘数据加载失败</h2>
         <p className="mt-2 text-sm text-muted">重试查询以恢复概览页面。</p>
         <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void refreshAll()} type="button">
           重试
@@ -116,9 +143,13 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-5">
-        <StatCard title={RUNNING_LABEL} value={runningRuns.length.toString().padStart(2, "0")} />
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 xl:[&>*:first-child]:col-span-2 xl:[&>*:first-child]:row-span-1">
+        <HeroStat
+          title={RUNNING_LABEL}
+          value={runningRuns.length.toString().padStart(2, "0")}
+          caption="当前并发运行的 Agent 会话数，每 15 秒自动刷新。"
+        />
         <StatCard title={PENDING_APPROVAL_LABEL} value={pendingApprovals.length.toString().padStart(2, "0")} />
         <StatCard title={MERGING_LABEL} value={mergingRuns.length.toString().padStart(2, "0")} />
         <StatCard title={FAILED_LABEL} value={failedRuns.length.toString().padStart(2, "0")} />

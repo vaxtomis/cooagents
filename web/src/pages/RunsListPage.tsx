@@ -44,7 +44,7 @@ function SectionPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
-          <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
+          <h2 className="mt-2 font-serif text-[1.6rem] font-medium leading-snug tracking-tight text-copy">{title}</h2>
         </div>
       </div>
       <div className="mt-5">{children}</div>
@@ -247,7 +247,7 @@ function CreateRunDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-copy/40 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-lg rounded-[32px] border border-border bg-panel p-6 shadow-panel" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold text-copy">创建任务</h2>
+        <h2 className="font-serif text-xl font-medium leading-tight tracking-tight text-copy">创建任务</h2>
         <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
           <label className="block space-y-1 text-sm text-muted">
             <span>工单 <span className="text-red-400">*</span></span>
@@ -484,7 +484,7 @@ export function RunsListPage() {
         <div className="mt-5">
           {runs.error ? (
             <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
-              <h3 className="text-base font-semibold text-copy">运行数据加载失败</h3>
+              <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">运行数据加载失败</h3>
               <p className="mt-2 text-sm text-muted">请重试查询或调整筛选条件。</p>
               <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void runs.mutate()} type="button">
                 重试
