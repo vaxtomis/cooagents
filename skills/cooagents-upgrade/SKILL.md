@@ -2,6 +2,11 @@
 name: cooagents-upgrade
 description: 升级 cooagents 服务，拉取最新代码、更新依赖、重新构建 Dashboard、重启服务并验证状态。当用户提及升级、更新 cooagents 时触发。
 user-invocable: true
+required_environment_variables:
+  - name: AGENT_API_TOKEN
+    prompt: "cooagents 服务令牌（由 cooagents-setup 阶段 ③ 生成）"
+    help: "/api/v1/runs?status=running 查询运行中任务时需要。"
+    required_for: "cooagents-upgrade"
 metadata:
   {
     "openclaw":

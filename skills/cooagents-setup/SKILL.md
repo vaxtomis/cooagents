@@ -2,6 +2,11 @@
 name: cooagents-setup
 description: 安装并启动 cooagents 服务，检测环境、安装依赖、构建 Dashboard、启动服务并注册本地 Agent 主机。当用户提及安装、部署、启动 cooagents 时触发。
 user-invocable: true
+required_environment_variables:
+  - name: AGENT_API_TOKEN
+    prompt: "cooagents 服务令牌（由本 Skill 阶段 ③ 自动生成并写入）"
+    help: "首次安装时留空即可；安装过程会生成并写回 {repo_path}/.env 及宿主 Agent 的 env。"
+    optional: true
 metadata:
   {
     "openclaw":

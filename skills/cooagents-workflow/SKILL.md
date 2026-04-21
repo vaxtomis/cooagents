@@ -2,6 +2,11 @@
 name: cooagents-workflow
 description: 管理 cooagents 多 Agent 协作工作流 — 通过 exec + curl 编排 Claude Code/Codex 完成从需求到合并的全生命周期。当用户提及任务创建、需求提交、设计/开发审批、任务状态查询、产物查看等工作流操作时触发。
 user-invocable: true
+required_environment_variables:
+  - name: AGENT_API_TOKEN
+    prompt: "cooagents 服务令牌（来自 cooagents .env 的 AGENT_API_TOKEN）"
+    help: "由 cooagents-setup 阶段 ③ 生成；所有 /api/v1/* 请求都需要它做 X-Agent-Token 鉴权。"
+    required_for: "cooagents-workflow"
 metadata:
   {
     "openclaw":
@@ -139,20 +144,20 @@ cooagents 会把工作流事件推送到**已配置的宿主 Agent**。目前支
 
 通过宿主 Agent 推送的事件（OPENCLAW_EVENTS 白名单，Hermes 侧由 `events` 字段控制）：
 
-| 事件                  | 处理动作                                    |
-|-----------------------|---------------------------------------------|
+| 事件                  | 处理动作                                                |
+|-----------------------|-----------------------------------------------------|
 | `gate.waiting`        | 触发人工交互流程；`*_REVIEW` 需先发送云文件，`MERGE_CONFLICT` 发送冲突通知 |
-| `job.completed`       | curl POST tick                              |
-| `job.failed` / `job.timeout` | 参见 error-handling.md              |
-| `job.interrupted`     | 同 job.failed                               |
-| `merge.conflict`      | exec curl GET /conflicts → 回复��突文件列表 |
-| `merge.completed`     | 确认完成（随后 run.completed 到达）         |
-| `run.completed`       | 回复完成通知                                |
-| `run.cancelled`       | 回复取消通知                                |
-| `host.online`         | 对所有等待中的任务执行 tick                 |
-| `host.offline`        | 健康检查发现主机离线                        |
-| `host.unavailable`    | 分派任务时无可用主机                        |
-| `agent.fallback`      | 首选 Agent 无可用主机，已自动切换到备选 Agent；通知用户实际使用的 Agent 类型 |
+| `job.completed`       | curl POST tick                                      |
+| `job.failed` / `job.timeout` | 参见 error-handling.md                                |
+| `job.interrupted`     | 同 job.failed                                        |
+| `merge.conflict`      | exec curl GET /conflicts → 回复冲突文件列表                 |
+| `merge.completed`     | 确认完成（随后 run.completed 到达）                           |
+| `run.completed`       | 回复完成通知                                              |
+| `run.cancelled`       | 回复取消通知                                              |
+| `host.online`         | 对所有等待中的任务执行 tick                                    |
+| `host.offline`        | 健康检查发现主机离线                                          |
+| `host.unavailable`    | 分派任务时无可用主机                                          |
+| `agent.fallback`      | 首选 Agent 无可用主机，已自动切换到备选 Agent；通知用户实际使用的 Agent 类型    |
 
 仅通过通用 webhook（含 Hermes 路由）推送、**不进入** OpenClaw `/hooks/agent` 的事件：
 
@@ -165,7 +170,7 @@ cooagents 会把工作流事件推送到**已配置的宿主 Agent**。目前支
 
 ## F. 诊断 API（自主排查）
 
-当任务出现异常时，可通���诊断 API 主动拉取链路信��，无需等待 webhook 推送。
+当任务出现异常时，可通过诊断 API 主动拉取链路信息，无需等待 webhook 推送。
 
 具体的 curl 命令和响应格式见 `references/api-playbook.md` §13。
 
@@ -185,8 +190,8 @@ cooagents 会把工作流事件推送到**已配置的宿主 Agent**。目前支
 ## H. 操作原则
 
 - **最小干预**：能自动推进的阶段不打扰用户
-- **审批必须等待**：`*_REVIEW` 和 `MERGE_CONFLICT` 阶段必须等用户��确回复后再操作
-- **云文件优先**：进入 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW` 后，必须先通过 `feishu_doc` 工具创建���文件并写入正文，再发送审批文本
+- **审批必须等待**：`*_REVIEW` 和 `MERGE_CONFLICT` 阶段必须等用户明确回复后再操作
+- **云文件优先**：进入 `REQ_REVIEW` / `DESIGN_REVIEW` / `DEV_REVIEW` 后，必须先通过 `feishu_doc` 工具创建云文件并写入正文，再发送审批文本
 - **幂等重试**：网络错误时可重试 tick，状态机保证幂等
 - **错误上报**：FAILED 阶段参考 error-handling.md 处理，必要时告知用户
 - **审计留痕**：approve/reject/resolve-conflict 的审计身份由服务端从 `X-Agent-Token` 自动派生为 `"agent"`；具体触发用户追溯到发起 webhook 的消息
@@ -219,16 +224,16 @@ cooagents 会把工作流事件推送到**已配置的宿主 Agent**。目前支
 gate → kind / 标题 / UI 标签映射：
 
 | gate | kind | 文档标题 | label | 文档类型 | 下一阶段 |
-|------|------|----------|-------|----------|----------|
+|------|------|----------|-------|------|----------|
 | req | req | REQ-{ticket} | 需求审批 | 需求文档 | 设计阶段 |
 | design | design | DES-{ticket} | 设计审批 | 设计文档 | 开发阶段 |
-| dev | test-report | TEST-REPORT-{ticket} | 开发审批 | ���试报告 | 合并阶段 |
+| dev | test-report | TEST-REPORT-{ticket} | 开发审批 | 测试报告 | 合并阶段 |
 
 `owner_open_id`：使用消息中的 `notify_to` 字段；为空时可省略。
 
 ### I.2 失败处理
 
-- `feishu_doc` 调用失败 → 回复 "⚠️ 飞书云文件创���失败：{error}"，然后仍发送审批消息（不含链接），确保流程不阻断
+- `feishu_doc` 调用失败 → 回复 "⚠️ 飞书云文件创建失败：{error}"，然后仍发送审批消息（不含链接），确保流程不阻断
 - **禁止只返回摘要或状态概览** — 收到 gate.waiting 必须创建云文档并发送审批消息
 
 ### I.3 自检
