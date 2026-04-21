@@ -17,15 +17,17 @@ export function RunCard({
   onClick?: () => void;
 }) {
   const content = (
-    <article className="rounded-[24px] border border-border bg-panel p-5 shadow-panel transition hover:border-border-strong hover:bg-panel-strong/80">
+    <article className="rounded-[24px] border border-border bg-panel p-5 shadow-whisper transition hover:shadow-[0_0_0_1px_var(--color-ring-warm),0_12px_32px_rgba(20,20,19,0.06)]">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="font-mono text-sm text-copy">{ticket}</p>
-          <p className="mt-2 text-sm leading-6 text-muted">{summary}</p>
+        <div className="min-w-0">
+          <p className="font-mono text-[13px] font-medium tracking-tight text-copy">
+            {ticket}
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-muted">{summary}</p>
         </div>
         <StatusBadge status={status} />
       </div>
-      <div className="mt-4">
+      <div className="mt-5">
         <StageProgress failedAtStage={failedAtStage} stage={stage} />
       </div>
     </article>

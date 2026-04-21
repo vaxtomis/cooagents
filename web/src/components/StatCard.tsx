@@ -12,14 +12,22 @@ export function StatCard({
   icon?: ReactNode;
 }) {
   return (
-    <section className="rounded-[24px] border border-border bg-panel p-5 shadow-panel">
-      <p className="text-xs uppercase tracking-[0.24em] text-muted/80">{title}</p>
-      <div className="mt-4 flex items-end justify-between gap-3">
+    <section className="rounded-[24px] border border-border bg-panel p-6 shadow-whisper transition hover:shadow-panel">
+      <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">
+        {title}
+      </p>
+      <div className="mt-5 flex items-end justify-between gap-3">
         <div>
-          <div className="font-mono text-4xl font-bold text-copy">{value}</div>
-          {subtitle ? <p className="mt-2 text-sm text-muted">{subtitle}</p> : null}
+          <div className="font-serif text-[3rem] font-medium leading-none tracking-tight text-copy [font-variant-numeric:tabular-nums]">
+            {value}
+          </div>
+          {subtitle ? <p className="mt-3 text-sm leading-relaxed text-muted">{subtitle}</p> : null}
         </div>
-        {icon ? <div className="flex size-10 items-center justify-center rounded-2xl border border-border bg-panel-strong/40 text-accent">{icon}</div> : null}
+        {icon ? (
+          <div className="flex size-10 items-center justify-center rounded-xl border border-border-strong bg-panel-strong/50 text-accent">
+            {icon}
+          </div>
+        ) : null}
       </div>
     </section>
   );

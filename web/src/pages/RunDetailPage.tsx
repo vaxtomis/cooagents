@@ -257,7 +257,7 @@ function ArtifactModal({
             {/* Download dropdown */}
             <div className="relative">
               <button
-                className="rounded-lg border border-border-strong bg-panel-strong/50 px-3.5 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:opacity-40"
+                className="rounded-lg border border-border-strong bg-panel-strong/50 px-3.5 py-2 text-xs font-medium text-copy transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)] disabled:opacity-40"
                 disabled={artifactState.loading || !artifactState.content}
                 onClick={() => setShowDownloadMenu((v) => !v)}
                 type="button"
@@ -284,7 +284,7 @@ function ArtifactModal({
               ) : null}
             </div>
             <button
-              className="rounded-lg border border-border-strong bg-panel-strong/50 px-2.5 py-2 text-xs text-muted transition hover:border-copy/20 hover:bg-panel-strong/70"
+              className="rounded-lg border border-border-strong bg-panel-strong/50 px-2.5 py-2 text-xs text-muted transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:text-copy hover:shadow-[0_0_0_1px_var(--color-ring-warm)]"
               onClick={onClose}
               type="button"
             >
@@ -373,7 +373,7 @@ function ArtifactsPanel({
                   </p>
                 </div>
                 <button
-                  className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+                  className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)]"
                   onClick={() => void onInspect(artifact)}
                   type="button"
                 >
@@ -417,7 +417,7 @@ function JobsPanel({
                 </p>
               </div>
               <button
-                className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+                className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)]"
                 onClick={() => void onLoadOutput(job)}
                 type="button"
               >

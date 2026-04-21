@@ -308,7 +308,7 @@ function CreateRunDialog({
           {error && <p className="rounded-xl bg-red-500/10 px-4 py-2 text-sm text-red-400">{error}</p>}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="rounded-lg border border-border-strong bg-panel-strong/50 px-5 py-2.5 text-sm font-medium text-copy hover:bg-panel-strong/70">取消</button>
+            <button type="button" onClick={onClose} className="rounded-lg border border-border-strong bg-panel-strong/50 px-5 py-2.5 text-sm font-medium text-copy transition hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)]">取消</button>
             <button type="submit" disabled={submitting} className="rounded-xl bg-copy px-5 py-2.5 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] hover:bg-copy/90 disabled:opacity-50">
               {submitting ? "创建中..." : "创建"}
             </button>
@@ -441,7 +441,7 @@ export function RunsListPage() {
             查询
           </button>
           <button
-            className="rounded-lg border border-border-strong bg-panel-strong/50 px-4 py-3 text-sm font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+            className="rounded-lg border border-border-strong bg-panel-strong/50 px-4 py-3 text-sm font-medium text-copy transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)]"
             onClick={() => void runs.mutate()}
             type="button"
           >
@@ -462,7 +462,7 @@ export function RunsListPage() {
           <p>{summary}</p>
           <div className="flex items-center gap-2">
             <button
-              className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)] disabled:cursor-not-allowed disabled:opacity-40"
               disabled={page <= 1}
               onClick={() => commit(applied, page - 1)}
               type="button"
@@ -471,7 +471,7 @@ export function RunsListPage() {
             </button>
             <span className="rounded-full border border-border bg-panel px-3 py-2 text-xs text-muted">{`第 ${page} / ${totalPages} 页`}</span>
             <button
-              className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)] disabled:cursor-not-allowed disabled:opacity-40"
               disabled={page >= totalPages || total === 0}
               onClick={() => commit(applied, page + 1)}
               type="button"

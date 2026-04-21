@@ -255,14 +255,14 @@ export function MergeQueuePage() {
 
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
-                      className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+                      className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)]"
                       onClick={() => setSelectedRunId(item.run_id)}
                       type="button"
                     >
                       {`查看 ${item.run_id}`}
                     </button>
                     <button
-                      className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)] disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={pendingState !== undefined && pendingState !== null}
                       onClick={() => void handleMerge(item.run_id, item.priority)}
                       type="button"
@@ -344,7 +344,7 @@ export function MergeQueuePage() {
                       冲突详情刷新失败，显示队列快照。
                     </p>
                     <button
-                      className="mt-3 rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+                      className="mt-3 rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-[color:var(--color-ring-warm)] hover:bg-panel-strong hover:shadow-[0_0_0_1px_var(--color-ring-warm)]"
                       onClick={() => void conflictsQuery.mutate()}
                       type="button"
                     >
