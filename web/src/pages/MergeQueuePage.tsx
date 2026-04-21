@@ -49,7 +49,7 @@ function LoadingSkeleton() {
       {Array.from({ length: 3 }, (_, index) => (
         <div
           key={index}
-          className="h-32 animate-pulse rounded-[24px] border border-border bg-panel-strong/70"
+          className="h-32 animate-pulse rounded-2xl border border-border bg-panel-strong/70"
         />
       ))}
     </div>
@@ -209,7 +209,7 @@ export function MergeQueuePage() {
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
       <SectionPanel kicker="队列清单" title="合并队列">
         {queueQuery.error || enrichedQuery.error ? (
-          <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
+          <div className="rounded-2xl border border-danger/15 bg-danger/8 p-5">
             <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">合并队列加载失败</h3>
             <p className="mt-2 text-sm text-muted">
               重试查询以恢复合并状态和运行上下文。
@@ -235,7 +235,7 @@ export function MergeQueuePage() {
 
               return (
                 <article
-                  className={`rounded-[24px] border bg-panel-strong/80 p-4 transition ${
+                  className={`rounded-2xl border bg-panel-strong/80 p-4 transition ${
                     selectedState
                       ? "border-accent/30 shadow-[0_0_0_1px_rgba(168,85,247,0.22)]"
                       : "border-border"
@@ -288,7 +288,7 @@ export function MergeQueuePage() {
       <SectionPanel kicker="选中项" title="队列详情">
         {selected ? (
           <div className="space-y-4">
-            <div className="rounded-[24px] border border-border bg-panel-strong/80 p-4">
+            <div className="rounded-2xl border border-border bg-panel-strong/80 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="font-mono text-sm text-copy">
@@ -325,7 +325,7 @@ export function MergeQueuePage() {
             </label>
 
             {selected.status === "conflict" ? (
-              <div className="rounded-[24px] border border-warning/20 bg-warning/10 p-4">
+              <div className="rounded-2xl border border-warning/20 bg-warning/10 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-copy">检测到冲突</p>
@@ -353,7 +353,7 @@ export function MergeQueuePage() {
                   </div>
                 ) : null}
 
-                <div className="mt-4 rounded-[24px] border border-border bg-panel-strong/80 p-4">
+                <div className="mt-4 rounded-2xl border border-border bg-panel-strong/80 p-4">
                   <p className="text-sm font-medium text-copy">冲突文件</p>
                   {selected.status === "conflict" && conflictsQuery.isLoading && !conflictsQuery.data ? (
                     <p className="mt-3 text-sm text-muted">加载冲突详情...</p>
@@ -380,7 +380,7 @@ export function MergeQueuePage() {
                 </button>
               </div>
             ) : (
-              <div className="rounded-[24px] border border-border bg-panel-strong/80 p-4">
+              <div className="rounded-2xl border border-border bg-panel-strong/80 p-4">
                 <p className="text-sm font-medium text-copy">冲突文件</p>
                 {selected.conflict_files.length === 0 ? (
                   <p className="mt-3 text-sm text-muted">未报告冲突文件</p>

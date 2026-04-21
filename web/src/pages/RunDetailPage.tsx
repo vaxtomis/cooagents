@@ -364,7 +364,7 @@ function ArtifactsPanel({
       ) : (
         <div className="space-y-3">
           {artifacts.map((artifact) => (
-            <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={artifact.id}>
+            <article className="rounded-2xl border border-border bg-panel-strong/80 p-4" key={artifact.id}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="font-mono text-sm text-copy">{artifact.path}</p>
@@ -408,7 +408,7 @@ function JobsPanel({
       {jobs.map((job) => {
         const outputState = jobOutputs[job.id] ?? {};
         return (
-          <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={job.id}>
+          <article className="rounded-2xl border border-border bg-panel-strong/80 p-4" key={job.id}>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="font-mono text-sm text-copy">{job.id}</p>
@@ -442,7 +442,7 @@ function TraceEvents({ trace }: { trace: RunTraceResponse }) {
   return (
     <div className="space-y-3">
       {trace.events.map((event, index) => (
-        <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={`${event.event_type}-${event.created_at}-${index}`}>
+        <article className="rounded-2xl border border-border bg-panel-strong/80 p-4" key={`${event.event_type}-${event.created_at}-${index}`}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-copy">{event.event_type}</p>
@@ -469,7 +469,7 @@ function StageHistoryPanel({ steps }: { steps: StepRecord[] | undefined }) {
   return (
     <div className="space-y-3">
       {orderedSteps.map((step, index) => (
-        <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={`${step.from_stage}-${step.to_stage}-${step.created_at}-${index}`}>
+        <article className="rounded-2xl border border-border bg-panel-strong/80 p-4" key={`${step.from_stage}-${step.to_stage}-${step.created_at}-${index}`}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-copy">{`${step.from_stage} -> ${step.to_stage}`}</p>

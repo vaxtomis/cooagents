@@ -128,7 +128,7 @@ export function DashboardPage() {
       <div className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-5">
           {Array.from({ length: 5 }, (_, index) => (
-            <div key={index} className="h-32 animate-pulse rounded-[24px] border border-border bg-panel" />
+            <div key={index} className="h-32 animate-pulse rounded-2xl border border-border bg-panel" />
           ))}
         </div>
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -183,7 +183,7 @@ export function DashboardPage() {
             ) : (
               <div className="space-y-3">
                 {pendingApprovals.map((run) => (
-                  <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={run.id}>
+                  <article className="rounded-2xl border border-border bg-panel-strong/80 p-4" key={run.id}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="font-mono text-sm text-copy">{run.ticket}</p>
@@ -224,7 +224,7 @@ export function DashboardPage() {
 
 function HostSummaryCard({ host }: { host: AgentHost }) {
   return (
-    <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4">
+    <article className="rounded-2xl border border-border bg-panel-strong/80 p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-copy">{host.host}</p>

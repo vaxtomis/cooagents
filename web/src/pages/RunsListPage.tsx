@@ -113,7 +113,7 @@ function LoadingSkeleton() {
   return (
     <div className="space-y-3">
       {Array.from({ length: 5 }, (_, index) => (
-        <div className="h-28 animate-pulse rounded-[24px] border border-border bg-panel-strong/70" key={index} />
+        <div className="h-28 animate-pulse rounded-2xl border border-border bg-panel-strong/70" key={index} />
       ))}
     </div>
   );
@@ -121,7 +121,7 @@ function LoadingSkeleton() {
 
 function RunRow({ run, onOpen }: { run: RunRecord; onOpen: (runId: string) => void }) {
   return (
-    <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4">
+    <article className="rounded-2xl border border-border bg-panel-strong/80 p-4">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
@@ -483,7 +483,7 @@ export function RunsListPage() {
 
         <div className="mt-5">
           {runs.error ? (
-            <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
+            <div className="rounded-2xl border border-danger/15 bg-danger/8 p-5">
               <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">运行数据加载失败</h3>
               <p className="mt-2 text-sm text-muted">请重试查询或调整筛选条件。</p>
               <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void runs.mutate()} type="button">

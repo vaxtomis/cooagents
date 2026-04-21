@@ -143,8 +143,8 @@ function ShellLayout() {
 
   return (
     <div className="min-h-screen bg-void text-copy">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1500px] gap-6 px-4 py-5 md:px-8 md:py-8">
-        <aside className="hidden w-[256px] shrink-0 flex-col rounded-[24px] border border-border bg-panel p-5 shadow-whisper md:flex">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1280px] gap-6 px-4 py-5 md:px-8 md:py-8">
+        <aside className="hidden w-[256px] shrink-0 flex-col rounded-[32px] border border-border bg-panel p-6 shadow-whisper md:flex">
           <div className="flex items-center gap-3 px-1 pb-2">
             <div className="flex size-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
               <Bot className="size-5" strokeWidth={1.9} />
@@ -192,17 +192,17 @@ function ShellLayout() {
         </aside>
 
         <div className="flex min-h-[calc(100vh-2rem)] flex-1 flex-col gap-6">
-          <header className="overflow-hidden rounded-[24px] border border-border bg-panel px-6 py-8 shadow-whisper md:px-10 md:py-10">
+          <header className="overflow-hidden rounded-[32px] border border-border bg-panel px-6 py-10 shadow-whisper md:px-12 md:py-12">
             <div className="flex flex-col gap-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-accent">
                     {meta.eyebrow}
                   </p>
-                  <h1 className="mt-3 font-serif text-[2.25rem] font-medium leading-[1.15] tracking-tight text-copy md:text-[2.75rem]">
+                  <h1 className="mt-3 font-serif text-[2.5rem] font-medium leading-[1.15] tracking-tight text-copy md:text-[3.25rem]">
                     {meta.title}
                   </h1>
-                  <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-muted md:text-base">
+                  <p className="mt-5 max-w-2xl text-[15px] leading-relaxed text-muted md:text-base">
                     {meta.description}
                   </p>
                 </div>

@@ -55,7 +55,7 @@ function LoadingSkeleton() {
   return (
     <div className="space-y-3">
       {Array.from({ length: 3 }, (_, index) => (
-        <div key={index} className="h-48 animate-pulse rounded-[24px] border border-border bg-panel-strong/70" />
+        <div key={index} className="h-48 animate-pulse rounded-2xl border border-border bg-panel-strong/70" />
       ))}
     </div>
   );
@@ -218,7 +218,7 @@ export function AgentHostsPage() {
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
       <SectionPanel kicker="主机注册" title="Agent 主机配置">
         {hostsQuery.error ? (
-          <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
+          <div className="rounded-2xl border border-danger/15 bg-danger/8 p-5">
             <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">主机清单加载失败</h3>
             <p className="mt-2 text-sm text-muted">重试查询以恢复主机注册表。</p>
             <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void refreshHosts()} type="button">
@@ -237,7 +237,7 @@ export function AgentHostsPage() {
 
               return (
                 <article
-                  className={`flex flex-col rounded-[24px] border bg-panel-strong/80 p-5 transition ${
+                  className={`flex flex-col rounded-2xl border bg-panel-strong/80 p-5 transition ${
                     isSelected ? "border-accent/30 shadow-[0_0_0_1px_rgba(168,85,247,0.22)]" : "border-border"
                   }`}
                   key={host.id}

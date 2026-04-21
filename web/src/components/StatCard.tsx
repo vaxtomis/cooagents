@@ -12,7 +12,7 @@ export function StatCard({
   icon?: ReactNode;
 }) {
   return (
-    <section className="rounded-[24px] border border-border bg-panel p-6 shadow-whisper transition hover:shadow-panel">
+    <section className="rounded-2xl border border-border bg-panel p-6 shadow-whisper transition hover:shadow-panel">
       <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent">
         {title}
       </p>
