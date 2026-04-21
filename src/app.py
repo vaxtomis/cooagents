@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,6 +26,7 @@ from src.state_machine import StateMachine
 from src.trace_emitter import TraceEmitter
 from src.trace_middleware import TraceMiddleware
 from src.webhook_notifier import WebhookNotifier
+from src.workspace_manager import WorkspaceManager
 
 
 @asynccontextmanager
@@ -50,6 +52,25 @@ async def lifespan(app: FastAPI):
     consumer_task = asyncio.create_task(trace_emitter.start_consumer()) if settings.tracing.enabled else None
 
     artifacts = ArtifactManager(db, project_root=project_root)
+    workspaces = WorkspaceManager(
+        db,
+        project_root=project_root,
+        workspaces_root=settings.security.resolved_workspace_root(),
+    )
+    # Startup reconcile — FS wins. Never fail the boot on a reconcile error;
+    # operator can re-trigger via POST /api/v1/workspaces/sync later.
+    _wlog = logging.getLogger(__name__)
+    try:
+        report = await workspaces.reconcile()
+        if report["fs_only"] or report["db_only"]:
+            _wlog.warning(
+                "workspace reconcile: fs_only=%s db_only=%s",
+                report["fs_only"],
+                report["db_only"],
+            )
+    except Exception:
+        _wlog.exception("workspace reconcile failed; continuing startup")
+
     hosts = HostManager(db)
     jobs = JobManager(db, coop_dir=coop_dir, project_root=project_root)
     webhooks = WebhookNotifier(
@@ -107,6 +128,7 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     app.state.sm = sm
     app.state.artifacts = artifacts
+    app.state.workspaces = workspaces
     app.state.hosts = hosts
     app.state.jobs = jobs
     app.state.executor = executor
@@ -237,6 +259,7 @@ from routes.repos import router as repos_router
 from routes.runs import router as runs_router
 from routes.sse import create_sse_router
 from routes.webhooks import router as webhooks_router
+from routes.workspaces import router as workspaces_router
 
 # Auth endpoints are public. Everything else requires a valid session.
 auth_required = [Depends(get_current_user)]
@@ -250,4 +273,5 @@ app.include_router(repos_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(create_events_router(), prefix="/api/v1", dependencies=auth_required)
 app.include_router(create_sse_router(), prefix="/api/v1", dependencies=auth_required)
 app.include_router(create_diagnostics_router(), prefix="/api/v1", dependencies=auth_required)
+app.include_router(workspaces_router, prefix="/api/v1", dependencies=auth_required)
 mount_dashboard_spa(app)

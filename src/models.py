@@ -1,6 +1,7 @@
+import re
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -247,4 +248,38 @@ class WorkspaceEvent(BaseModel):
     correlation_id: str | None = None
     payload: dict | None = None
     ts: str
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Workspace lifecycle DTOs
+# ---------------------------------------------------------------------------
+
+# Kebab-case slug, 1-63 chars, no leading/trailing dash, no consecutive dashes.
+# Mirrors Docker/k8s naming rules. Single source of truth: keep in sync with
+# src.workspace_manager._SLUG_RE (the manager enforces the same shape as
+# defense-in-depth at the FS boundary).
+_WORKSPACE_SLUG_RE = re.compile(
+    r"^[a-z0-9](?:[a-z0-9]|-(?!-)){0,61}[a-z0-9]$|^[a-z0-9]$"
+)
+
+
+class CreateWorkspaceRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=120)
+    slug: str
+
+    @field_validator("slug")
+    @classmethod
+    def _check_slug(cls, v: str) -> str:
+        if not _WORKSPACE_SLUG_RE.match(v):
+            raise ValueError(
+                "slug must be kebab-case (1-63 chars, no leading/trailing dash, "
+                "no consecutive dashes)"
+            )
+        return v
+
+
+class WorkspaceSyncReport(BaseModel):
+    fs_only: list[str] = Field(default_factory=list)
+    db_only: list[str] = Field(default_factory=list)
+    in_sync: list[str] = Field(default_factory=list)
 
