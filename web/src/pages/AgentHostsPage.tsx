@@ -39,7 +39,7 @@ function SectionPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
+    <section className="rounded-[32px] border border-border bg-panel p-6 shadow-panel">
       <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
       <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
@@ -63,7 +63,7 @@ function LoadingSkeleton() {
 
 function ConfigBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[20px] border border-border bg-panel px-4 py-3">
+    <div className="rounded-2xl border border-border bg-panel px-4 py-3">
       <p className="text-[11px] uppercase tracking-[0.24em] text-muted/70">{label}</p>
       <p className="mt-2 text-sm font-medium text-copy">{value}</p>
     </div>
@@ -221,7 +221,7 @@ export function AgentHostsPage() {
           <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
             <h3 className="text-base font-semibold text-copy">主机清单加载失败</h3>
             <p className="mt-2 text-sm text-muted">重试查询以恢复主机注册表。</p>
-            <button className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert" onClick={() => void refreshHosts()} type="button">
+            <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void refreshHosts()} type="button">
               重试
             </button>
           </div>
@@ -261,7 +261,7 @@ export function AgentHostsPage() {
                     />
                   </div>
 
-                  <div className="mt-4 rounded-[20px] border border-border bg-panel px-4 py-3">
+                  <div className="mt-4 rounded-2xl border border-border bg-panel px-4 py-3">
                     <p className="text-[11px] uppercase tracking-[0.24em] text-muted/70">标签</p>
                     {host.labels.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -276,7 +276,7 @@ export function AgentHostsPage() {
 
                   <div className="mt-auto flex flex-wrap gap-2 pt-4">
                     <button
-                      className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+                      className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                       onClick={() => {
                         setSelectedHostId(host.id);
                         setActionMessage(null);
@@ -287,7 +287,7 @@ export function AgentHostsPage() {
                       编辑
                     </button>
                     <button
-                      className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={pendingState !== undefined && pendingState !== null}
                       onClick={() => void handleCheck(host.id)}
                       type="button"
@@ -295,7 +295,7 @@ export function AgentHostsPage() {
                       {pendingState === "check" ? "检查中..." : "检查"}
                     </button>
                     <button
-                      className="rounded-full bg-danger px-3 py-2 text-xs font-medium text-copy disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-lg bg-danger px-3 py-2 text-xs font-medium text-ink-invert disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={pendingState !== undefined && pendingState !== null}
                       onClick={() => void handleDelete(host.id)}
                       type="button"
@@ -317,7 +317,7 @@ export function AgentHostsPage() {
           </p>
           {isEditing && (
             <button
-              className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+              className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
               onClick={resetForm}
               type="button"
             >
@@ -329,7 +329,7 @@ export function AgentHostsPage() {
         <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
           <Field label="主机 ID">
             <input
-              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)] disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isEditing}
               onChange={updateForm("id")}
               required
@@ -340,7 +340,7 @@ export function AgentHostsPage() {
 
           <Field label="主机地址">
             <input
-              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
+              className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
               onChange={updateForm("host")}
               required
               type="text"
@@ -350,7 +350,7 @@ export function AgentHostsPage() {
 
           <Field label="Agent 类型">
             <select
-              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-xl border border-border-strong bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={updateForm("agent_type")}
               value={form.agent_type}
             >
@@ -362,7 +362,7 @@ export function AgentHostsPage() {
 
           <Field label="最大并发">
             <input
-              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
+              className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
               min={1}
               onChange={updateForm("max_concurrent")}
               required
@@ -373,7 +373,7 @@ export function AgentHostsPage() {
 
           <Field label="SSH 密钥">
             <input
-              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
+              className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
               onChange={updateForm("ssh_key")}
               type="text"
               value={form.ssh_key}
@@ -382,7 +382,7 @@ export function AgentHostsPage() {
 
           <Field label="标签">
             <input
-              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
+              className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
               onChange={updateForm("labels")}
               placeholder="逗号分隔的标签"
               type="text"
@@ -394,7 +394,7 @@ export function AgentHostsPage() {
           {formError ? <p className="text-sm text-danger">{formError}</p> : null}
 
           <button
-            className="w-full rounded-full bg-copy px-4 py-3 text-sm font-medium text-ink-invert transition hover:bg-copy/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-xl bg-copy px-4 py-3 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={formPending}
             type="submit"
           >

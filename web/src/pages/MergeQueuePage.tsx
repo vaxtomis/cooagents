@@ -27,7 +27,7 @@ function SectionPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
+    <section className="rounded-[32px] border border-border bg-panel p-6 shadow-panel">
       <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
       <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
@@ -215,7 +215,7 @@ export function MergeQueuePage() {
               重试查询以恢复合并状态和运行上下文。
             </p>
             <button
-              className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert"
+              className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90"
               onClick={() => void refreshAll()}
               type="button"
             >
@@ -255,14 +255,14 @@ export function MergeQueuePage() {
 
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
-                      className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+                      className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                       onClick={() => setSelectedRunId(item.run_id)}
                       type="button"
                     >
                       {`查看 ${item.run_id}`}
                     </button>
                     <button
-                      className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={pendingState !== undefined && pendingState !== null}
                       onClick={() => void handleMerge(item.run_id, item.priority)}
                       type="button"
@@ -270,7 +270,7 @@ export function MergeQueuePage() {
                       {pendingState === "merge" ? "排队中..." : `合并 ${item.run_id}`}
                     </button>
                     <button
-                      className="rounded-full bg-danger px-3 py-2 text-xs font-medium text-copy disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-lg bg-danger px-3 py-2 text-xs font-medium text-ink-invert disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={pendingState !== undefined && pendingState !== null}
                       onClick={() => void handleSkip(item.run_id)}
                       type="button"
@@ -316,7 +316,7 @@ export function MergeQueuePage() {
             <label className="block space-y-2 text-sm text-muted">
               <span>合并优先级</span>
               <input
-                className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
+                className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
                 min={0}
                 onChange={(event) => setMergePriority(event.target.value)}
                 type="number"
@@ -344,7 +344,7 @@ export function MergeQueuePage() {
                       冲突详情刷新失败，显示队列快照。
                     </p>
                     <button
-                      className="mt-3 rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+                      className="mt-3 rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                       onClick={() => void conflictsQuery.mutate()}
                       type="button"
                     >
@@ -369,7 +369,7 @@ export function MergeQueuePage() {
                 </div>
 
                 <button
-                  className="mt-4 rounded-full bg-copy px-4 py-3 text-sm font-medium text-ink-invert transition hover:bg-copy/90 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-4 rounded-xl bg-copy px-4 py-3 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90 disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={rowPending[selected.run_id] !== undefined && rowPending[selected.run_id] !== null}
                   onClick={() => void handleResolve(selected.run_id)}
                   type="button"

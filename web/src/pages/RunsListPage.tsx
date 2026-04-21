@@ -40,7 +40,7 @@ function SectionPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
+    <section className="rounded-[32px] border border-border bg-panel p-6 shadow-panel">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
@@ -150,7 +150,7 @@ function RunRow({ run, onOpen }: { run: RunRecord; onOpen: (runId: string) => vo
               <p className="mt-2 truncate text-xs text-copy">{run.repo_path}</p>
             </div>
             <button
-              className="mt-4 rounded-full bg-copy px-3 py-2 text-xs font-medium text-ink-invert transition hover:bg-copy/90"
+              className="mt-4 rounded-xl bg-copy px-3 py-2 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90"
               onClick={() => onOpen(run.id)}
               type="button"
             >
@@ -246,20 +246,20 @@ function CreateRunDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-copy/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-[28px] border border-border bg-panel p-6 shadow-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg rounded-[32px] border border-border bg-panel p-6 shadow-panel" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold text-copy">创建任务</h2>
         <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
           <label className="block space-y-1 text-sm text-muted">
             <span>工单 <span className="text-red-400">*</span></span>
-            <input name="ticket" required className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none focus:border-accent/40" placeholder="PROJ-123" />
+            <input name="ticket" required className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]" placeholder="PROJ-123" />
           </label>
           <label className="block space-y-1 text-sm text-muted">
             <span>仓库路径 <span className="text-red-400">*</span></span>
-            <input name="repo_path" required className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none focus:border-accent/40" placeholder="/path/to/repo" />
+            <input name="repo_path" required className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]" placeholder="/path/to/repo" />
           </label>
           <label className="block space-y-1 text-sm text-muted">
             <span>描述</span>
-            <textarea name="description" rows={2} className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none focus:border-accent/40" />
+            <textarea name="description" rows={2} className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]" />
           </label>
 
           {/* File drop zone */}
@@ -289,7 +289,7 @@ function CreateRunDialog({
           <div className="grid grid-cols-2 gap-3">
             <label className="block space-y-1 text-sm text-muted">
               <span>设计 Agent</span>
-              <select name="design_agent" className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none [&_option]:bg-panel-strong">
+              <select name="design_agent" className="w-full rounded-xl border border-border-strong bg-panel-strong px-4 py-3 text-sm text-copy outline-none [&_option]:bg-panel-strong">
                 <option value="">默认</option>
                 <option value="claude">Claude</option>
                 <option value="codex">Codex</option>
@@ -297,7 +297,7 @@ function CreateRunDialog({
             </label>
             <label className="block space-y-1 text-sm text-muted">
               <span>开发 Agent</span>
-              <select name="dev_agent" className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none [&_option]:bg-panel-strong">
+              <select name="dev_agent" className="w-full rounded-xl border border-border-strong bg-panel-strong px-4 py-3 text-sm text-copy outline-none [&_option]:bg-panel-strong">
                 <option value="">默认</option>
                 <option value="claude">Claude</option>
                 <option value="codex">Codex</option>
@@ -308,8 +308,8 @@ function CreateRunDialog({
           {error && <p className="rounded-xl bg-red-500/10 px-4 py-2 text-sm text-red-400">{error}</p>}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="rounded-full border border-border-strong bg-panel-strong/50 px-5 py-2.5 text-sm font-medium text-copy hover:bg-panel-strong/70">取消</button>
-            <button type="submit" disabled={submitting} className="rounded-full bg-copy px-5 py-2.5 text-sm font-medium text-ink-invert hover:bg-copy/90 disabled:opacity-50">
+            <button type="button" onClick={onClose} className="rounded-lg border border-border-strong bg-panel-strong/50 px-5 py-2.5 text-sm font-medium text-copy hover:bg-panel-strong/70">取消</button>
+            <button type="submit" disabled={submitting} className="rounded-xl bg-copy px-5 py-2.5 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] hover:bg-copy/90 disabled:opacity-50">
               {submitting ? "创建中..." : "创建"}
             </button>
           </div>
@@ -370,7 +370,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>工单</span>
             <input
-              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
+              className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
               onChange={(event) => setDraft((current) => ({ ...current, ticket: event.target.value }))}
               placeholder="按工单搜索"
               type="search"
@@ -381,7 +381,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>状态</span>
             <select
-              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-xl border border-border-strong bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))}
               value={draft.status}
             >
@@ -397,7 +397,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>阶段</span>
             <select
-              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-xl border border-border-strong bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, stage: event.target.value }))}
               value={draft.stage}
             >
@@ -413,7 +413,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>排序字段</span>
             <select
-              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-xl border border-border-strong bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, sortBy: event.target.value }))}
               value={draft.sortBy}
             >
@@ -428,7 +428,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>排序方向</span>
             <select
-              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-xl border border-border-strong bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, sortOrder: event.target.value === "asc" ? "asc" : "desc" }))}
               value={draft.sortOrder}
             >
@@ -437,18 +437,18 @@ export function RunsListPage() {
             </select>
           </label>
 
-          <button className="rounded-full bg-copy px-4 py-3 text-sm font-medium text-ink-invert transition hover:bg-copy/90" type="submit">
+          <button className="rounded-xl bg-copy px-4 py-3 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" type="submit">
             查询
           </button>
           <button
-            className="rounded-full border border-border-strong bg-panel-strong/50 px-4 py-3 text-sm font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+            className="rounded-lg border border-border-strong bg-panel-strong/50 px-4 py-3 text-sm font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
             onClick={() => void runs.mutate()}
             type="button"
           >
             刷新
           </button>
           <button
-            className="rounded-full bg-accent px-4 py-3 text-sm font-medium text-copy transition hover:bg-accent/90"
+            className="rounded-xl bg-accent px-4 py-3 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft"
             onClick={() => setShowCreate(true)}
             type="button"
           >
@@ -462,7 +462,7 @@ export function RunsListPage() {
           <p>{summary}</p>
           <div className="flex items-center gap-2">
             <button
-              className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={page <= 1}
               onClick={() => commit(applied, page - 1)}
               type="button"
@@ -471,7 +471,7 @@ export function RunsListPage() {
             </button>
             <span className="rounded-full border border-border bg-panel px-3 py-2 text-xs text-muted">{`第 ${page} / ${totalPages} 页`}</span>
             <button
-              className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={page >= totalPages || total === 0}
               onClick={() => commit(applied, page + 1)}
               type="button"
@@ -486,7 +486,7 @@ export function RunsListPage() {
             <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
               <h3 className="text-base font-semibold text-copy">运行数据加载失败</h3>
               <p className="mt-2 text-sm text-muted">请重试查询或调整筛选条件。</p>
-              <button className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert" onClick={() => void runs.mutate()} type="button">
+              <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void runs.mutate()} type="button">
                 重试
               </button>
             </div>

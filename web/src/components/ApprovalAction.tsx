@@ -50,7 +50,7 @@ export function ApprovalAction({
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
         <button
-          className="rounded-full bg-success px-3 py-1.5 text-xs font-medium text-copy disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg bg-success px-3 py-1.5 text-xs font-medium text-ink-invert disabled:cursor-not-allowed disabled:opacity-60"
           disabled={pendingAction !== null}
           onClick={handleApprove}
           type="button"
@@ -58,7 +58,7 @@ export function ApprovalAction({
           {pendingAction === "approve" ? "批准中..." : "批准"}
         </button>
         <button
-          className="rounded-full bg-danger px-3 py-1.5 text-xs font-medium text-copy disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:cursor-not-allowed disabled:opacity-60"
           disabled={pendingAction !== null}
           onClick={handleReject}
           type="button"

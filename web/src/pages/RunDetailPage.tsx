@@ -54,7 +54,7 @@ function SectionPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
+    <section className="rounded-[32px] border border-border bg-panel p-6 shadow-panel">
       <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
       <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
@@ -78,9 +78,9 @@ function EmptyState({ copy }: { copy: string }) {
 function LoadingSkeleton() {
   return (
     <div className="space-y-4">
-      <div className="h-[180px] animate-pulse rounded-[28px] border border-border bg-panel" />
-      <div className="h-[220px] animate-pulse rounded-[28px] border border-border bg-panel" />
-      <div className="h-[220px] animate-pulse rounded-[28px] border border-border bg-panel" />
+      <div className="h-[180px] animate-pulse rounded-[32px] border border-border bg-panel" />
+      <div className="h-[220px] animate-pulse rounded-[32px] border border-border bg-panel" />
+      <div className="h-[220px] animate-pulse rounded-[32px] border border-border bg-panel" />
     </div>
   );
 }
@@ -247,7 +247,7 @@ function ArtifactModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-copy/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex max-h-[85vh] w-full max-w-[800px] flex-col overflow-hidden rounded-[28px] border border-border bg-panel shadow-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="flex max-h-[85vh] w-full max-w-[800px] flex-col overflow-hidden rounded-[32px] border border-border bg-panel shadow-panel" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="min-w-0 flex-1">
@@ -257,7 +257,7 @@ function ArtifactModal({
             {/* Download dropdown */}
             <div className="relative">
               <button
-                className="rounded-full border border-border-strong bg-panel-strong/50 px-3.5 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:opacity-40"
+                className="rounded-lg border border-border-strong bg-panel-strong/50 px-3.5 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:opacity-40"
                 disabled={artifactState.loading || !artifactState.content}
                 onClick={() => setShowDownloadMenu((v) => !v)}
                 type="button"
@@ -284,7 +284,7 @@ function ArtifactModal({
               ) : null}
             </div>
             <button
-              className="rounded-full border border-border-strong bg-panel-strong/50 px-2.5 py-2 text-xs text-muted transition hover:border-copy/20 hover:bg-panel-strong/70"
+              className="rounded-lg border border-border-strong bg-panel-strong/50 px-2.5 py-2 text-xs text-muted transition hover:border-copy/20 hover:bg-panel-strong/70"
               onClick={onClose}
               type="button"
             >
@@ -373,7 +373,7 @@ function ArtifactsPanel({
                   </p>
                 </div>
                 <button
-                  className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+                  className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                   onClick={() => void onInspect(artifact)}
                   type="button"
                 >
@@ -417,7 +417,7 @@ function JobsPanel({
                 </p>
               </div>
               <button
-                className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
+                className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                 onClick={() => void onLoadOutput(job)}
                 type="button"
               >
@@ -542,7 +542,7 @@ export function RunDetailPage() {
 
   if (!runId) {
     return (
-      <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
+      <section className="rounded-[32px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
         <h2 className="text-lg font-semibold text-copy">缺少运行 ID</h2>
         <p className="mt-2 text-sm text-muted">请从概览或运行列表进入以查看具体运行。</p>
       </section>
@@ -552,10 +552,10 @@ export function RunDetailPage() {
   const error = run.error ?? brief.error ?? jobs.error ?? artifacts.error ?? trace.error;
   if (error) {
     return (
-      <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
+      <section className="rounded-[32px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
         <h2 className="text-lg font-semibold text-copy">运行详情加载失败</h2>
         <p className="mt-2 text-sm text-muted">重试查询以恢复产物、任务和追踪数据。</p>
-        <button className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert" onClick={() => void refreshAll()} type="button">
+        <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void refreshAll()} type="button">
           重试
         </button>
       </section>
@@ -743,7 +743,7 @@ export function RunDetailPage() {
               <p className="text-sm text-copy">终止运行</p>
               <p className="mt-2 text-sm text-muted">需要停止后续工作时，取消当前运行并等待终止事件。</p>
               <button
-                className="mt-4 rounded-full bg-danger px-4 py-2 text-sm font-medium text-copy disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-4 rounded-lg bg-danger px-4 py-2 text-sm font-medium text-ink-invert disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={cancelPending || runData.status !== "running"}
                 onClick={() => void handleCancelRun()}
                 type="button"

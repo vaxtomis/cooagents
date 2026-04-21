@@ -33,7 +33,7 @@ function SectionPanel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
+    <section className="rounded-[32px] border border-border bg-panel p-6 shadow-panel">
       <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
       <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
@@ -86,10 +86,10 @@ export function DashboardPage() {
   const hasError = overview.error || active.error || hosts.error;
   if (hasError) {
     return (
-      <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
+      <section className="rounded-[32px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
         <h2 className="text-lg font-semibold text-copy">仪表盘数据加载失败</h2>
         <p className="mt-2 text-sm text-muted">重试查询以恢复概览页面。</p>
-        <button className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert" onClick={() => void refreshAll()} type="button">
+        <button className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90" onClick={() => void refreshAll()} type="button">
           重试
         </button>
       </section>
@@ -105,10 +105,10 @@ export function DashboardPage() {
           ))}
         </div>
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="h-[360px] animate-pulse rounded-[28px] border border-border bg-panel" />
+          <div className="h-[360px] animate-pulse rounded-[32px] border border-border bg-panel" />
           <div className="space-y-4">
-            <div className="h-[180px] animate-pulse rounded-[28px] border border-border bg-panel" />
-            <div className="h-[180px] animate-pulse rounded-[28px] border border-border bg-panel" />
+            <div className="h-[180px] animate-pulse rounded-[32px] border border-border bg-panel" />
+            <div className="h-[180px] animate-pulse rounded-[32px] border border-border bg-panel" />
           </div>
         </div>
       </div>

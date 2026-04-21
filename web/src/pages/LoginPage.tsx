@@ -36,7 +36,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-void px-4 py-10">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-6 rounded-[28px] border border-border bg-panel p-10 shadow-whisper"
+        className="w-full max-w-sm space-y-6 rounded-[32px] border border-border bg-panel p-10 shadow-whisper"
       >
         <div className="space-y-2">
           <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-accent">

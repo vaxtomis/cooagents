@@ -182,7 +182,7 @@ function ShellLayout() {
               <button
                 type="button"
                 onClick={() => void logout()}
-                className="inline-flex items-center gap-1 rounded-full border border-border-strong px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
+                className="inline-flex items-center gap-1 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
               >
                 <LogOut className="size-3.5" strokeWidth={1.8} />
                 退出
@@ -207,7 +207,7 @@ function ShellLayout() {
                   </p>
                 </div>
 
-                <div className="hidden shrink-0 items-center gap-2 rounded-full border border-border-strong bg-panel-strong/50 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-muted md:flex">
+                <div className="hidden shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-panel-strong/50 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-muted md:flex">
                   <span className="size-1.5 rounded-full bg-success" />
                   在线
                 </div>
