@@ -1,165 +1,132 @@
 PRAGMA journal_mode=WAL;
 
--- 1. runs — workflow run tracking
-CREATE TABLE IF NOT EXISTS runs (
-  id              TEXT PRIMARY KEY,
-  ticket          TEXT NOT NULL,
-  repo_path       TEXT NOT NULL,
-  repo_url        TEXT,
-  status          TEXT DEFAULT 'running' CHECK(status IN ('running','completed','failed','cancelled')),
-  current_stage   TEXT NOT NULL DEFAULT 'INIT',
-  description     TEXT,
-  failed_at_stage TEXT,
-  design_worktree TEXT,
-  design_branch   TEXT,
-  dev_worktree    TEXT,
-  dev_branch      TEXT,
-  preferences_json TEXT,
-  notify_channel  TEXT,
-  notify_to       TEXT,
-  design_agent    TEXT DEFAULT 'claude' CHECK(design_agent IN ('claude','codex')),
-  dev_agent       TEXT DEFAULT 'claude' CHECK(dev_agent IN ('claude','codex')),
-  created_at      TEXT NOT NULL,
-  updated_at      TEXT NOT NULL
-);
+-- ============================================================================
+-- Phase 1: Workspace-Driven Data Model
+-- Breaking rewrite — old tables (runs/steps/events/approvals/artifacts/jobs/
+-- merge_queue/turns/webhooks/agent_hosts) are dropped wholesale.
+-- ============================================================================
 
--- 2. steps — stage transition history
-CREATE TABLE IF NOT EXISTS steps (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id       TEXT NOT NULL REFERENCES runs(id),
-  from_stage   TEXT NOT NULL,
-  to_stage     TEXT NOT NULL,
-  triggered_by TEXT,
-  created_at   TEXT NOT NULL
-);
-
--- 3. events — audit log with tracing support
-CREATE TABLE IF NOT EXISTS events (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id       TEXT REFERENCES runs(id),
-  event_type   TEXT NOT NULL,
-  payload_json TEXT,
-  created_at   TEXT NOT NULL,
-  trace_id     TEXT,
-  job_id       TEXT,
-  span_type    TEXT DEFAULT 'system',
-  level        TEXT DEFAULT 'info',
-  duration_ms  INTEGER,
-  error_detail TEXT,
-  source       TEXT
-);
-
--- 4. approvals — gate approvals/rejections
-CREATE TABLE IF NOT EXISTS approvals (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id     TEXT NOT NULL REFERENCES runs(id),
-  gate       TEXT NOT NULL CHECK(gate IN ('req','design','dev')),
-  decision   TEXT NOT NULL CHECK(decision IN ('approved','rejected')),
-  by         TEXT NOT NULL,
-  comment    TEXT,
-  created_at TEXT NOT NULL,
-  UNIQUE(run_id, gate, created_at)
-);
-
--- 5. webhooks — webhook subscriptions
-CREATE TABLE IF NOT EXISTS webhooks (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  url         TEXT NOT NULL,
-  events_json TEXT,
-  secret      TEXT,
-  status      TEXT DEFAULT 'active' CHECK(status IN ('active','disabled')),
+-- 1. workspaces — workspace container
+CREATE TABLE IF NOT EXISTS workspaces (
+  id          TEXT PRIMARY KEY,              -- 'ws-<hex12>'
+  title       TEXT NOT NULL,
+  slug        TEXT NOT NULL UNIQUE,
+  status      TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived')),
+  root_path   TEXT NOT NULL,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
 
--- 6. artifacts — artifact versioning
-CREATE TABLE IF NOT EXISTS artifacts (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id         TEXT NOT NULL REFERENCES runs(id),
-  kind           TEXT NOT NULL CHECK(kind IN ('req','design','adr','code','test-report')),
-  path           TEXT NOT NULL,
-  version        INTEGER DEFAULT 1,
-  status         TEXT DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','rejected')),
-  content_hash   TEXT,
-  byte_size      INTEGER,
-  stage          TEXT,
-  git_ref        TEXT,
-  review_comment TEXT,
-  created_at     TEXT NOT NULL
+-- 2. design_docs — DesignDoc artifact index (created before design_works since
+--    design_works.output_design_doc_id soft-references this table)
+CREATE TABLE IF NOT EXISTS design_docs (
+  id                      TEXT PRIMARY KEY,  -- 'des-<hex12>'
+  workspace_id            TEXT NOT NULL REFERENCES workspaces(id),
+  slug                    TEXT NOT NULL,
+  version                 TEXT NOT NULL,     -- SemVer string '1.0.0'
+  path                    TEXT NOT NULL,
+  parent_version          TEXT,
+  needs_frontend_mockup   INTEGER NOT NULL DEFAULT 0 CHECK(needs_frontend_mockup IN (0,1)),
+  rubric_threshold        INTEGER NOT NULL DEFAULT 85,
+  status                  TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','superseded')),
+  content_hash            TEXT,
+  byte_size               INTEGER,
+  created_at              TEXT NOT NULL,
+  published_at            TEXT,
+  UNIQUE(workspace_id, slug, version)
 );
 
--- 7. agent_hosts — host pool
-CREATE TABLE IF NOT EXISTS agent_hosts (
-  id             TEXT PRIMARY KEY,
-  host           TEXT NOT NULL,
-  agent_type     TEXT NOT NULL CHECK(agent_type IN ('claude','codex','both')),
-  max_concurrent INTEGER DEFAULT 2,
-  ssh_key        TEXT,
-  labels_json    TEXT,
-  status         TEXT DEFAULT 'active' CHECK(status IN ('active','draining','offline')),
-  created_at     TEXT NOT NULL,
-  updated_at     TEXT NOT NULL
+-- 3. design_works — DesignWork state machine instance (process table)
+CREATE TABLE IF NOT EXISTS design_works (
+  id                      TEXT PRIMARY KEY,  -- 'desw-<hex12>'
+  workspace_id            TEXT NOT NULL REFERENCES workspaces(id),
+  mode                    TEXT NOT NULL CHECK(mode IN ('new','optimize')),
+  parent_version          TEXT,
+  needs_frontend_mockup   INTEGER NOT NULL DEFAULT 0 CHECK(needs_frontend_mockup IN (0,1)),
+  current_state           TEXT NOT NULL DEFAULT 'INIT' CHECK(current_state IN ('INIT','MODE_BRANCH','PRE_VALIDATE','PROMPT_COMPOSE','LLM_GENERATE','MOCKUP','POST_VALIDATE','PERSIST','COMPLETED','ESCALATED','CANCELLED')),
+  loop                    INTEGER NOT NULL DEFAULT 0,
+  missing_sections_json   TEXT,
+  agent                   TEXT NOT NULL DEFAULT 'claude' CHECK(agent IN ('claude','codex')),
+  escalated_at            TEXT,
+  user_input_path         TEXT,
+  output_design_doc_id    TEXT,              -- soft reference (no FK, U12)
+  created_at              TEXT NOT NULL,
+  updated_at              TEXT NOT NULL
 );
 
--- 8. jobs — agent job tracking
-CREATE TABLE IF NOT EXISTS jobs (
-  id             TEXT PRIMARY KEY,
-  run_id         TEXT NOT NULL REFERENCES runs(id),
-  host_id        TEXT REFERENCES agent_hosts(id),
-  agent_type     TEXT NOT NULL,
-  stage          TEXT NOT NULL,
-  status         TEXT DEFAULT 'starting' CHECK(status IN ('starting','running','completed','failed','timeout','cancelled','interrupted')),
-  task_file      TEXT,
-  worktree       TEXT,
-  base_commit    TEXT,
-  pid            INTEGER,
-  ssh_session_id TEXT,
-  snapshot_json  TEXT,
-  resume_count   INTEGER DEFAULT 0,
-  session_name   TEXT,
-  turn_count     INTEGER DEFAULT 1,
-  events_file    TEXT,
-  timeout_sec    INTEGER,
-  running_started_at TEXT,
-  started_at     TEXT NOT NULL,
-  ended_at       TEXT
+-- 4. dev_works — DevWork state machine instance + indicator fields
+CREATE TABLE IF NOT EXISTS dev_works (
+  id                          TEXT PRIMARY KEY,  -- 'dev-<hex12>'
+  workspace_id                TEXT NOT NULL REFERENCES workspaces(id),
+  design_doc_id               TEXT NOT NULL REFERENCES design_docs(id),
+  repo_path                   TEXT NOT NULL,
+  prompt                      TEXT NOT NULL,
+  worktree_path               TEXT,
+  worktree_branch             TEXT,
+  current_step                TEXT NOT NULL DEFAULT 'INIT' CHECK(current_step IN ('INIT','STEP1_VALIDATE','STEP2_ITERATION','STEP3_CONTEXT','STEP4_DEVELOP','STEP5_REVIEW','COMPLETED','ESCALATED','CANCELLED')),
+  iteration_rounds            INTEGER NOT NULL DEFAULT 0,
+  first_pass_success          INTEGER CHECK(first_pass_success IN (0,1)),
+  last_score                  INTEGER,
+  last_problem_category       TEXT CHECK(last_problem_category IN ('req_gap','impl_gap','design_hollow') OR last_problem_category IS NULL),
+  agent                       TEXT NOT NULL DEFAULT 'claude' CHECK(agent IN ('claude','codex')),
+  gates_json                  TEXT,
+  escalated_at                TEXT,
+  completed_at                TEXT,
+  created_at                  TEXT NOT NULL,
+  updated_at                  TEXT NOT NULL
 );
 
--- 9. merge_queue — merge ordering
-CREATE TABLE IF NOT EXISTS merge_queue (
-  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id              TEXT NOT NULL REFERENCES runs(id) UNIQUE,
-  branch              TEXT NOT NULL,
-  priority            INTEGER DEFAULT 0,
-  status              TEXT DEFAULT 'waiting' CHECK(status IN ('waiting','merging','merged','conflict','skipped')),
-  conflict_files_json TEXT,
+-- 5. dev_iteration_notes — iteration design file metadata (markdown body on disk)
+CREATE TABLE IF NOT EXISTS dev_iteration_notes (
+  id                  TEXT PRIMARY KEY,      -- 'note-<hex12>'
+  dev_work_id         TEXT NOT NULL REFERENCES dev_works(id),
+  round               INTEGER NOT NULL,
+  markdown_path       TEXT NOT NULL,
+  score_history_json  TEXT,
   created_at          TEXT NOT NULL,
-  updated_at          TEXT NOT NULL
+  UNIQUE(dev_work_id, round)
 );
 
--- 10. turns — per-turn history within a job
-CREATE TABLE IF NOT EXISTS turns (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id      TEXT NOT NULL REFERENCES jobs(id),
-    turn_num    INTEGER NOT NULL,
-    prompt_file TEXT,
-    verdict     TEXT,
-    detail      TEXT,
-    started_at  TEXT NOT NULL,
-    ended_at    TEXT,
-    UNIQUE(job_id, turn_num)
+-- 6. reviews — Step5 / D5 review records
+CREATE TABLE IF NOT EXISTS reviews (
+  id                      TEXT PRIMARY KEY,  -- 'rev-<hex12>'
+  dev_work_id             TEXT REFERENCES dev_works(id),
+  design_work_id          TEXT REFERENCES design_works(id),
+  dev_iteration_note_id   TEXT REFERENCES dev_iteration_notes(id),
+  round                   INTEGER NOT NULL,
+  score                   INTEGER,
+  issues_json             TEXT,
+  findings_json           TEXT,
+  problem_category        TEXT CHECK(problem_category IN ('req_gap','impl_gap','design_hollow') OR problem_category IS NULL),
+  reviewer                TEXT,
+  created_at              TEXT NOT NULL,
+  CHECK ((dev_work_id IS NOT NULL) OR (design_work_id IS NOT NULL))
 );
 
-CREATE INDEX IF NOT EXISTS idx_turns_job ON turns(job_id);
+-- 7. workspace_events — telemetry event log (pure log, no delivery state)
+CREATE TABLE IF NOT EXISTS workspace_events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id        TEXT NOT NULL UNIQUE,
+  event_name      TEXT NOT NULL,
+  workspace_id    TEXT REFERENCES workspaces(id),
+  correlation_id  TEXT,
+  payload_json    TEXT,
+  ts              TEXT NOT NULL
+);
 
 -- Indexes
-CREATE INDEX IF NOT EXISTS idx_runs_status   ON runs(status);
-CREATE INDEX IF NOT EXISTS idx_runs_ticket   ON runs(ticket);
-CREATE INDEX IF NOT EXISTS idx_events_run    ON events(run_id);
-CREATE INDEX IF NOT EXISTS idx_events_trace  ON events(trace_id);
-CREATE INDEX IF NOT EXISTS idx_events_job    ON events(job_id);
-CREATE INDEX IF NOT EXISTS idx_events_level  ON events(level);
-CREATE INDEX IF NOT EXISTS idx_events_span   ON events(span_type);
-CREATE INDEX IF NOT EXISTS idx_jobs_run      ON jobs(run_id);
-CREATE INDEX IF NOT EXISTS idx_jobs_status   ON jobs(status);
-CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id);
+CREATE INDEX IF NOT EXISTS idx_workspaces_status           ON workspaces(status);
+CREATE INDEX IF NOT EXISTS idx_design_works_workspace      ON design_works(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_design_works_state          ON design_works(current_state);
+CREATE INDEX IF NOT EXISTS idx_design_docs_workspace       ON design_docs(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_design_docs_slug            ON design_docs(slug);
+CREATE INDEX IF NOT EXISTS idx_dev_works_workspace         ON dev_works(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_dev_works_step              ON dev_works(current_step);
+CREATE INDEX IF NOT EXISTS idx_dev_works_design_doc        ON dev_works(design_doc_id);
+CREATE INDEX IF NOT EXISTS idx_dev_iteration_notes_work    ON dev_iteration_notes(dev_work_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_dev_work            ON reviews(dev_work_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_design_work         ON reviews(design_work_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_note                ON reviews(dev_iteration_note_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_events_name       ON workspace_events(event_name);
+CREATE INDEX IF NOT EXISTS idx_workspace_events_workspace  ON workspace_events(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_events_ts         ON workspace_events(ts);
