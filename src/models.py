@@ -95,3 +95,156 @@ class MergeRequest(BaseModel):
     priority: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 — Workspace-driven domain models
+# ---------------------------------------------------------------------------
+
+class WorkspaceStatus(str, Enum):
+    active = "active"
+    archived = "archived"
+
+
+class DesignWorkMode(str, Enum):
+    new = "new"
+    optimize = "optimize"
+
+
+class DesignWorkState(str, Enum):
+    INIT = "INIT"
+    MODE_BRANCH = "MODE_BRANCH"
+    PRE_VALIDATE = "PRE_VALIDATE"
+    PROMPT_COMPOSE = "PROMPT_COMPOSE"
+    LLM_GENERATE = "LLM_GENERATE"
+    MOCKUP = "MOCKUP"
+    POST_VALIDATE = "POST_VALIDATE"
+    PERSIST = "PERSIST"
+    COMPLETED = "COMPLETED"
+    ESCALATED = "ESCALATED"
+    CANCELLED = "CANCELLED"
+
+
+class DesignDocStatus(str, Enum):
+    draft = "draft"
+    published = "published"
+    superseded = "superseded"
+
+
+class DevWorkStep(str, Enum):
+    INIT = "INIT"
+    STEP1_VALIDATE = "STEP1_VALIDATE"
+    STEP2_ITERATION = "STEP2_ITERATION"
+    STEP3_CONTEXT = "STEP3_CONTEXT"
+    STEP4_DEVELOP = "STEP4_DEVELOP"
+    STEP5_REVIEW = "STEP5_REVIEW"
+    COMPLETED = "COMPLETED"
+    ESCALATED = "ESCALATED"
+    CANCELLED = "CANCELLED"
+
+
+class ProblemCategory(str, Enum):
+    req_gap = "req_gap"
+    impl_gap = "impl_gap"
+    design_hollow = "design_hollow"
+
+
+class AgentKind(str, Enum):
+    claude = "claude"
+    codex = "codex"
+
+
+class Workspace(BaseModel):
+    id: str
+    title: str
+    slug: str
+    status: WorkspaceStatus = WorkspaceStatus.active
+    root_path: str
+    created_at: str
+    updated_at: str
+
+
+class DesignWork(BaseModel):
+    id: str
+    workspace_id: str
+    mode: DesignWorkMode
+    parent_version: str | None = None
+    needs_frontend_mockup: bool = False
+    current_state: DesignWorkState = DesignWorkState.INIT
+    loop: int = 0
+    missing_sections: list[str] | None = None
+    agent: AgentKind = AgentKind.claude
+    escalated_at: str | None = None
+    user_input_path: str | None = None
+    output_design_doc_id: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class DesignDoc(BaseModel):
+    id: str
+    workspace_id: str
+    slug: str
+    version: str
+    path: str
+    parent_version: str | None = None
+    needs_frontend_mockup: bool = False
+    rubric_threshold: int = 85
+    status: DesignDocStatus = DesignDocStatus.draft
+    content_hash: str | None = None
+    byte_size: int | None = None
+    created_at: str
+    published_at: str | None = None
+
+
+class DevWork(BaseModel):
+    id: str
+    workspace_id: str
+    design_doc_id: str
+    repo_path: str
+    prompt: str
+    worktree_path: str | None = None
+    worktree_branch: str | None = None
+    current_step: DevWorkStep = DevWorkStep.INIT
+    iteration_rounds: int = 0
+    first_pass_success: bool | None = None
+    last_score: int | None = None
+    last_problem_category: ProblemCategory | None = None
+    agent: AgentKind = AgentKind.claude
+    gates: dict | None = None
+    escalated_at: str | None = None
+    completed_at: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class DevIterationNote(BaseModel):
+    id: str
+    dev_work_id: str
+    round: int
+    markdown_path: str
+    score_history: list[int] | None = None
+    created_at: str
+
+
+class Review(BaseModel):
+    id: str
+    dev_work_id: str | None = None
+    design_work_id: str | None = None
+    dev_iteration_note_id: str | None = None
+    round: int
+    score: int | None = None
+    issues: list[dict] | None = None
+    findings: list[dict] | None = None
+    problem_category: ProblemCategory | None = None
+    reviewer: str | None = None
+    created_at: str
+
+
+class WorkspaceEvent(BaseModel):
+    id: int | None = None
+    event_id: str
+    event_name: str
+    workspace_id: str | None = None
+    correlation_id: str | None = None
+    payload: dict | None = None
+    ts: str
+

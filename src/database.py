@@ -69,46 +69,58 @@ class Database:
             rows = await cursor.fetchall()
         return any(row["name"] == column for row in rows)
 
-    async def _apply_compat_migrations(self) -> None:
+    async def _table_exists(self, table: str) -> bool:
         conn = self._ensure_connected()
-        if not await self._column_exists("jobs", "timeout_sec"):
-            await conn.execute("ALTER TABLE jobs ADD COLUMN timeout_sec INTEGER")
-        if not await self._column_exists("jobs", "running_started_at"):
-            await conn.execute("ALTER TABLE jobs ADD COLUMN running_started_at TEXT")
+        async with conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row is not None
 
-        # Tracing columns migration
-        trace_cols = {
-            "trace_id": "TEXT",
-            "job_id": "TEXT",
-            "span_type": "TEXT DEFAULT 'system'",
-            "level": "TEXT DEFAULT 'info'",
-            "duration_ms": "INTEGER",
-            "error_detail": "TEXT",
-            "source": "TEXT",
-        }
-        for col, col_type in trace_cols.items():
-            if not await self._column_exists("events", col):
-                await conn.execute(f"ALTER TABLE events ADD COLUMN {col} {col_type}")
+    async def _apply_compat_migrations(self) -> None:
+        # Phase 1 workspace-driven refactor dropped the legacy tables (runs,
+        # events, jobs, ...). The compat migrations below only apply when those
+        # legacy tables are still present; skip gracefully when the schema has
+        # been rebuilt for the new workspace model.
+        conn = self._ensure_connected()
+        if await self._table_exists("jobs"):
+            if not await self._column_exists("jobs", "timeout_sec"):
+                await conn.execute("ALTER TABLE jobs ADD COLUMN timeout_sec INTEGER")
+            if not await self._column_exists("jobs", "running_started_at"):
+                await conn.execute("ALTER TABLE jobs ADD COLUMN running_started_at TEXT")
 
-        # Make run_id nullable: check notnull flag via PRAGMA
-        async with conn.execute("PRAGMA table_info(events)") as cursor:
-            rows = await cursor.fetchall()
-        for row in rows:
-            if row["name"] == "run_id" and row["notnull"] == 1:
-                await self._migrate_events_nullable_run_id(conn)
-                break
+        if await self._table_exists("events"):
+            trace_cols = {
+                "trace_id": "TEXT",
+                "job_id": "TEXT",
+                "span_type": "TEXT DEFAULT 'system'",
+                "level": "TEXT DEFAULT 'info'",
+                "duration_ms": "INTEGER",
+                "error_detail": "TEXT",
+                "source": "TEXT",
+            }
+            for col, col_type in trace_cols.items():
+                if not await self._column_exists("events", col):
+                    await conn.execute(f"ALTER TABLE events ADD COLUMN {col} {col_type}")
 
-        # Agent preference columns on runs
-        if not await self._column_exists("runs", "design_agent"):
-            await conn.execute("ALTER TABLE runs ADD COLUMN design_agent TEXT DEFAULT 'claude'")
-        if not await self._column_exists("runs", "dev_agent"):
-            await conn.execute("ALTER TABLE runs ADD COLUMN dev_agent TEXT DEFAULT 'claude'")
+            async with conn.execute("PRAGMA table_info(events)") as cursor:
+                rows = await cursor.fetchall()
+            for row in rows:
+                if row["name"] == "run_id" and row["notnull"] == 1:
+                    await self._migrate_events_nullable_run_id(conn)
+                    break
 
-        # Ensure tracing indexes exist
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_trace ON events(trace_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_job ON events(job_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_span ON events(span_type)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_level ON events(level)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_trace ON events(trace_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_job ON events(job_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_span ON events(span_type)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_events_level ON events(level)")
+
+        if await self._table_exists("runs"):
+            if not await self._column_exists("runs", "design_agent"):
+                await conn.execute("ALTER TABLE runs ADD COLUMN design_agent TEXT DEFAULT 'claude'")
+            if not await self._column_exists("runs", "dev_agent"):
+                await conn.execute("ALTER TABLE runs ADD COLUMN dev_agent TEXT DEFAULT 'claude'")
 
     async def _migrate_events_nullable_run_id(self, conn) -> None:
         """Rebuild events table to make run_id nullable."""
