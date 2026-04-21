@@ -54,9 +54,9 @@ function SectionPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-white/6 bg-panel p-6 shadow-panel">
-      <p className="text-[11px] uppercase tracking-[0.3em] text-muted/75">{kicker}</p>
-      <h2 className="mt-2 text-lg font-semibold text-white">{title}</h2>
+    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
+      <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
+      <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
   );
@@ -64,23 +64,23 @@ function SectionPanel({
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
-      <p className="text-xs uppercase tracking-[0.24em] text-muted/75">{label}</p>
-      <p className="mt-3 break-all font-mono text-sm text-white">{value}</p>
+    <div className="rounded-2xl border border-border bg-panel-strong/80 p-4">
+      <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">{label}</p>
+      <p className="mt-3 break-all font-mono text-sm text-copy">{value}</p>
     </div>
   );
 }
 
 function EmptyState({ copy }: { copy: string }) {
-  return <p className="rounded-2xl border border-dashed border-white/8 bg-white/3 px-4 py-6 text-sm text-muted">{copy}</p>;
+  return <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">{copy}</p>;
 }
 
 function LoadingSkeleton() {
   return (
     <div className="space-y-4">
-      <div className="h-[180px] animate-pulse rounded-[28px] border border-white/6 bg-panel" />
-      <div className="h-[220px] animate-pulse rounded-[28px] border border-white/6 bg-panel" />
-      <div className="h-[220px] animate-pulse rounded-[28px] border border-white/6 bg-panel" />
+      <div className="h-[180px] animate-pulse rounded-[28px] border border-border bg-panel" />
+      <div className="h-[220px] animate-pulse rounded-[28px] border border-border bg-panel" />
+      <div className="h-[220px] animate-pulse rounded-[28px] border border-border bg-panel" />
     </div>
   );
 }
@@ -201,10 +201,10 @@ function ApprovalHistory({ approvals, currentStage }: { approvals: ApprovalRecor
         });
 
         return (
-          <article className="overflow-hidden rounded-2xl border border-white/6 bg-panel-strong/80 p-4" key={definition.gate}>
+          <article className="overflow-hidden rounded-2xl border border-border bg-panel-strong/80 p-4" key={definition.gate}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-white">{definition.label}</p>
+                <p className="text-sm font-medium text-copy">{definition.label}</p>
                 <p className="mt-2 truncate text-xs text-muted">{state.byline}</p>
               </div>
               <StatusBadge label={state.label} status={state.status} />
@@ -246,18 +246,18 @@ function ArtifactModal({
   if (artifactState.artifactId === null) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex max-h-[85vh] w-full max-w-[800px] flex-col overflow-hidden rounded-[28px] border border-white/8 bg-panel shadow-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-copy/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="flex max-h-[85vh] w-full max-w-[800px] flex-col overflow-hidden rounded-[28px] border border-border bg-panel shadow-panel" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/6 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="min-w-0 flex-1">
-            <p className="truncate font-mono text-sm font-medium text-white">{artifactState.path}</p>
+            <p className="truncate font-mono text-sm font-medium text-copy">{artifactState.path}</p>
           </div>
           <div className="flex items-center gap-2">
             {/* Download dropdown */}
             <div className="relative">
               <button
-                className="rounded-full border border-white/10 bg-white/4 px-3.5 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:opacity-40"
+                className="rounded-full border border-border-strong bg-panel-strong/50 px-3.5 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:opacity-40"
                 disabled={artifactState.loading || !artifactState.content}
                 onClick={() => setShowDownloadMenu((v) => !v)}
                 type="button"
@@ -265,16 +265,16 @@ function ArtifactModal({
                 下载 ▾
               </button>
               {showDownloadMenu ? (
-                <div className="absolute right-0 top-full z-10 mt-1 min-w-[140px] rounded-xl border border-white/8 bg-panel-strong p-1 shadow-panel">
+                <div className="absolute right-0 top-full z-10 mt-1 min-w-[140px] rounded-xl border border-border bg-panel-strong p-1 shadow-panel">
                   <a
-                    className="block rounded-lg px-3 py-2 text-xs text-white transition hover:bg-white/8"
+                    className="block rounded-lg px-3 py-2 text-xs text-copy transition hover:bg-panel-strong/70"
                     href={downloadUrl("md")}
                     onClick={() => setShowDownloadMenu(false)}
                   >
                     下载 Markdown
                   </a>
                   <a
-                    className="block rounded-lg px-3 py-2 text-xs text-white transition hover:bg-white/8"
+                    className="block rounded-lg px-3 py-2 text-xs text-copy transition hover:bg-panel-strong/70"
                     href={downloadUrl("docx")}
                     onClick={() => setShowDownloadMenu(false)}
                   >
@@ -284,7 +284,7 @@ function ArtifactModal({
               ) : null}
             </div>
             <button
-              className="rounded-full border border-white/10 bg-white/4 px-2.5 py-2 text-xs text-muted transition hover:border-white/20 hover:bg-white/8"
+              className="rounded-full border border-border-strong bg-panel-strong/50 px-2.5 py-2 text-xs text-muted transition hover:border-copy/20 hover:bg-panel-strong/70"
               onClick={onClose}
               type="button"
             >
@@ -295,9 +295,9 @@ function ArtifactModal({
 
         {/* Tabs */}
         {!artifactState.loading && !artifactState.error && (artifactState.content || artifactState.diff) ? (
-          <div className="flex gap-1 border-b border-white/6 px-6">
+          <div className="flex gap-1 border-b border-border px-6">
             <button
-              className={`rounded-t-lg px-4 py-2 text-xs font-medium transition ${tab === "content" ? "border-b-2 border-accent text-white" : "text-muted hover:text-white"}`}
+              className={`rounded-t-lg px-4 py-2 text-xs font-medium transition ${tab === "content" ? "border-b-2 border-accent text-copy" : "text-muted hover:text-copy"}`}
               onClick={() => setTab("content")}
               type="button"
             >
@@ -305,7 +305,7 @@ function ArtifactModal({
             </button>
             {artifactState.diff ? (
               <button
-                className={`rounded-t-lg px-4 py-2 text-xs font-medium transition ${tab === "diff" ? "border-b-2 border-accent text-white" : "text-muted hover:text-white"}`}
+                className={`rounded-t-lg px-4 py-2 text-xs font-medium transition ${tab === "diff" ? "border-b-2 border-accent text-copy" : "text-muted hover:text-copy"}`}
                 onClick={() => setTab("diff")}
                 type="button"
               >
@@ -328,7 +328,7 @@ function ArtifactModal({
               <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{artifactState.content}</Markdown>
             </div>
           ) : tab === "diff" && artifactState.diff ? (
-            <pre className="overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{artifactState.diff}</pre>
+            <pre className="overflow-x-auto rounded-2xl bg-panel-deep p-4 text-xs text-copy whitespace-pre-wrap">{artifactState.diff}</pre>
           ) : (
             <p className="py-12 text-center text-sm text-muted">暂无内容</p>
           )}
@@ -364,16 +364,16 @@ function ArtifactsPanel({
       ) : (
         <div className="space-y-3">
           {artifacts.map((artifact) => (
-            <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={artifact.id}>
+            <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={artifact.id}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="font-mono text-sm text-white">{artifact.path}</p>
+                  <p className="font-mono text-sm text-copy">{artifact.path}</p>
                   <p className="mt-1 text-xs text-muted">
                     {artifact.kind} · v{artifact.version} · {artifact.status}
                   </p>
                 </div>
                 <button
-                  className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+                  className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                   onClick={() => void onInspect(artifact)}
                   type="button"
                 >
@@ -408,16 +408,16 @@ function JobsPanel({
       {jobs.map((job) => {
         const outputState = jobOutputs[job.id] ?? {};
         return (
-          <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={job.id}>
+          <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={job.id}>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="font-mono text-sm text-white">{job.id}</p>
+                <p className="font-mono text-sm text-copy">{job.id}</p>
                 <p className="mt-1 text-xs text-muted">
                   {job.agent_type} · {job.stage} · {job.status}
                 </p>
               </div>
               <button
-                className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+                className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                 onClick={() => void onLoadOutput(job)}
                 type="button"
               >
@@ -426,7 +426,7 @@ function JobsPanel({
             </div>
             {outputState.loading ? <p className="mt-3 text-sm text-muted">加载输出中...</p> : null}
             {outputState.error ? <p className="mt-3 text-sm text-danger">{outputState.error}</p> : null}
-            {outputState.output ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{outputState.output}</pre> : null}
+            {outputState.output ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-panel-deep p-4 text-xs text-copy whitespace-pre-wrap">{outputState.output}</pre> : null}
           </article>
         );
       })}
@@ -442,17 +442,17 @@ function TraceEvents({ trace }: { trace: RunTraceResponse }) {
   return (
     <div className="space-y-3">
       {trace.events.map((event, index) => (
-        <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={`${event.event_type}-${event.created_at}-${index}`}>
+        <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={`${event.event_type}-${event.created_at}-${index}`}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-white">{event.event_type}</p>
+              <p className="text-sm font-medium text-copy">{event.event_type}</p>
               <p className="mt-1 text-xs text-muted">
                 {event.source ?? "engine"} · {event.level ?? "info"}
               </p>
             </div>
             <span className="text-xs text-muted">{formatTimestamp(event.created_at)}</span>
           </div>
-          {event.payload ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/30 p-4 text-xs text-white whitespace-pre-wrap">{JSON.stringify(event.payload, null, 2)}</pre> : null}
+          {event.payload ? <pre className="mt-3 overflow-x-auto rounded-2xl bg-panel-deep p-4 text-xs text-copy whitespace-pre-wrap">{JSON.stringify(event.payload, null, 2)}</pre> : null}
         </article>
       ))}
     </div>
@@ -469,10 +469,10 @@ function StageHistoryPanel({ steps }: { steps: StepRecord[] | undefined }) {
   return (
     <div className="space-y-3">
       {orderedSteps.map((step, index) => (
-        <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={`${step.from_stage}-${step.to_stage}-${step.created_at}-${index}`}>
+        <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={`${step.from_stage}-${step.to_stage}-${step.created_at}-${index}`}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-white">{`${step.from_stage} -> ${step.to_stage}`}</p>
+              <p className="text-sm font-medium text-copy">{`${step.from_stage} -> ${step.to_stage}`}</p>
               <p className="mt-2 text-xs text-muted">触发者 {step.triggered_by ?? "system"}</p>
             </div>
             <span className="text-xs text-muted">{formatTimestamp(step.created_at)}</span>
@@ -543,7 +543,7 @@ export function RunDetailPage() {
   if (!runId) {
     return (
       <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
-        <h2 className="text-lg font-semibold text-white">缺少运行 ID</h2>
+        <h2 className="text-lg font-semibold text-copy">缺少运行 ID</h2>
         <p className="mt-2 text-sm text-muted">请从概览或运行列表进入以查看具体运行。</p>
       </section>
     );
@@ -553,9 +553,9 @@ export function RunDetailPage() {
   if (error) {
     return (
       <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
-        <h2 className="text-lg font-semibold text-white">运行详情加载失败</h2>
+        <h2 className="text-lg font-semibold text-copy">运行详情加载失败</h2>
         <p className="mt-2 text-sm text-muted">重试查询以恢复产物、任务和追踪数据。</p>
-        <button className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black" onClick={() => void refreshAll()} type="button">
+        <button className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert" onClick={() => void refreshAll()} type="button">
           重试
         </button>
       </section>
@@ -667,13 +667,13 @@ export function RunDetailPage() {
             <MetricCard label="产物数" value={String(briefData.progress.artifacts_count)} />
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
-              <p className="text-xs uppercase tracking-[0.24em] text-muted/75">当前描述</p>
+            <div className="rounded-2xl border border-border bg-panel-strong/80 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">当前描述</p>
               <p className="mt-3 text-sm text-muted">{briefData.current.description}</p>
             </div>
-            <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
-              <p className="text-xs uppercase tracking-[0.24em] text-muted/75">上一阶段</p>
-              <p className="mt-3 text-sm text-white">{briefData.previous?.stage ?? "-"}</p>
+            <div className="rounded-2xl border border-border bg-panel-strong/80 p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">上一阶段</p>
+              <p className="mt-3 text-sm text-copy">{briefData.previous?.stage ?? "-"}</p>
               <p className="mt-2 text-xs text-muted">{briefData.previous?.result ?? "暂无阶段转换记录。"}</p>
             </div>
           </div>
@@ -689,7 +689,7 @@ export function RunDetailPage() {
                   aria-selected={selected}
                   className={[
                     "rounded-full border px-4 py-2 text-sm font-medium transition",
-                    selected ? "border-accent/30 bg-accent/15 text-white" : "border-white/10 bg-white/4 text-muted hover:border-white/20 hover:bg-white/8 hover:text-white",
+                    selected ? "border-accent/30 bg-accent/15 text-copy" : "border-border-strong bg-panel-strong/50 text-muted hover:border-copy/20 hover:bg-panel-strong/70 hover:text-copy",
                   ].join(" ")}
                   id={`run-detail-tab-${tab.id}`}
                   key={tab.id}
@@ -714,9 +714,9 @@ export function RunDetailPage() {
 
       <div className="space-y-4">
         <SectionPanel kicker="SSE 状态" title="实时连接">
-          <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
+          <div className="rounded-2xl border border-border bg-panel-strong/80 p-4">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-white">运行事件流</span>
+              <span className="text-sm text-copy">运行事件流</span>
               <StatusBadge label={connection.label} status={connection.tone} />
             </div>
             <p className="mt-3 text-sm text-muted">相关运行事件会触发节流刷新，使产物、任务和追踪数据保持最新。</p>
@@ -730,8 +730,8 @@ export function RunDetailPage() {
         <SectionPanel kicker="操作" title="操作控制">
           <div className="space-y-4">
             {activeGate ? (
-              <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
-                <p className="text-sm text-white">审批门控</p>
+              <div className="rounded-2xl border border-border bg-panel-strong/80 p-4">
+                <p className="text-sm text-copy">审批门控</p>
                 <p className="mt-2 text-sm text-muted">{runData.current_stage} 等待审批决策中。</p>
                 <div className="mt-4">
                   <ApprovalAction gate={activeGate} onComplete={refreshAll} runId={resolvedRunId} />
@@ -739,11 +739,11 @@ export function RunDetailPage() {
               </div>
             ) : null}
 
-            <div className="rounded-2xl border border-white/6 bg-panel-strong/80 p-4">
-              <p className="text-sm text-white">终止运行</p>
+            <div className="rounded-2xl border border-border bg-panel-strong/80 p-4">
+              <p className="text-sm text-copy">终止运行</p>
               <p className="mt-2 text-sm text-muted">需要停止后续工作时，取消当前运行并等待终止事件。</p>
               <button
-                className="mt-4 rounded-full bg-danger px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-4 rounded-full bg-danger px-4 py-2 text-sm font-medium text-copy disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={cancelPending || runData.status !== "running"}
                 onClick={() => void handleCancelRun()}
                 type="button"

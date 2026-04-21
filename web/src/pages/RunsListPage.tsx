@@ -40,11 +40,11 @@ function SectionPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-white/6 bg-panel p-6 shadow-panel">
+    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.3em] text-muted/75">{kicker}</p>
-          <h2 className="mt-2 text-lg font-semibold text-white">{title}</h2>
+          <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
+          <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
         </div>
       </div>
       <div className="mt-5">{children}</div>
@@ -106,14 +106,14 @@ function formatTimestamp(value: string) {
 }
 
 function EmptyState({ copy }: { copy: string }) {
-  return <p className="rounded-2xl border border-dashed border-white/8 bg-white/3 px-4 py-6 text-sm text-muted">{copy}</p>;
+  return <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">{copy}</p>;
 }
 
 function LoadingSkeleton() {
   return (
     <div className="space-y-3">
       {Array.from({ length: 5 }, (_, index) => (
-        <div className="h-28 animate-pulse rounded-[24px] border border-white/6 bg-panel-strong/70" key={index} />
+        <div className="h-28 animate-pulse rounded-[24px] border border-border bg-panel-strong/70" key={index} />
       ))}
     </div>
   );
@@ -121,11 +121,11 @@ function LoadingSkeleton() {
 
 function RunRow({ run, onOpen }: { run: RunRecord; onOpen: (runId: string) => void }) {
   return (
-    <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4">
+    <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
-            <p className="font-mono text-sm text-white">{run.ticket}</p>
+            <p className="font-mono text-sm text-copy">{run.ticket}</p>
             <StatusBadge status={run.status} />
             <StatusBadge label={run.current_stage} status={run.current_stage.includes("REVIEW") ? "review" : run.status} />
           </div>
@@ -136,21 +136,21 @@ function RunRow({ run, onOpen }: { run: RunRecord; onOpen: (runId: string) => vo
         </div>
 
         <div className="grid gap-3 text-sm text-muted sm:grid-cols-3 xl:min-w-[360px]">
-          <div className="rounded-2xl border border-white/6 bg-black/18 px-3 py-3">
-            <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">阶段</p>
-            <p className="mt-2 font-mono text-xs text-white">{run.current_stage}</p>
+          <div className="rounded-2xl border border-border bg-panel px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-muted-soft">阶段</p>
+            <p className="mt-2 font-mono text-xs text-copy">{run.current_stage}</p>
           </div>
-          <div className="rounded-2xl border border-white/6 bg-black/18 px-3 py-3">
-            <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">更新时间</p>
-            <p className="mt-2 text-xs text-white">{formatTimestamp(run.updated_at)}</p>
+          <div className="rounded-2xl border border-border bg-panel px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-muted-soft">更新时间</p>
+            <p className="mt-2 text-xs text-copy">{formatTimestamp(run.updated_at)}</p>
           </div>
-          <div className="flex flex-col justify-between rounded-2xl border border-white/6 bg-black/18 px-3 py-3">
+          <div className="flex flex-col justify-between rounded-2xl border border-border bg-panel px-3 py-3">
             <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">仓库</p>
-              <p className="mt-2 truncate text-xs text-white">{run.repo_path}</p>
+              <p className="text-[11px] uppercase tracking-[0.24em] text-muted-soft">仓库</p>
+              <p className="mt-2 truncate text-xs text-copy">{run.repo_path}</p>
             </div>
             <button
-              className="mt-4 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90"
+              className="mt-4 rounded-full bg-copy px-3 py-2 text-xs font-medium text-ink-invert transition hover:bg-copy/90"
               onClick={() => onOpen(run.id)}
               type="button"
             >
@@ -245,35 +245,35 @@ function CreateRunDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-[28px] border border-white/8 bg-panel p-6 shadow-panel" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold text-white">创建任务</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-copy/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-[28px] border border-border bg-panel p-6 shadow-panel" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-copy">创建任务</h2>
         <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
           <label className="block space-y-1 text-sm text-muted">
             <span>工单 <span className="text-red-400">*</span></span>
-            <input name="ticket" required className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none focus:border-accent/40" placeholder="PROJ-123" />
+            <input name="ticket" required className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none focus:border-accent/40" placeholder="PROJ-123" />
           </label>
           <label className="block space-y-1 text-sm text-muted">
             <span>仓库路径 <span className="text-red-400">*</span></span>
-            <input name="repo_path" required className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none focus:border-accent/40" placeholder="/path/to/repo" />
+            <input name="repo_path" required className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none focus:border-accent/40" placeholder="/path/to/repo" />
           </label>
           <label className="block space-y-1 text-sm text-muted">
             <span>描述</span>
-            <textarea name="description" rows={2} className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none focus:border-accent/40" />
+            <textarea name="description" rows={2} className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none focus:border-accent/40" />
           </label>
 
           {/* File drop zone */}
           <div className="space-y-1 text-sm text-muted">
             <span>需求文档（可选，上传后跳过需求阶段）</span>
             <div
-              className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-4 py-6 transition ${file ? "border-accent/50 bg-accent/5" : "border-white/10 bg-black/10 hover:border-white/20"}`}
+              className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-4 py-6 transition ${file ? "border-accent/50 bg-accent/5" : "border-border-strong bg-panel hover:border-copy/20"}`}
               onClick={() => fileRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
             >
               {file ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-white">{file.name}</span>
+                  <span className="text-sm text-copy">{file.name}</span>
                   <button type="button" className="text-xs text-red-400 hover:underline" onClick={(e) => { e.stopPropagation(); setFile(null); }}>移除</button>
                 </div>
               ) : (
@@ -289,7 +289,7 @@ function CreateRunDialog({
           <div className="grid grid-cols-2 gap-3">
             <label className="block space-y-1 text-sm text-muted">
               <span>设计 Agent</span>
-              <select name="design_agent" className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none [&_option]:bg-panel-strong">
+              <select name="design_agent" className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none [&_option]:bg-panel-strong">
                 <option value="">默认</option>
                 <option value="claude">Claude</option>
                 <option value="codex">Codex</option>
@@ -297,7 +297,7 @@ function CreateRunDialog({
             </label>
             <label className="block space-y-1 text-sm text-muted">
               <span>开发 Agent</span>
-              <select name="dev_agent" className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none [&_option]:bg-panel-strong">
+              <select name="dev_agent" className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none [&_option]:bg-panel-strong">
                 <option value="">默认</option>
                 <option value="claude">Claude</option>
                 <option value="codex">Codex</option>
@@ -308,8 +308,8 @@ function CreateRunDialog({
           {error && <p className="rounded-xl bg-red-500/10 px-4 py-2 text-sm text-red-400">{error}</p>}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="rounded-full border border-white/10 bg-white/4 px-5 py-2.5 text-sm font-medium text-white hover:bg-white/8">取消</button>
-            <button type="submit" disabled={submitting} className="rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black hover:bg-white/90 disabled:opacity-50">
+            <button type="button" onClick={onClose} className="rounded-full border border-border-strong bg-panel-strong/50 px-5 py-2.5 text-sm font-medium text-copy hover:bg-panel-strong/70">取消</button>
+            <button type="submit" disabled={submitting} className="rounded-full bg-copy px-5 py-2.5 text-sm font-medium text-ink-invert hover:bg-copy/90 disabled:opacity-50">
               {submitting ? "创建中..." : "创建"}
             </button>
           </div>
@@ -370,7 +370,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>工单</span>
             <input
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
               onChange={(event) => setDraft((current) => ({ ...current, ticket: event.target.value }))}
               placeholder="按工单搜索"
               type="search"
@@ -381,7 +381,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>状态</span>
             <select
-              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))}
               value={draft.status}
             >
@@ -397,7 +397,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>阶段</span>
             <select
-              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, stage: event.target.value }))}
               value={draft.stage}
             >
@@ -413,7 +413,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>排序字段</span>
             <select
-              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, sortBy: event.target.value }))}
               value={draft.sortBy}
             >
@@ -428,7 +428,7 @@ export function RunsListPage() {
           <label className="space-y-2 text-sm text-muted">
             <span>排序方向</span>
             <select
-              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={(event) => setDraft((current) => ({ ...current, sortOrder: event.target.value === "asc" ? "asc" : "desc" }))}
               value={draft.sortOrder}
             >
@@ -437,18 +437,18 @@ export function RunsListPage() {
             </select>
           </label>
 
-          <button className="rounded-full bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90" type="submit">
+          <button className="rounded-full bg-copy px-4 py-3 text-sm font-medium text-ink-invert transition hover:bg-copy/90" type="submit">
             查询
           </button>
           <button
-            className="rounded-full border border-white/10 bg-white/4 px-4 py-3 text-sm font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+            className="rounded-full border border-border-strong bg-panel-strong/50 px-4 py-3 text-sm font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
             onClick={() => void runs.mutate()}
             type="button"
           >
             刷新
           </button>
           <button
-            className="rounded-full bg-accent px-4 py-3 text-sm font-medium text-white transition hover:bg-accent/90"
+            className="rounded-full bg-accent px-4 py-3 text-sm font-medium text-copy transition hover:bg-accent/90"
             onClick={() => setShowCreate(true)}
             type="button"
           >
@@ -458,20 +458,20 @@ export function RunsListPage() {
       </SectionPanel>
 
       <SectionPanel kicker="服务端查询" title="运行列表">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/6 pb-4 text-sm text-muted">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4 text-sm text-muted">
           <p>{summary}</p>
           <div className="flex items-center gap-2">
             <button
-              className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={page <= 1}
               onClick={() => commit(applied, page - 1)}
               type="button"
             >
               上一页
             </button>
-            <span className="rounded-full border border-white/8 bg-black/18 px-3 py-2 text-xs text-muted">{`第 ${page} / ${totalPages} 页`}</span>
+            <span className="rounded-full border border-border bg-panel px-3 py-2 text-xs text-muted">{`第 ${page} / ${totalPages} 页`}</span>
             <button
-              className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={page >= totalPages || total === 0}
               onClick={() => commit(applied, page + 1)}
               type="button"
@@ -484,9 +484,9 @@ export function RunsListPage() {
         <div className="mt-5">
           {runs.error ? (
             <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
-              <h3 className="text-base font-semibold text-white">运行数据加载失败</h3>
+              <h3 className="text-base font-semibold text-copy">运行数据加载失败</h3>
               <p className="mt-2 text-sm text-muted">请重试查询或调整筛选条件。</p>
-              <button className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black" onClick={() => void runs.mutate()} type="button">
+              <button className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert" onClick={() => void runs.mutate()} type="button">
                 重试
               </button>
             </div>

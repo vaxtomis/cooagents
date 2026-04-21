@@ -39,23 +39,23 @@ function SectionPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-white/6 bg-panel p-6 shadow-panel">
-      <p className="text-[11px] uppercase tracking-[0.3em] text-muted/75">{kicker}</p>
-      <h2 className="mt-2 text-lg font-semibold text-white">{title}</h2>
+    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
+      <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
+      <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
   );
 }
 
 function EmptyState({ copy }: { copy: string }) {
-  return <p className="rounded-2xl border border-dashed border-white/8 bg-white/3 px-4 py-6 text-sm text-muted">{copy}</p>;
+  return <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">{copy}</p>;
 }
 
 function LoadingSkeleton() {
   return (
     <div className="space-y-3">
       {Array.from({ length: 3 }, (_, index) => (
-        <div key={index} className="h-48 animate-pulse rounded-[24px] border border-white/6 bg-panel-strong/70" />
+        <div key={index} className="h-48 animate-pulse rounded-[24px] border border-border bg-panel-strong/70" />
       ))}
     </div>
   );
@@ -63,16 +63,16 @@ function LoadingSkeleton() {
 
 function ConfigBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[20px] border border-white/6 bg-black/18 px-4 py-3">
+    <div className="rounded-[20px] border border-border bg-panel px-4 py-3">
       <p className="text-[11px] uppercase tracking-[0.24em] text-muted/70">{label}</p>
-      <p className="mt-2 text-sm font-medium text-white">{value}</p>
+      <p className="mt-2 text-sm font-medium text-copy">{value}</p>
     </div>
   );
 }
 
 function HostTag({ label }: { label: string }) {
   return (
-    <span className="rounded-full border border-white/8 bg-white/4 px-3 py-1 text-xs text-white/85">
+    <span className="rounded-full border border-border bg-panel-strong/50 px-3 py-1 text-xs text-copy/85">
       {label}
     </span>
   );
@@ -219,9 +219,9 @@ export function AgentHostsPage() {
       <SectionPanel kicker="主机注册" title="Agent 主机配置">
         {hostsQuery.error ? (
           <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
-            <h3 className="text-base font-semibold text-white">主机清单加载失败</h3>
+            <h3 className="text-base font-semibold text-copy">主机清单加载失败</h3>
             <p className="mt-2 text-sm text-muted">重试查询以恢复主机注册表。</p>
-            <button className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black" onClick={() => void refreshHosts()} type="button">
+            <button className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert" onClick={() => void refreshHosts()} type="button">
               重试
             </button>
           </div>
@@ -238,14 +238,14 @@ export function AgentHostsPage() {
               return (
                 <article
                   className={`flex flex-col rounded-[24px] border bg-panel-strong/80 p-5 transition ${
-                    isSelected ? "border-accent/30 shadow-[0_0_0_1px_rgba(168,85,247,0.22)]" : "border-white/6"
+                    isSelected ? "border-accent/30 shadow-[0_0_0_1px_rgba(168,85,247,0.22)]" : "border-border"
                   }`}
                   key={host.id}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                       <p className="text-[11px] uppercase tracking-[0.28em] text-muted/70">主机配置</p>
-                      <p className="mt-2 font-mono text-sm text-white">{host.id}</p>
+                      <p className="mt-2 font-mono text-sm text-copy">{host.id}</p>
                       <p className="mt-1 text-sm text-muted">{host.host}</p>
                     </div>
                     <StatusBadge status={host.status} />
@@ -261,7 +261,7 @@ export function AgentHostsPage() {
                     />
                   </div>
 
-                  <div className="mt-4 rounded-[20px] border border-white/6 bg-black/18 px-4 py-3">
+                  <div className="mt-4 rounded-[20px] border border-border bg-panel px-4 py-3">
                     <p className="text-[11px] uppercase tracking-[0.24em] text-muted/70">标签</p>
                     {host.labels.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -276,7 +276,7 @@ export function AgentHostsPage() {
 
                   <div className="mt-auto flex flex-wrap gap-2 pt-4">
                     <button
-                      className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+                      className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                       onClick={() => {
                         setSelectedHostId(host.id);
                         setActionMessage(null);
@@ -287,7 +287,7 @@ export function AgentHostsPage() {
                       编辑
                     </button>
                     <button
-                      className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={pendingState !== undefined && pendingState !== null}
                       onClick={() => void handleCheck(host.id)}
                       type="button"
@@ -295,7 +295,7 @@ export function AgentHostsPage() {
                       {pendingState === "check" ? "检查中..." : "检查"}
                     </button>
                     <button
-                      className="rounded-full bg-danger px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-full bg-danger px-3 py-2 text-xs font-medium text-copy disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={pendingState !== undefined && pendingState !== null}
                       onClick={() => void handleDelete(host.id)}
                       type="button"
@@ -317,7 +317,7 @@ export function AgentHostsPage() {
           </p>
           {isEditing && (
             <button
-              className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+              className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
               onClick={resetForm}
               type="button"
             >
@@ -329,7 +329,7 @@ export function AgentHostsPage() {
         <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
           <Field label="主机 ID">
             <input
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isEditing}
               onChange={updateForm("id")}
               required
@@ -340,7 +340,7 @@ export function AgentHostsPage() {
 
           <Field label="主机地址">
             <input
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
               onChange={updateForm("host")}
               required
               type="text"
@@ -350,7 +350,7 @@ export function AgentHostsPage() {
 
           <Field label="Agent 类型">
             <select
-              className="w-full rounded-2xl border border-white/8 bg-panel-strong px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
+              className="w-full rounded-2xl border border-border bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40 [&_option]:bg-panel-strong"
               onChange={updateForm("agent_type")}
               value={form.agent_type}
             >
@@ -362,7 +362,7 @@ export function AgentHostsPage() {
 
           <Field label="最大并发">
             <input
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
               min={1}
               onChange={updateForm("max_concurrent")}
               required
@@ -373,7 +373,7 @@ export function AgentHostsPage() {
 
           <Field label="SSH 密钥">
             <input
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
               onChange={updateForm("ssh_key")}
               type="text"
               value={form.ssh_key}
@@ -382,7 +382,7 @@ export function AgentHostsPage() {
 
           <Field label="标签">
             <input
-              className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+              className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
               onChange={updateForm("labels")}
               placeholder="逗号分隔的标签"
               type="text"
@@ -394,7 +394,7 @@ export function AgentHostsPage() {
           {formError ? <p className="text-sm text-danger">{formError}</p> : null}
 
           <button
-            className="w-full rounded-full bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-full bg-copy px-4 py-3 text-sm font-medium text-ink-invert transition hover:bg-copy/90 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={formPending}
             type="submit"
           >

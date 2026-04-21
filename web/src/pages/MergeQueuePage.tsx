@@ -27,9 +27,9 @@ function SectionPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-white/6 bg-panel p-6 shadow-panel">
-      <p className="text-[11px] uppercase tracking-[0.3em] text-muted/75">{kicker}</p>
-      <h2 className="mt-2 text-lg font-semibold text-white">{title}</h2>
+    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
+      <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
+      <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
   );
@@ -37,7 +37,7 @@ function SectionPanel({
 
 function EmptyState({ copy }: { copy: string }) {
   return (
-    <p className="rounded-2xl border border-dashed border-white/8 bg-white/3 px-4 py-6 text-sm text-muted">
+    <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
       {copy}
     </p>
   );
@@ -49,7 +49,7 @@ function LoadingSkeleton() {
       {Array.from({ length: 3 }, (_, index) => (
         <div
           key={index}
-          className="h-32 animate-pulse rounded-[24px] border border-white/6 bg-panel-strong/70"
+          className="h-32 animate-pulse rounded-[24px] border border-border bg-panel-strong/70"
         />
       ))}
     </div>
@@ -210,12 +210,12 @@ export function MergeQueuePage() {
       <SectionPanel kicker="队列清单" title="合并队列">
         {queueQuery.error || enrichedQuery.error ? (
           <div className="rounded-[24px] border border-danger/15 bg-danger/8 p-5">
-            <h3 className="text-base font-semibold text-white">合并队列加载失败</h3>
+            <h3 className="text-base font-semibold text-copy">合并队列加载失败</h3>
             <p className="mt-2 text-sm text-muted">
               重试查询以恢复合并状态和运行上下文。
             </p>
             <button
-              className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black"
+              className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert"
               onClick={() => void refreshAll()}
               type="button"
             >
@@ -238,13 +238,13 @@ export function MergeQueuePage() {
                   className={`rounded-[24px] border bg-panel-strong/80 p-4 transition ${
                     selectedState
                       ? "border-accent/30 shadow-[0_0_0_1px_rgba(168,85,247,0.22)]"
-                      : "border-white/6"
+                      : "border-border"
                   }`}
                   key={item.id}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="font-mono text-sm text-white">{label}</p>
+                      <p className="font-mono text-sm text-copy">{label}</p>
                       <p className="mt-1 text-sm text-muted">{item.branch}</p>
                       <p className="mt-2 text-xs text-muted">
                         priority {item.priority} · {item.run?.current_stage ?? "run unavailable"}
@@ -255,14 +255,14 @@ export function MergeQueuePage() {
 
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
-                      className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+                      className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                       onClick={() => setSelectedRunId(item.run_id)}
                       type="button"
                     >
                       {`查看 ${item.run_id}`}
                     </button>
                     <button
-                      className="rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={pendingState !== undefined && pendingState !== null}
                       onClick={() => void handleMerge(item.run_id, item.priority)}
                       type="button"
@@ -270,7 +270,7 @@ export function MergeQueuePage() {
                       {pendingState === "merge" ? "排队中..." : `合并 ${item.run_id}`}
                     </button>
                     <button
-                      className="rounded-full bg-danger px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-full bg-danger px-3 py-2 text-xs font-medium text-copy disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={pendingState !== undefined && pendingState !== null}
                       onClick={() => void handleSkip(item.run_id)}
                       type="button"
@@ -288,10 +288,10 @@ export function MergeQueuePage() {
       <SectionPanel kicker="选中项" title="队列详情">
         {selected ? (
           <div className="space-y-4">
-            <div className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4">
+            <div className="rounded-[24px] border border-border bg-panel-strong/80 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-mono text-sm text-white">
+                  <p className="font-mono text-sm text-copy">
                     {selected.run?.ticket ?? selected.run_id}
                   </p>
                   <p className="mt-1 text-sm text-muted">{selected.branch}</p>
@@ -316,7 +316,7 @@ export function MergeQueuePage() {
             <label className="block space-y-2 text-sm text-muted">
               <span>合并优先级</span>
               <input
-                className="w-full rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                className="w-full rounded-2xl border border-border bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-accent/40"
                 min={0}
                 onChange={(event) => setMergePriority(event.target.value)}
                 type="number"
@@ -328,7 +328,7 @@ export function MergeQueuePage() {
               <div className="rounded-[24px] border border-warning/20 bg-warning/10 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium text-white">检测到冲突</p>
+                    <p className="text-sm font-medium text-copy">检测到冲突</p>
                     <p className="mt-2 text-sm text-muted">
                       查看冲突文件，在外部解决后重新入队。
                     </p>
@@ -340,11 +340,11 @@ export function MergeQueuePage() {
 
                 {conflictsQuery.error ? (
                   <div className="mt-4 rounded-2xl border border-danger/15 bg-danger/8 p-4">
-                    <p className="text-sm text-white">
+                    <p className="text-sm text-copy">
                       冲突详情刷新失败，显示队列快照。
                     </p>
                     <button
-                      className="mt-3 rounded-full border border-white/10 bg-white/4 px-3 py-2 text-xs font-medium text-white transition hover:border-white/20 hover:bg-white/8"
+                      className="mt-3 rounded-full border border-border-strong bg-panel-strong/50 px-3 py-2 text-xs font-medium text-copy transition hover:border-copy/20 hover:bg-panel-strong/70"
                       onClick={() => void conflictsQuery.mutate()}
                       type="button"
                     >
@@ -353,8 +353,8 @@ export function MergeQueuePage() {
                   </div>
                 ) : null}
 
-                <div className="mt-4 rounded-[24px] border border-white/6 bg-panel-strong/80 p-4">
-                  <p className="text-sm font-medium text-white">冲突文件</p>
+                <div className="mt-4 rounded-[24px] border border-border bg-panel-strong/80 p-4">
+                  <p className="text-sm font-medium text-copy">冲突文件</p>
                   {selected.status === "conflict" && conflictsQuery.isLoading && !conflictsQuery.data ? (
                     <p className="mt-3 text-sm text-muted">加载冲突详情...</p>
                   ) : conflictFiles.length === 0 ? (
@@ -369,7 +369,7 @@ export function MergeQueuePage() {
                 </div>
 
                 <button
-                  className="mt-4 rounded-full bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-4 rounded-full bg-copy px-4 py-3 text-sm font-medium text-ink-invert transition hover:bg-copy/90 disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={rowPending[selected.run_id] !== undefined && rowPending[selected.run_id] !== null}
                   onClick={() => void handleResolve(selected.run_id)}
                   type="button"
@@ -380,8 +380,8 @@ export function MergeQueuePage() {
                 </button>
               </div>
             ) : (
-              <div className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4">
-                <p className="text-sm font-medium text-white">冲突文件</p>
+              <div className="rounded-[24px] border border-border bg-panel-strong/80 p-4">
+                <p className="text-sm font-medium text-copy">冲突文件</p>
                 {selected.conflict_files.length === 0 ? (
                   <p className="mt-3 text-sm text-muted">未报告冲突文件</p>
                 ) : (
@@ -407,9 +407,9 @@ export function MergeQueuePage() {
 
 function DetailLine({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/6 bg-black/18 px-3 py-3">
-      <p className="text-[11px] uppercase tracking-[0.24em] text-muted/75">{label}</p>
-      <p className="mt-2 break-all text-sm text-white">{value}</p>
+    <div className="rounded-2xl border border-border bg-panel px-3 py-3">
+      <p className="text-[11px] uppercase tracking-[0.24em] text-muted-soft">{label}</p>
+      <p className="mt-2 break-all text-sm text-copy">{value}</p>
     </div>
   );
 }

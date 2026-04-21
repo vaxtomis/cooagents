@@ -107,14 +107,14 @@ function ShellNavLink({ item, compact = false }: { item: NavItem; compact?: bool
       className={({ isActive }) => {
         const base = compact
           ? "inline-flex min-w-fit items-center gap-2 rounded-full border px-3 py-2 text-sm transition"
-          : "flex items-center gap-3 rounded-2xl border px-3 py-3 text-sm transition";
+          : "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition";
         const state = isActive
-          ? "border-accent/30 bg-accent/12 text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
-          : "border-transparent text-muted hover:border-white/8 hover:bg-white/4 hover:text-white";
+          ? "border-[color:var(--color-ring-warm)] bg-panel text-copy shadow-[0_0_0_1px_var(--color-ring-warm)]"
+          : "border-transparent text-muted hover:border-border hover:bg-panel-strong/60 hover:text-copy";
         return `${base} ${state}`;
       }}
     >
-      <Icon className="size-4.5 shrink-0" strokeWidth={1.8} />
+      <Icon className="size-4 shrink-0" strokeWidth={1.8} />
       <span>{item.label}</span>
     </NavLink>
   );
@@ -143,40 +143,46 @@ function ShellLayout() {
 
   return (
     <div className="min-h-screen bg-void text-copy">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1600px] gap-4 px-3 py-3 md:px-5 md:py-5">
-        <aside className="hidden w-[240px] shrink-0 rounded-[30px] border border-white/6 bg-black/55 p-4 shadow-shell backdrop-blur md:flex md:flex-col">
-          <div className="flex items-center gap-3 px-2 py-2">
-            <div className="flex size-10 items-center justify-center rounded-2xl bg-accent/14 text-accent">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1500px] gap-6 px-4 py-5 md:px-8 md:py-8">
+        <aside className="hidden w-[256px] shrink-0 flex-col rounded-[24px] border border-border bg-panel p-5 shadow-whisper md:flex">
+          <div className="flex items-center gap-3 px-1 pb-2">
+            <div className="flex size-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
               <Bot className="size-5" strokeWidth={1.9} />
             </div>
             <div>
-              <p className="text-lg font-semibold tracking-tight text-white">Cooagents</p>
-              <p className="text-xs text-muted">运维控制台</p>
+              <p className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">
+                Cooagents
+              </p>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-soft">
+                运维控制台
+              </p>
             </div>
           </div>
 
-          <nav className="mt-8 flex flex-col gap-1.5">
+          <nav className="mt-8 flex flex-col gap-1">
             {navItems.map((item) => (
               <ShellNavLink key={item.to} item={item} />
             ))}
           </nav>
 
           <div className="mt-auto space-y-3">
-            <div className="rounded-[24px] border border-white/6 bg-panel p-4 text-sm text-muted">
-              <p className="text-white">运维控制台已上线</p>
-              <p className="mt-2">
+            <div className="rounded-2xl border border-border-strong bg-panel-strong/40 p-4 text-sm text-muted">
+              <p className="font-serif text-base font-medium leading-snug text-copy">
+                章节般的运维节奏
+              </p>
+              <p className="mt-2 leading-relaxed">
                 概览、Runs、主机管理与合并控制共享同一实时终端。
               </p>
             </div>
-            <div className="flex items-center justify-between gap-3 rounded-[24px] border border-white/6 bg-panel px-4 py-3 text-xs text-muted">
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3 text-xs text-muted">
               <div className="min-w-0 truncate">
-                <p className="text-[10px] uppercase tracking-[0.22em] text-muted/75">已登录</p>
-                <p className="truncate text-sm text-white">{user?.username ?? "-"}</p>
+                <p className="text-[10px] uppercase tracking-[0.22em] text-muted-soft">已登录</p>
+                <p className="truncate text-sm text-copy">{user?.username ?? "-"}</p>
               </div>
               <button
                 type="button"
                 onClick={() => void logout()}
-                className="inline-flex items-center gap-1 rounded-full border border-white/10 px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
+                className="inline-flex items-center gap-1 rounded-full border border-border-strong px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
               >
                 <LogOut className="size-3.5" strokeWidth={1.8} />
                 退出
@@ -185,24 +191,24 @@ function ShellLayout() {
           </div>
         </aside>
 
-        <div className="flex min-h-[calc(100vh-1.5rem)] flex-1 flex-col gap-4">
-          <header className="overflow-hidden rounded-[30px] border border-white/6 bg-[radial-gradient(circle_at_top_left,rgba(168,85,247,0.18),transparent_38%),linear-gradient(180deg,rgba(24,24,27,0.96),rgba(15,15,18,0.92))] p-5 shadow-shell md:p-7">
-            <div className="flex flex-col gap-5">
+        <div className="flex min-h-[calc(100vh-2rem)] flex-1 flex-col gap-6">
+          <header className="overflow-hidden rounded-[24px] border border-border bg-panel px-6 py-8 shadow-whisper md:px-10 md:py-10">
+            <div className="flex flex-col gap-6">
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.32em] text-accent/85">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-accent">
                     {meta.eyebrow}
                   </p>
-                  <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white md:text-[2.1rem]">
+                  <h1 className="mt-3 font-serif text-[2.25rem] font-medium leading-[1.15] tracking-tight text-copy md:text-[2.75rem]">
                     {meta.title}
                   </h1>
-                  <p className="mt-3 max-w-3xl text-sm leading-6 text-muted md:text-[15px]">
+                  <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-muted md:text-base">
                     {meta.description}
                   </p>
                 </div>
 
-                <div className="hidden rounded-full border border-white/8 bg-white/4 px-4 py-2 text-xs uppercase tracking-[0.24em] text-muted md:flex md:items-center md:gap-2">
-                  <span className="size-2 rounded-full bg-success" />
+                <div className="hidden shrink-0 items-center gap-2 rounded-full border border-border-strong bg-panel-strong/50 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-muted md:flex">
+                  <span className="size-1.5 rounded-full bg-success" />
                   在线
                 </div>
               </div>

@@ -19,7 +19,7 @@ describe("StatusBadge", () => {
 
     const badge = screen.getByRole("status", { name: "运行中" });
     expect(badge).toHaveAttribute("data-tone", "success");
-    expect(badge).toHaveClass("bg-success/12", "text-success");
+    expect(badge).toHaveClass("bg-success/10", "text-success");
   });
 });
 

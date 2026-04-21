@@ -33,16 +33,16 @@ function SectionPanel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-[28px] border border-white/6 bg-panel p-6 shadow-panel">
-      <p className="text-[11px] uppercase tracking-[0.3em] text-muted/75">{kicker}</p>
-      <h2 className="mt-2 text-lg font-semibold text-white">{title}</h2>
+    <section className="rounded-[28px] border border-border bg-panel p-6 shadow-panel">
+      <p className="text-[11px] uppercase tracking-[0.3em] text-muted-soft">{kicker}</p>
+      <h2 className="mt-2 text-lg font-semibold text-copy">{title}</h2>
       <div className="mt-5">{children}</div>
     </section>
   );
 }
 
 function EmptyState({ copy }: { copy: string }) {
-  return <p className="rounded-2xl border border-dashed border-white/8 bg-white/3 px-4 py-6 text-sm text-muted">{copy}</p>;
+  return <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">{copy}</p>;
 }
 
 function getPendingApprovals(runs: RunRecord[]) {
@@ -87,9 +87,9 @@ export function DashboardPage() {
   if (hasError) {
     return (
       <section className="rounded-[28px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
-        <h2 className="text-lg font-semibold text-white">仪表盘数据加载失败</h2>
+        <h2 className="text-lg font-semibold text-copy">仪表盘数据加载失败</h2>
         <p className="mt-2 text-sm text-muted">重试查询以恢复概览页面。</p>
-        <button className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-medium text-black" onClick={() => void refreshAll()} type="button">
+        <button className="mt-4 rounded-full bg-copy px-4 py-2 text-sm font-medium text-ink-invert" onClick={() => void refreshAll()} type="button">
           重试
         </button>
       </section>
@@ -101,14 +101,14 @@ export function DashboardPage() {
       <div className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-5">
           {Array.from({ length: 5 }, (_, index) => (
-            <div key={index} className="h-32 animate-pulse rounded-[24px] border border-white/6 bg-panel" />
+            <div key={index} className="h-32 animate-pulse rounded-[24px] border border-border bg-panel" />
           ))}
         </div>
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="h-[360px] animate-pulse rounded-[28px] border border-white/6 bg-panel" />
+          <div className="h-[360px] animate-pulse rounded-[28px] border border-border bg-panel" />
           <div className="space-y-4">
-            <div className="h-[180px] animate-pulse rounded-[28px] border border-white/6 bg-panel" />
-            <div className="h-[180px] animate-pulse rounded-[28px] border border-white/6 bg-panel" />
+            <div className="h-[180px] animate-pulse rounded-[28px] border border-border bg-panel" />
+            <div className="h-[180px] animate-pulse rounded-[28px] border border-border bg-panel" />
           </div>
         </div>
       </div>
@@ -152,10 +152,10 @@ export function DashboardPage() {
             ) : (
               <div className="space-y-3">
                 {pendingApprovals.map((run) => (
-                  <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4" key={run.id}>
+                  <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4" key={run.id}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="font-mono text-sm text-white">{run.ticket}</p>
+                        <p className="font-mono text-sm text-copy">{run.ticket}</p>
                         <p className="mt-1 text-sm text-muted">{run.description || "审批门控等待决策中。"}</p>
                       </div>
                       <StatusBadge label={run.current_stage} status="review" />
@@ -193,10 +193,10 @@ export function DashboardPage() {
 
 function HostSummaryCard({ host }: { host: AgentHost }) {
   return (
-    <article className="rounded-[24px] border border-white/6 bg-panel-strong/80 p-4">
+    <article className="rounded-[24px] border border-border bg-panel-strong/80 p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-white">{host.host}</p>
+          <p className="text-sm font-medium text-copy">{host.host}</p>
           <p className="mt-1 text-xs text-muted">
             {host.agent_type} · {host.current_load}/{host.max_concurrent}
           </p>

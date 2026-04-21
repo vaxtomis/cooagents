@@ -1,23 +1,48 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Geist", "Segoe UI", sans-serif;
-  --font-mono: "Geist Mono", "SFMono-Regular", monospace;
-  --color-void: #09090b;
-  --color-panel: #151519;
-  --color-panel-strong: #1d1d22;
-  --color-copy: #f5f5f5;
-  --color-muted: #a1a1aa;
-  --color-accent: #a855f7;
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
-  --color-danger: #ef4444;
-  --shadow-shell: 0 24px 80px rgba(0, 0, 0, 0.38);
-  --shadow-panel: 0 16px 34px rgba(0, 0, 0, 0.28);
+  --font-sans: "Inter", "system-ui", "Segoe UI", sans-serif;
+  --font-serif: "Source Serif 4", "Source Serif Pro", "Georgia", serif;
+  --font-mono: "JetBrains Mono", "Geist Mono", "SFMono-Regular", monospace;
+
+  /* Claude parchment surfaces */
+  --color-void: #f5f4ed;          /* Parchment — primary page background */
+  --color-panel: #faf9f5;         /* Ivory — elevated card surface */
+  --color-panel-strong: #e8e6dc;  /* Warm Sand — prominent surface */
+  --color-panel-deep: #30302e;    /* Dark Surface — inverse sections */
+
+  /* Typography */
+  --color-copy: #141413;          /* Anthropic Near Black — primary text */
+  --color-copy-soft: #3d3d3a;     /* Dark Warm — emphasized secondary */
+  --color-muted: #5e5d59;         /* Olive Gray — secondary text */
+  --color-muted-soft: #87867f;    /* Stone Gray — tertiary / metadata */
+  --color-ink-invert: #faf9f5;    /* Ivory — text on dark surfaces */
+  --color-ink-invert-soft: #b0aea5;/* Warm Silver — muted text on dark */
+
+  /* Brand + semantic accents (all warm-toned except focus blue) */
+  --color-accent: #c96442;        /* Terracotta Brand */
+  --color-accent-soft: #d97757;   /* Coral Accent */
+  --color-success: #4f7a4a;       /* Muted forest green */
+  --color-warning: #b07a2b;       /* Warm amber */
+  --color-danger: #b53333;        /* Error Crimson */
+  --color-focus: #3898ec;         /* Focus Blue (accessibility only) */
+
+  /* Warm borders & rings */
+  --color-border: #f0eee6;        /* Border Cream */
+  --color-border-strong: #e8e6dc; /* Border Warm */
+  --color-border-dark: #30302e;   /* Border on dark */
+  --color-ring-warm: #d1cfc5;     /* Ring Warm */
+  --color-ring-deep: #c2c0b6;     /* Ring Deep */
+
+  /* Shadows — ring-based warm halos + whisper lifts */
+  --shadow-ring: 0 0 0 1px #d1cfc5;
+  --shadow-whisper: 0 4px 24px rgba(20, 20, 19, 0.05);
+  --shadow-shell: 0 24px 64px rgba(20, 20, 19, 0.08);
+  --shadow-panel: 0 12px 32px rgba(20, 20, 19, 0.06);
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 * {
@@ -32,16 +57,16 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-sans);
-  background:
-    radial-gradient(circle at top left, rgba(168, 85, 247, 0.14), transparent 28%),
-    radial-gradient(circle at top right, rgba(34, 197, 94, 0.08), transparent 24%),
-    #09090b;
+  background: var(--color-void);
   color: var(--color-copy);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body::selection {
-  background: rgba(168, 85, 247, 0.35);
-  color: #ffffff;
+  background: rgba(201, 100, 66, 0.22);
+  color: var(--color-copy);
 }
 
 button,
@@ -60,28 +85,51 @@ a {
   min-height: 100vh;
 }
 
-/* Markdown prose styles for artifact viewer */
-.md-prose {
-  font-size: 14px;
-  line-height: 1.7;
-  color: #d4d4d8;
+/* Headings default to the Anthropic Serif voice */
+h1,
+h2,
+h3 {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: 0;
 }
-.md-prose h1, .md-prose h2, .md-prose h3, .md-prose h4 {
-  color: #f5f5f5;
-  font-weight: 600;
+
+/* Markdown prose — warm light theme mirroring DESIGN.md */
+.md-prose {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--color-copy-soft);
+}
+.md-prose h1,
+.md-prose h2,
+.md-prose h3,
+.md-prose h4 {
+  color: var(--color-copy);
+  font-family: var(--font-serif);
+  font-weight: 500;
   margin-top: 1.5em;
   margin-bottom: 0.5em;
+  letter-spacing: 0;
 }
-.md-prose h1 { font-size: 1.5em; }
-.md-prose h2 { font-size: 1.25em; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 0.3em; }
-.md-prose h3 { font-size: 1.1em; }
-.md-prose h1:first-child, .md-prose h2:first-child, .md-prose h3:first-child {
+.md-prose h1 { font-size: 1.6em; line-height: 1.2; }
+.md-prose h2 {
+  font-size: 1.3em;
+  line-height: 1.25;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.3em;
+}
+.md-prose h3 { font-size: 1.12em; line-height: 1.3; }
+.md-prose h1:first-child,
+.md-prose h2:first-child,
+.md-prose h3:first-child {
   margin-top: 0;
 }
 .md-prose p {
   margin: 0.6em 0;
 }
-.md-prose ul, .md-prose ol {
+.md-prose ul,
+.md-prose ol {
   padding-left: 1.5em;
   margin: 0.5em 0;
 }
@@ -91,27 +139,31 @@ a {
 .md-prose code {
   font-family: var(--font-mono);
   font-size: 0.88em;
-  background: rgba(0,0,0,0.3);
-  padding: 0.15em 0.35em;
-  border-radius: 4px;
-  color: #e4e4e7;
+  background: var(--color-panel-strong);
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+  color: var(--color-copy);
+  letter-spacing: -0.01em;
 }
 .md-prose pre {
-  background: rgba(0,0,0,0.3);
-  border-radius: 12px;
-  padding: 1em;
+  background: var(--color-panel-deep);
+  color: var(--color-ink-invert);
+  border-radius: 16px;
+  padding: 1em 1.1em;
   overflow-x: auto;
   margin: 0.8em 0;
+  box-shadow: var(--shadow-whisper);
 }
 .md-prose pre code {
   background: none;
   padding: 0;
+  color: inherit;
 }
 .md-prose blockquote {
-  border-left: 3px solid rgba(168,85,247,0.4);
+  border-left: 3px solid var(--color-accent);
   padding-left: 1em;
   margin: 0.8em 0;
-  color: #a1a1aa;
+  color: var(--color-muted);
 }
 .md-prose table {
   width: 100%;
@@ -119,22 +171,25 @@ a {
   margin: 0.8em 0;
   font-size: 0.92em;
 }
-.md-prose th, .md-prose td {
-  border: 1px solid rgba(255,255,255,0.08);
+.md-prose th,
+.md-prose td {
+  border: 1px solid var(--color-border-strong);
   padding: 0.5em 0.75em;
   text-align: left;
 }
 .md-prose th {
-  background: rgba(255,255,255,0.04);
-  color: #f5f5f5;
+  background: var(--color-panel-strong);
+  color: var(--color-copy);
   font-weight: 500;
 }
 .md-prose a {
-  color: #a855f7;
+  color: var(--color-accent);
   text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 .md-prose hr {
   border: none;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid var(--color-border);
   margin: 1.2em 0;
 }

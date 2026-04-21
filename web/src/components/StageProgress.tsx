@@ -38,9 +38,9 @@ export function StageProgress({
               : "pending";
         const toneClass = {
           complete: "bg-success",
-          current: "bg-accent shadow-[0_0_24px_rgba(168,85,247,0.35)]",
-          failed: "bg-danger shadow-[0_0_24px_rgba(239,68,68,0.28)]",
-          pending: "bg-white/8",
+          current: "bg-accent shadow-[0_0_0_1px_var(--color-accent)]",
+          failed: "bg-danger shadow-[0_0_0_1px_var(--color-danger)]",
+          pending: "bg-panel-strong",
         }[state];
 
         return (
