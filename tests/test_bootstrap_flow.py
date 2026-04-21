@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 
@@ -41,6 +42,37 @@ def test_setup_skill_mandates_auth_env_generation():
     assert "ADMIN_PASSWORD_HASH" in skill
     assert "JWT_SECRET" in skill
     assert "AGENT_API_TOKEN" in skill
+
+
+def test_generate_password_hash_script_emits_real_env_values():
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts" / "generate_password_hash.py"
+    python = root / ".venv" / "bin" / "python"
+    proc = subprocess.run(
+        [str(python), str(script), "--username", "admin", "--password", "hunter22"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    env_lines = {}
+    for line in proc.stdout.splitlines():
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        env_lines[key] = value.strip().strip("'")
+
+    assert env_lines["ADMIN_USERNAME"] == "admin"
+    assert env_lines["ADMIN_PASSWORD_HASH"].startswith("$argon2")
+    assert env_lines["JWT_SECRET"]
+    assert env_lines["AGENT_API_TOKEN"]
+
+def test_setup_skill_uses_hermes_webhooks_route():
+    skill = Path("skills/cooagents-setup/SKILL.md").read_text(encoding="utf-8")
+    assert "http://127.0.0.1:8644/webhooks/cooagents" in skill
+    assert "http://127.0.0.1:8644/webhook/cooagents" not in skill
 
 
 def test_workflow_skill_uses_agent_token_header():

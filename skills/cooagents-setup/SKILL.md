@@ -386,7 +386,7 @@ exec cd {repo_path} && printf "\nHERMES_WEBHOOK_SECRET=%s\n" "{hermes_secret}" >
 
 ```bash
 # venv 成功时（Linux/macOS）
-exec cd {repo_path} && .venv/bin/python -c "from pathlib import Path; import yaml; p=Path('config/settings.yaml'); d=yaml.safe_load(p.read_text(encoding='utf-8')); d.setdefault('hermes', {}); d['hermes'].update({'enabled': True, 'skills_dir': '~/.hermes/skills', 'deploy_skills': True}); d['hermes'].setdefault('webhook', {}); d['hermes']['webhook'].update({'enabled': True, 'url': 'http://127.0.0.1:8644/webhook/cooagents', 'secret': '\$ENV:HERMES_WEBHOOK_SECRET'}); p.write_text(yaml.safe_dump(d, allow_unicode=True, sort_keys=False), encoding='utf-8')"
+exec cd {repo_path} && .venv/bin/python -c "from pathlib import Path; import yaml; p=Path('config/settings.yaml'); d=yaml.safe_load(p.read_text(encoding='utf-8')); d.setdefault('hermes', {}); d['hermes'].update({'enabled': True, 'skills_dir': '~/.hermes/skills', 'deploy_skills': True}); d['hermes'].setdefault('webhook', {}); d['hermes']['webhook'].update({'enabled': True, 'url': 'http://127.0.0.1:8644/webhooks/cooagents', 'secret': '\$ENV:HERMES_WEBHOOK_SECRET'}); p.write_text(yaml.safe_dump(d, allow_unicode=True, sort_keys=False), encoding='utf-8')"
 ```
 
 Windows Git Bash 改为 `.venv/Scripts/python`；全局安装回退改为 `python3`。
@@ -397,7 +397,7 @@ Windows Git Bash 改为 `.venv/Scripts/python`；全局安装回退改为 `pytho
 exec curl -s -X POST http://127.0.0.1:8321/api/v1/webhooks \
   -H "X-Agent-Token: $AGENT_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"url\":\"http://127.0.0.1:8644/webhook/cooagents\",\"events\":[\"gate.waiting\",\"run.completed\",\"run.failed\",\"merge.conflict\"],\"secret\":\"{hermes_secret}\"}"
+  -d "{\"url\":\"http://127.0.0.1:8644/webhooks/cooagents\",\"events\":[\"gate.waiting\",\"run.completed\",\"run.failed\",\"merge.conflict\"],\"secret\":\"{hermes_secret}\"}"
 ```
 
 **7. 注入 `AGENT_API_TOKEN` 到 Hermes 环境**（Hermes skill 里的 `exec curl` 会用到）：
@@ -411,7 +411,7 @@ exec chmod 600 "$(hermes config env-path)"
 
 ```bash
 exec hermes gateway restart 2>/dev/null || true
-exec curl -s -X POST http://127.0.0.1:8644/webhook/cooagents -H "Content-Type: application/json" -d '{"ping":"1"}' -o /dev/null -w "%{http_code}\n"
+exec curl -s -X POST http://127.0.0.1:8644/webhooks/cooagents -H "Content-Type: application/json" -d '{"ping":"1"}' -o /dev/null -w "%{http_code}\n"
 ```
 
 成功判定：返回 `401`（未签名）或 `202`（签名正确）。若返回 `000`/`curl: (7)`，说明 Hermes webhook 未就绪，检查 Hermes 日志。
@@ -430,7 +430,7 @@ exec curl -s -X POST http://127.0.0.1:8644/webhook/cooagents -H "Content-Type: a
 - AGENT_API_TOKEN：已写入 {repo_path}/.env 并注入到宿主 Agent（{runtime}）
 - 通知通道：
   - `openclaw` → cooagents 指向 http://127.0.0.1:{gateway_port}/hooks/agent
-  - `hermes` → cooagents 订阅已注册到 http://127.0.0.1:8644/webhook/cooagents（HMAC 签名）
+  - `hermes` → cooagents 订阅已注册到 http://127.0.0.1:8644/webhooks/cooagents（HMAC 签名）
   - `both` → 两条通道并行
   - `none` → 未配置外部通知
 

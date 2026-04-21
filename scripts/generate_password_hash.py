@@ -16,7 +16,13 @@ from __future__ import annotations
 import argparse
 import getpass
 import secrets
+import shlex
 import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.auth import hash_password
 
@@ -44,15 +50,15 @@ def main() -> int:
 
     print()
     print("# Append these to your environment (e.g. systemd EnvironmentFile or .env):")
-    print(f"ADMIN_USERNAME={args.username}")
-    print(f"ADMIN_PASSWORD_HASH={pwd_hash}")
-    print(f"JWT_SECRET={jwt_secret}")
-    print(f"AGENT_API_TOKEN={agent_token}")
+    print(f"ADMIN_USERNAME={shlex.quote(args.username)}")
+    print(f"ADMIN_PASSWORD_HASH={shlex.quote(pwd_hash)}")
+    print(f"JWT_SECRET={shlex.quote(jwt_secret)}")
+    print(f"AGENT_API_TOKEN={shlex.quote(agent_token)}")
     print()
     print("# Copy AGENT_API_TOKEN into the environment of any local agent")
     print("# (e.g. OpenClaw) that needs to call the cooagents API without")
     print("# an interactive login. Example:")
-    print("#   systemctl edit openclaw     # then: Environment=AGENT_API_TOKEN=...")
+    print("#   systemctl edit openclaw     # then: Environment=AGENT_API_TOKEN=***")
     print()
     return 0
 

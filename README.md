@@ -61,6 +61,15 @@ bash scripts/bootstrap.sh
 
 `bootstrap.sh` 自动完成：Python 校验 → git/node/npm 检查 → acpx 安装 → venv + pip → `web/` 构建 → 校验 `web/dist/index.html` → 目录与 DB 初始化。
 
+如果你想手动复现前端构建步骤，等价命令是：
+
+```bash
+cd web
+npm ci
+npm run build
+test -f dist/index.html
+```
+
 ### 生成启动凭据
 
 公网部署要求以下环境变量，缺一即拒绝启动：`ADMIN_USERNAME`、`ADMIN_PASSWORD_HASH`、`JWT_SECRET`、`AGENT_API_TOKEN`。用内置脚本一次生成：
@@ -198,7 +207,7 @@ hermes:
   deploy_skills: true
   webhook:
     enabled: true
-    url: "http://127.0.0.1:8644/webhook/cooagents"
+    url: "http://127.0.0.1:8644/webhooks/cooagents"
     secret: "$ENV:HERMES_WEBHOOK_SECRET"
 ```
 
@@ -208,7 +217,7 @@ hermes:
 curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
   -H "X-Agent-Token: $AGENT_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"url\":\"http://127.0.0.1:8644/webhook/cooagents\",
+  -d "{\"url\":\"http://127.0.0.1:8644/webhooks/cooagents\",
        \"events\":[\"gate.waiting\",\"run.completed\",\"run.failed\",\"merge.conflict\"],
        \"secret\":\"$HERMES_SECRET\"}"
 ```
@@ -217,7 +226,7 @@ curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
 
 ```bash
 # 无签名时应返回 401，签名正确时返回 202
-curl -s -X POST http://127.0.0.1:8644/webhook/cooagents \
+curl -s -X POST http://127.0.0.1:8644/webhooks/cooagents \
   -H "Content-Type: application/json" -d '{"ping":"1"}' -o /dev/null -w "%{http_code}\n"
 
 # Hermes 拿到 AGENT_API_TOKEN
