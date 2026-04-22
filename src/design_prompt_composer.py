@@ -1,0 +1,52 @@
+"""D3 PROMPT_COMPOSE — assemble the LLM prompt for a DesignWork loop.
+
+Kept pure so unit tests can assert on exact strings without spinning up a
+state machine.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from string import Template
+from typing import Sequence
+
+_TPL_PATH = Path(__file__).resolve().parents[1] / "templates" / "design_prompt.md.tpl"
+
+
+@dataclass(frozen=True)
+class PromptInputs:
+    workspace_slug: str
+    title: str
+    version: str
+    user_input: str
+    needs_frontend_mockup: bool
+    output_path: str
+    parent_version: str | None = None
+    missing_sections: Sequence[str] = ()
+
+
+def compose_prompt(inputs: PromptInputs) -> str:
+    text = _TPL_PATH.read_text(encoding="utf-8")
+    mockup_instruction = (
+        "**前端设计图**：额外产出 `## 页面结构` 章节，并在其中写一行 "
+        "`设计图链接或路径: <图片路径或 URL>`（v1 接受人工上传的路径或可访问 URL）。"
+        if inputs.needs_frontend_mockup
+        else ""
+    )
+    if inputs.missing_sections:
+        bullets = "\n".join(f"- {s}" for s in inputs.missing_sections)
+        missing_hint = f"上一轮缺失：\n{bullets}\n请本轮务必补齐上述项。"
+    else:
+        missing_hint = "(首轮，无补齐项)"
+
+    return Template(text).safe_substitute(
+        workspace_slug=inputs.workspace_slug,
+        title=inputs.title,
+        version=inputs.version,
+        user_input=inputs.user_input,
+        needs_frontend_mockup="true" if inputs.needs_frontend_mockup else "false",
+        output_path=inputs.output_path,
+        parent_version_or_empty=inputs.parent_version or "",
+        mockup_instruction=mockup_instruction,
+        missing_sections_hint=missing_hint,
+    )

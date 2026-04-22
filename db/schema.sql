@@ -50,6 +50,14 @@ CREATE TABLE IF NOT EXISTS design_works (
   escalated_at            TEXT,
   user_input_path         TEXT,
   output_design_doc_id    TEXT,              -- soft reference (no FK, U12)
+  -- Phase 3 additions (U7): runtime-required but nullable so compat migrations
+  -- (ALTER TABLE ADD COLUMN) can widen a Phase 1 DB without NOT NULL errors.
+  -- The state machine enforces non-null invariants at create().
+  title                   TEXT,
+  sub_slug                TEXT,
+  version                 TEXT,
+  output_path             TEXT,
+  gates_json              TEXT,
   created_at              TEXT NOT NULL,
   updated_at              TEXT NOT NULL
 );

@@ -36,6 +36,25 @@ turns:
   design_max_turns: 3
   dev_max_turns: 3
 
+# DesignWork state machine bounds (Phase 3).
+design:
+  max_loops: 3
+  execution_timeout: 600        # per-LLM-call seconds (U5)
+  # When a design doc fails POST_VALIDATE, the loop re-composes the prompt
+  # with these sections' names as the "missing" list.
+  required_sections:
+    - 用户故事
+    - 用户案例
+    - 详细操作流程
+    - 验收标准
+    - 打分 rubric
+  mockup_sections:
+    - 页面结构
+  allow_optimize_mode: false    # v1 stubbed; flip true later
+
+scoring:
+  default_threshold: 80         # fallback when API + LLM both omit rubric_threshold (U2)
+
 preferred_design_agent: "claude"
 preferred_dev_agent: "claude"
 

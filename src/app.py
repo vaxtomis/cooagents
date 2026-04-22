@@ -16,6 +16,8 @@ from src.auth import AuthError, AuthSettings, get_current_user
 from src.request_utils import client_ip
 from src.config import load_agent_hosts, load_settings
 from src.database import Database
+from src.design_doc_manager import DesignDocManager
+from src.design_work_sm import DesignWorkStateMachine
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.host_manager import HostManager
 from src.job_manager import JobManager
@@ -107,6 +109,17 @@ async def lifespan(app: FastAPI):
     )
     executor.set_state_machine(sm)
 
+    design_docs = DesignDocManager(
+        db, workspaces_root=settings.security.resolved_workspace_root()
+    )
+    design_work_sm = DesignWorkStateMachine(
+        db=db,
+        workspaces=workspaces,
+        design_docs=design_docs,
+        executor=executor,
+        config=settings,
+    )
+
     agent_config = load_agent_hosts()
     await hosts.load_from_config(agent_config)
     await executor.restore_on_startup()
@@ -129,6 +142,8 @@ async def lifespan(app: FastAPI):
     app.state.sm = sm
     app.state.artifacts = artifacts
     app.state.workspaces = workspaces
+    app.state.design_docs = design_docs
+    app.state.design_work_sm = design_work_sm
     app.state.hosts = hosts
     app.state.jobs = jobs
     app.state.executor = executor
@@ -226,6 +241,19 @@ async def bad_request_handler(request, exc):
     return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(exc)})
 
 
+@app.exception_handler(NotImplementedError)
+async def not_implemented_handler(request, exc):
+    # Log before surfacing so an unintended NotImplementedError in unrelated
+    # code shows up in server logs rather than silently turning into 501.
+    logging.getLogger(__name__).exception(
+        "NotImplementedError at %s: %s", request.url.path, exc
+    )
+    return JSONResponse(
+        status_code=501,
+        content={"error": "not_implemented", "message": str(exc)},
+    )
+
+
 @app.exception_handler(AuthError)
 async def auth_error_handler(request, exc):
     return JSONResponse(
@@ -253,6 +281,7 @@ from fastapi import Depends
 from routes.agent_hosts import router as hosts_router
 from routes.artifacts import router as artifacts_router
 from routes.auth import router as auth_router
+from routes.design_works import router as design_works_router
 from routes.diagnostics import create_diagnostics_router
 from routes.events import create_events_router
 from routes.repos import router as repos_router
@@ -274,4 +303,5 @@ app.include_router(create_events_router(), prefix="/api/v1", dependencies=auth_r
 app.include_router(create_sse_router(), prefix="/api/v1", dependencies=auth_required)
 app.include_router(create_diagnostics_router(), prefix="/api/v1", dependencies=auth_required)
 app.include_router(workspaces_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(design_works_router, prefix="/api/v1", dependencies=auth_required)
 mount_dashboard_spa(app)

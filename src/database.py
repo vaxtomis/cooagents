@@ -122,6 +122,23 @@ class Database:
             if not await self._column_exists("runs", "dev_agent"):
                 await conn.execute("ALTER TABLE runs ADD COLUMN dev_agent TEXT DEFAULT 'claude'")
 
+        # Phase 3 (U7): design_works gains 5 runtime columns. Keep these
+        # nullable in both schema.sql and the ALTER path — SQLite cannot add
+        # a NOT NULL column to an existing table without a default, and a
+        # default would lie about rows created before Phase 3.
+        if await self._table_exists("design_works"):
+            for col, col_type in (
+                ("title", "TEXT"),
+                ("sub_slug", "TEXT"),
+                ("version", "TEXT"),
+                ("output_path", "TEXT"),
+                ("gates_json", "TEXT"),
+            ):
+                if not await self._column_exists("design_works", col):
+                    await conn.execute(
+                        f"ALTER TABLE design_works ADD COLUMN {col} {col_type}"
+                    )
+
     async def _migrate_events_nullable_run_id(self, conn) -> None:
         """Rebuild events table to make run_id nullable."""
         await conn.execute("""

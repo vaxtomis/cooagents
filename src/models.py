@@ -1,7 +1,7 @@
 import re
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +176,13 @@ class DesignWork(BaseModel):
     escalated_at: str | None = None
     user_input_path: str | None = None
     output_design_doc_id: str | None = None
+    # Phase 3 additions (U7): persisted here instead of in an in-memory cache
+    # so a server restart mid-loop can reconstruct prompt + output paths.
+    title: str | None = None
+    sub_slug: str | None = None
+    version: str | None = None
+    output_path: str | None = None
+    gates_json: str | None = None
     created_at: str
     updated_at: str
 
@@ -282,4 +289,60 @@ class WorkspaceSyncReport(BaseModel):
     fs_only: list[str] = Field(default_factory=list)
     db_only: list[str] = Field(default_factory=list)
     in_sync: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — DesignWork request/response DTOs
+# ---------------------------------------------------------------------------
+
+
+class CreateDesignWorkRequest(BaseModel):
+    workspace_id: str
+    title: str = Field(..., min_length=1, max_length=120)
+    slug: str  # DesignDoc sub-slug; unique within the workspace (U1).
+    user_input: str = Field(..., min_length=1, max_length=20000)
+    mode: DesignWorkMode = DesignWorkMode.new
+    parent_version: str | None = None
+    needs_frontend_mockup: bool = False
+    agent: AgentKind = AgentKind.claude
+    # Optional per-DesignWork override. When None, D6 PERSIST falls back
+    # first to the LLM-produced front-matter, then to
+    # config.scoring.default_threshold (=80). (U2)
+    rubric_threshold: int | None = Field(default=None, ge=1, le=100)
+
+    @field_validator("slug")
+    @classmethod
+    def _check_slug(cls, v: str) -> str:
+        if not _WORKSPACE_SLUG_RE.match(v):
+            raise ValueError(
+                "slug must be kebab-case (1-63 chars, no leading/trailing dash, "
+                "no consecutive dashes)"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _check_mode_parent_combo(self) -> "CreateDesignWorkRequest":
+        # Enforce the mode/parent_version invariant at the HTTP boundary so
+        # clients get an immediate 422 instead of a 201 + ESCALATED row.
+        if self.mode == DesignWorkMode.new and self.parent_version is not None:
+            raise ValueError("mode=new must not supply parent_version")
+        if self.mode == DesignWorkMode.optimize and self.parent_version is None:
+            raise ValueError("mode=optimize requires parent_version")
+        return self
+
+
+class DesignWorkProgress(BaseModel):
+    id: str
+    workspace_id: str
+    mode: DesignWorkMode
+    current_state: DesignWorkState
+    loop: int
+    missing_sections: list[str] | None = None
+    output_design_doc_id: str | None = None
+    escalated_at: str | None = None
+    title: str | None = None
+    sub_slug: str | None = None
+    version: str | None = None
+    created_at: str
+    updated_at: str
 

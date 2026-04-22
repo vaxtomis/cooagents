@@ -41,6 +41,34 @@ def _load_template() -> Template:
     return Template(text)
 
 
+def _replace_section(md: str, heading: str, new_body: str) -> str:
+    """Replace the body between ``heading`` line and the next ``## `` heading.
+
+    The heading line itself is kept; the previous body (including the
+    italicised placeholder) is swapped for ``new_body``. Idempotent: if
+    called twice with the same args, the output matches exactly.
+    """
+    lines = md.splitlines(keepends=False)
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        if line.strip() == heading:
+            # Skip existing body until the next H2.
+            j = i + 1
+            while j < len(lines) and not lines[j].startswith("## "):
+                j += 1
+            out.append("")
+            out.append(new_body)
+            out.append("")
+            i = j
+            continue
+        i += 1
+    result = "\n".join(out)
+    return result + "\n" if md.endswith("\n") else result
+
+
 class WorkspaceManager:
     def __init__(
         self,
@@ -331,6 +359,65 @@ class WorkspaceManager:
                 shutil.rmtree(p)
         except OSError:
             logger.exception("failed to cleanup partial workspace dir %s", p)
+
+    # ---- Phase 3: workspace.md section refresh ----
+
+    async def refresh_workspace_md(self, workspace_id: str) -> None:
+        """Rewrite workspace.md to reflect current DesignWork / DesignDoc state.
+
+        Invoked by DesignWorkStateMachine after each state transition and by
+        DesignDocManager after D6 PERSIST. Safe no-op if the workspace row is
+        missing (another subsystem may have archived it concurrently).
+        """
+        ws = await self.get(workspace_id)
+        if ws is None:
+            logger.warning("refresh_workspace_md: workspace %s missing", workspace_id)
+            return
+        slug_dir = self._slug_dir(ws["slug"])
+        self._assert_under_root(slug_dir)
+        md_path = slug_dir / "workspace.md"
+        if not md_path.exists():
+            logger.warning(
+                "refresh_workspace_md: workspace.md missing at %s", md_path
+            )
+            return
+
+        design_docs = await self.db.fetchall(
+            "SELECT slug, version, status FROM design_docs "
+            "WHERE workspace_id=? ORDER BY created_at",
+            (workspace_id,),
+        )
+        design_works = await self.db.fetchall(
+            "SELECT id, mode, current_state, loop, sub_slug, output_design_doc_id "
+            "FROM design_works WHERE workspace_id=? ORDER BY created_at",
+            (workspace_id,),
+        )
+
+        lines: list[str] = []
+        for dd in design_docs:
+            lines.append(
+                f"- designs/DES-{dd['slug']}-{dd['version']}.md"
+                f" — 状态：{dd['status']}"
+            )
+        for dw in design_works:
+            # Skip already-represented DesignWorks (their design_doc is in the list).
+            if dw["output_design_doc_id"]:
+                continue
+            slug_part = dw["sub_slug"] or dw["id"]
+            lines.append(
+                f"- design_work {dw['id']} "
+                f"(slug={slug_part}) · state={dw['current_state']} · loop={dw['loop']}"
+            )
+        if lines:
+            designs_section = "\n".join(lines)
+        else:
+            designs_section = (
+                "_暂无 DesignWork。在此 Workspace 下创建后此处自动刷新。_"
+            )
+
+        text = md_path.read_text(encoding="utf-8")
+        new_text = _replace_section(text, "## 设计工作", designs_section)
+        md_path.write_text(new_text, encoding="utf-8")
 
     @staticmethod
     def _parse_front_matter(md: Path) -> dict[str, str]:

@@ -58,6 +58,48 @@ class TurnsConfig(BaseModel):
     dev_max_turns: int = 3
 
 
+class DesignConfig(BaseModel):
+    """DesignWork state machine bounds (Phase 3).
+
+    ``max_loops`` caps D3 <-> D5 iterations. Per PRD R4 this is independent
+    from ``devwork.max_rounds``; the two loops are semantically different.
+    """
+
+    max_loops: int = 3
+    # Per-LLM-call timeout for D4 LLM_GENERATE. Decoupled from the legacy
+    # ``TimeoutConfig.design_execution`` (1800s) because that value was tuned
+    # for the old 15-stage design phase (agent session lifecycle); the
+    # DesignWork one-shot prompt typically completes in <5 min. 600s gives
+    # a 2x buffer while keeping feedback fast. (U5 decision.)
+    execution_timeout: int = 600
+    # Section titles are Markdown ## headings. Order matches
+    # templates/design_doc.md.tpl; validator accepts missing only if the
+    # corresponding section is absent from this list.
+    required_sections: list[str] = Field(
+        default_factory=lambda: [
+            "用户故事",
+            "用户案例",
+            "详细操作流程",
+            "验收标准",
+            "打分 rubric",
+        ]
+    )
+    # When needs_frontend_mockup=True, these sections become mandatory.
+    mockup_sections: list[str] = Field(default_factory=lambda: ["页面结构"])
+    allow_optimize_mode: bool = False  # v1 stubbed; flip True in a later phase
+
+
+class ScoringConfig(BaseModel):
+    """Rubric threshold defaults for scoring loops.
+
+    Used as the final fallback when (a) the API request did not supply
+    ``rubric_threshold``, AND (b) the LLM-produced front-matter omits it.
+    Priority: API request > LLM front-matter > default_threshold. (U2)
+    """
+
+    default_threshold: int = 80
+
+
 class OpenclawTarget(BaseModel):
     type: str = "local"              # "local" or "ssh"
     skills_dir: str = "~/.openclaw/skills"
@@ -158,6 +200,8 @@ class Settings(BaseModel):
     hermes: HermesConfig = HermesConfig()
     tracing: TracingConfig = TracingConfig()
     security: SecurityConfig = SecurityConfig()
+    design: DesignConfig = DesignConfig()
+    scoring: ScoringConfig = ScoringConfig()
     preferred_design_agent: str = "claude"
     preferred_dev_agent: str = "claude"
 
