@@ -1,7 +1,15 @@
 """Async git utilities for cooagents workflow management."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+# Allowlist for branch names passed to ``git branch`` / ``git worktree add``.
+# ``asyncio.create_subprocess_exec`` does not spawn a shell, so this is not
+# about shell injection — it is about preventing argument confusion (e.g., a
+# branch name starting with ``-`` being parsed as an option flag) and
+# rejecting control characters that ``git`` would reject later anyway.
+_BRANCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_.\-]{0,199}$")
 
 
 async def run_git(*args, cwd=None, check=True) -> tuple[str, str, int]:
@@ -25,30 +33,32 @@ async def run_git(*args, cwd=None, check=True) -> tuple[str, str, int]:
 
 async def ensure_worktree(
     repo_path: str,
-    ticket: str,
-    phase: str,
-    run_suffix: str = "",
+    branch_name: str,
+    worktree_path: str,
 ) -> tuple[str, str]:
-    """Create or reuse a git worktree for *ticket*/*phase*.
+    """Create or reuse a git worktree at *worktree_path* tracking *branch_name*.
+
+    Callers supply *worktree_path* so placement is decoupled from repo
+    layout — Phase 4 uses ``<workspace_root>/.coop/worktrees/<branch_safe>``
+    so worktrees live alongside cooagents state instead of polluting the
+    user's repo parent directory.
 
     Returns
     -------
     (branch_name, worktree_path)
-        The branch is ``feat/{ticket}-{phase}`` (or with a ``-{run_suffix}``
-        appended when *run_suffix* is non-empty).
     """
-    branch = (
-        f"feat/{ticket}-{phase}"
-        if not run_suffix
-        else f"feat/{ticket}-{phase}-{run_suffix}"
-    )
     # Defense in depth: route-layer validates repo_path against workspace_root,
     # but guard against a repo_path that resolves to a filesystem root (which
     # would place the worktree directory outside any expected boundary).
     resolved_repo = Path(repo_path).resolve()
     if resolved_repo.parent == resolved_repo:
         raise ValueError(f"repo_path cannot be a filesystem root: {repo_path}")
-    wt_path = str(Path(repo_path).parent / f".worktrees/{ticket}-{phase}")
+    if not _BRANCH_RE.match(branch_name):
+        raise ValueError(
+            f"invalid branch_name {branch_name!r}: must match "
+            f"[a-zA-Z0-9][a-zA-Z0-9/_.-]{{0,199}}"
+        )
+    wt_path = str(Path(worktree_path))
 
     # Check if worktree already exists.
     # On Windows git outputs forward-slash paths in --porcelain output, so
@@ -56,18 +66,18 @@ async def ensure_worktree(
     out, _, _ = await run_git("worktree", "list", "--porcelain", cwd=repo_path)
     wt_path_forward = wt_path.replace("\\", "/")
     if wt_path_forward in out or wt_path in out:
-        return branch, wt_path
+        return branch_name, wt_path
 
     # Create branch if it doesn't exist
     _, _, rc = await run_git(
-        "rev-parse", "--verify", branch, cwd=repo_path, check=False
+        "rev-parse", "--verify", branch_name, cwd=repo_path, check=False
     )
     if rc != 0:
-        await run_git("branch", branch, cwd=repo_path)
+        await run_git("branch", branch_name, cwd=repo_path)
 
     Path(wt_path).parent.mkdir(parents=True, exist_ok=True)
-    await run_git("worktree", "add", wt_path, branch, cwd=repo_path)
-    return branch, wt_path
+    await run_git("worktree", "add", wt_path, branch_name, cwd=repo_path)
+    return branch_name, wt_path
 
 
 async def check_conflicts(worktree: str, target_branch: str = "main") -> list[str]:

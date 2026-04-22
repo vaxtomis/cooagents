@@ -415,8 +415,28 @@ class WorkspaceManager:
                 "_暂无 DesignWork。在此 Workspace 下创建后此处自动刷新。_"
             )
 
+        dev_works = await self.db.fetchall(
+            "SELECT id, design_doc_id, current_step, iteration_rounds, last_score "
+            "FROM dev_works WHERE workspace_id=? ORDER BY created_at",
+            (workspace_id,),
+        )
+        dev_lines: list[str] = []
+        for d in dev_works:
+            last_score = (
+                d["last_score"] if d["last_score"] is not None else "—"
+            )
+            dev_lines.append(
+                f"- devworks/DEV-{d['id']}/ — design={d['design_doc_id']} · "
+                f"step={d['current_step']} · round={d['iteration_rounds']} · "
+                f"score={last_score}"
+            )
+        dev_section = (
+            "\n".join(dev_lines) if dev_lines else "_暂无 DevWork。_"
+        )
+
         text = md_path.read_text(encoding="utf-8")
         new_text = _replace_section(text, "## 设计工作", designs_section)
+        new_text = _replace_section(new_text, "## 开发工作", dev_section)
         md_path.write_text(new_text, encoding="utf-8")
 
     @staticmethod
@@ -425,7 +445,9 @@ class WorkspaceManager:
 
         Intentionally simple: only extracts ``key: value`` pairs between the
         opening and closing ``---`` lines. Sufficient for the fields our
-        template writes.
+        template writes. Values are length-capped and stripped of control
+        characters — a crafted ``workspace.md`` on disk should not be able
+        to push unbounded content into the DB.
         """
         try:
             text = md.read_text(encoding="utf-8")
@@ -440,5 +462,8 @@ class WorkspaceManager:
                 break
             if ":" in line:
                 k, _, v = line.partition(":")
-                out[k.strip()] = v.strip()
+                cleaned = "".join(
+                    c for c in v.strip() if c == " " or not c.isspace() and c.isprintable()
+                )
+                out[k.strip()] = cleaned[:120]
         return out

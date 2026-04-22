@@ -68,13 +68,20 @@ async def repo(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-async def test_ensure_worktree_creates_new(repo: Path) -> None:
+def _wt(tmp_path: Path, name: str) -> str:
+    """Deterministic worktree path under a temp-root ``.worktrees`` dir."""
+    return str(tmp_path / ".worktrees" / name)
+
+
+async def test_ensure_worktree_creates_new(repo: Path, tmp_path: Path) -> None:
     """ensure_worktree should create a new worktree directory and branch."""
+    wt_path_in = _wt(tmp_path, "feat-T-1-design")
     branch, wt_path = await ensure_worktree(
-        str(repo), ticket="T-1", phase="design"
+        str(repo), "feat/T-1-design", wt_path_in
     )
 
     assert branch == "feat/T-1-design"
+    assert wt_path == wt_path_in
     assert Path(wt_path).is_dir(), "Worktree directory was not created"
 
     # The branch must exist in the repo
@@ -82,28 +89,43 @@ async def test_ensure_worktree_creates_new(repo: Path) -> None:
     assert "feat/T-1-design" in branches_out
 
 
-async def test_ensure_worktree_reuses_existing(repo: Path) -> None:
+async def test_ensure_worktree_reuses_existing(
+    repo: Path, tmp_path: Path
+) -> None:
     """Calling ensure_worktree twice must not raise and must return same paths."""
-    branch1, wt1 = await ensure_worktree(str(repo), ticket="T-2", phase="dev")
-    branch2, wt2 = await ensure_worktree(str(repo), ticket="T-2", phase="dev")
+    wt_path_in = _wt(tmp_path, "feat-T-2-dev")
+    branch1, wt1 = await ensure_worktree(
+        str(repo), "feat/T-2-dev", wt_path_in
+    )
+    branch2, wt2 = await ensure_worktree(
+        str(repo), "feat/T-2-dev", wt_path_in
+    )
 
-    assert branch1 == branch2
+    assert branch1 == branch2 == "feat/T-2-dev"
     assert wt1 == wt2
     assert Path(wt1).is_dir()
 
 
-async def test_ensure_worktree_with_suffix(repo: Path) -> None:
-    """run_suffix should be appended to the branch name."""
-    branch, _ = await ensure_worktree(
-        str(repo), ticket="T-3", phase="dev", run_suffix="r2"
+async def test_ensure_worktree_custom_branch_name(
+    repo: Path, tmp_path: Path
+) -> None:
+    """Branch names with slashes (e.g. devwork/ws-abc) must be accepted."""
+    wt_path_in = _wt(tmp_path, "devwork-demo-abc")
+    branch, wt = await ensure_worktree(
+        str(repo), "devwork/demo-abc", wt_path_in
     )
-    assert branch == "feat/T-3-dev-r2"
+    assert branch == "devwork/demo-abc"
+    # git rev-parse confirms the branch
+    out = await _git("rev-parse", "--verify", "devwork/demo-abc", cwd=repo)
+    assert len(out) == 40
+    assert Path(wt).is_dir()
 
 
-async def test_check_conflicts_no_conflict(repo: Path) -> None:
+async def test_check_conflicts_no_conflict(repo: Path, tmp_path: Path) -> None:
     """Two branches modifying different files should produce no conflicts."""
-    # Branch A: modifies file_a.txt
-    _, wt_a = await ensure_worktree(str(repo), ticket="T-6", phase="design")
+    _, wt_a = await ensure_worktree(
+        str(repo), "feat/T-6-design", _wt(tmp_path, "feat-T-6-design")
+    )
     (Path(wt_a) / "file_a.txt").write_text("branch A content\n")
     await _git("add", "file_a.txt", cwd=wt_a)
     await _git("commit", "-m", "branch A change", cwd=wt_a)
@@ -117,20 +139,21 @@ async def test_check_conflicts_no_conflict(repo: Path) -> None:
     assert conflicts == [], f"Expected no conflicts, got: {conflicts}"
 
 
-async def test_check_conflicts_with_conflict(repo: Path) -> None:
+async def test_check_conflicts_with_conflict(
+    repo: Path, tmp_path: Path
+) -> None:
     """Two branches modifying the same line of the same file → conflict."""
-    # Add a shared file on main first
     (repo / "shared.txt").write_text("original line\n")
     await _git("add", "shared.txt", cwd=repo)
     await _git("commit", "-m", "add shared file", cwd=repo)
 
-    # Feature branch: modify shared.txt
-    _, wt = await ensure_worktree(str(repo), ticket="T-7", phase="dev")
+    _, wt = await ensure_worktree(
+        str(repo), "feat/T-7-dev", _wt(tmp_path, "feat-T-7-dev")
+    )
     (Path(wt) / "shared.txt").write_text("feature branch line\n")
     await _git("add", "shared.txt", cwd=wt)
     await _git("commit", "-m", "feature changes shared", cwd=wt)
 
-    # Now change shared.txt on main as well (diverge)
     (repo / "shared.txt").write_text("main branch line\n")
     await _git("add", "shared.txt", cwd=repo)
     await _git("commit", "-m", "main changes shared", cwd=repo)

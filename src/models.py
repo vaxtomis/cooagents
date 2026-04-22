@@ -346,3 +346,34 @@ class DesignWorkProgress(BaseModel):
     created_at: str
     updated_at: str
 
+
+# ---------------------------------------------------------------------------
+# Phase 4 — DevWork request/response DTOs
+# ---------------------------------------------------------------------------
+
+
+class CreateDevWorkRequest(BaseModel):
+    workspace_id: str
+    design_doc_id: str
+    repo_path: str = Field(..., min_length=1, max_length=500)
+    prompt: str = Field(..., min_length=1, max_length=20000)
+    agent: AgentKind = AgentKind.claude
+
+
+class DevWorkProgress(BaseModel):
+    id: str
+    workspace_id: str
+    design_doc_id: str
+    current_step: DevWorkStep
+    iteration_rounds: int
+    first_pass_success: bool | None = None
+    last_score: int | None = None
+    last_problem_category: ProblemCategory | None = None
+    escalated_at: str | None = None
+    completed_at: str | None = None
+    # F1: expose worktree paths so operators / UI can inspect the sandbox.
+    worktree_path: str | None = None
+    worktree_branch: str | None = None
+    created_at: str
+    updated_at: str
+

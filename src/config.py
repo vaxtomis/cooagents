@@ -89,6 +89,27 @@ class DesignConfig(BaseModel):
     allow_optimize_mode: bool = False  # v1 stubbed; flip True in a later phase
 
 
+class DevWorkConfig(BaseModel):
+    """DevWork state machine bounds (Phase 4, PRD L191, L177).
+
+    ``max_rounds`` caps Step2<->Step5 iterations. Independent from
+    ``design.max_loops`` (PRD R4) because the two loops are semantically
+    different (requirements refinement vs. code-quality scoring).
+    """
+
+    max_rounds: int = 5
+    # Per-step LLM timeouts (seconds). Step2 plans the iteration design
+    # (F2=B); Step3 is prompt-side context retrieval; Step4 includes one
+    # self-repair attempt inside the same LLM call; Step5 is rubric scoring.
+    step2_timeout: int = 600
+    step3_timeout: int = 600
+    step4_timeout: int = 900
+    step5_timeout: int = 600
+    # v1 default: Step5 auto-approves when score>=threshold. Phase 5 will
+    # flip this to gate on a human confirmation event (PRD L145).
+    require_human_exit_confirm: bool = False
+
+
 class ScoringConfig(BaseModel):
     """Rubric threshold defaults for scoring loops.
 
@@ -202,6 +223,7 @@ class Settings(BaseModel):
     security: SecurityConfig = SecurityConfig()
     design: DesignConfig = DesignConfig()
     scoring: ScoringConfig = ScoringConfig()
+    devwork: DevWorkConfig = DevWorkConfig()
     preferred_design_agent: str = "claude"
     preferred_dev_agent: str = "claude"
 
