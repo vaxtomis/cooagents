@@ -1,0 +1,68 @@
+{
+  "envelope_keys": ["event", "event_id", "ts", "correlation_id", "payload"],
+  "events": {
+    "workspace.created": {
+      "required_payload": ["workspace_id", "title", "slug"]
+    },
+    "workspace.archived": {
+      "required_payload": ["workspace_id"]
+    },
+    "workspace.human_intervention": {
+      "required_payload": ["actor", "action", "target"]
+    },
+    "design_work.started": {
+      "required_payload": ["mode", "title", "sub_slug"]
+    },
+    "design_work.round_completed": {
+      "required_payload": ["loop", "missing"]
+    },
+    "design_work.escalated": {
+      "required_payload": ["reason", "missing"]
+    },
+    "design_work.cancelled": {
+      "required_payload": []
+    },
+    "design_work.llm_completed": {
+      "required_payload": ["loop", "rc", "stdout_len"]
+    },
+    "design_work.mockup_recorded": {
+      "required_payload": ["link", "note"]
+    },
+    "design_doc.published": {
+      "required_payload": ["design_work_id", "version", "slug"]
+    },
+    "dev_work.started": {
+      "required_payload": ["design_doc_id", "repo_path"]
+    },
+    "dev_work.step_started": {
+      "required_payload": ["step", "round"]
+    },
+    "dev_work.step_completed": {
+      "required_payload": ["step", "round", "rc"]
+    },
+    "dev_work.round_completed": {
+      "required_payload": ["round"]
+    },
+    "dev_work.score_passed": {
+      "required_payload": ["score", "round"]
+    },
+    "dev_work.escalated": {
+      "required_payload": ["reason", "rounds"]
+    },
+    "dev_work.cancelled": {
+      "required_payload": []
+    },
+    "dev_work.completed": {
+      "required_payload": ["score", "first_pass_success"]
+    },
+    "dev_work.gate.exit_waiting": {
+      "required_payload": ["dev_work_id", "score"]
+    },
+    "dev_work.merge_conflict": {
+      "required_payload": ["dev_work_id"]
+    },
+    "webhook.delivery_failed": {
+      "required_payload": ["event", "subscription_id", "url"]
+    }
+  }
+}
