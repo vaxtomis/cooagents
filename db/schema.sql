@@ -131,6 +131,12 @@ CREATE INDEX IF NOT EXISTS idx_design_docs_slug            ON design_docs(slug);
 CREATE INDEX IF NOT EXISTS idx_dev_works_workspace         ON dev_works(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_dev_works_step              ON dev_works(current_step);
 CREATE INDEX IF NOT EXISTS idx_dev_works_design_doc        ON dev_works(design_doc_id);
+-- Phase 4 invariant C1: at most one active DevWork per design_doc. Partial
+-- UNIQUE index (SQLite 3.8+) enforces this atomically, closing the
+-- SELECT-then-INSERT race that the route-level check cannot prevent.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_dev_works_active_per_design_doc
+  ON dev_works(design_doc_id)
+  WHERE current_step NOT IN ('COMPLETED','ESCALATED','CANCELLED');
 CREATE INDEX IF NOT EXISTS idx_dev_iteration_notes_work    ON dev_iteration_notes(dev_work_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_dev_work            ON reviews(dev_work_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_design_work         ON reviews(design_work_id);

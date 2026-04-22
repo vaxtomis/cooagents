@@ -18,6 +18,8 @@ from src.config import load_agent_hosts, load_settings
 from src.database import Database
 from src.design_doc_manager import DesignDocManager
 from src.design_work_sm import DesignWorkStateMachine
+from src.dev_iteration_note_manager import DevIterationNoteManager
+from src.dev_work_sm import DevWorkStateMachine
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.host_manager import HostManager
 from src.job_manager import JobManager
@@ -119,6 +121,17 @@ async def lifespan(app: FastAPI):
         executor=executor,
         config=settings,
     )
+    iteration_notes = DevIterationNoteManager(
+        db, workspaces_root=settings.security.resolved_workspace_root()
+    )
+    dev_work_sm = DevWorkStateMachine(
+        db=db,
+        workspaces=workspaces,
+        design_docs=design_docs,
+        iteration_notes=iteration_notes,
+        executor=executor,
+        config=settings,
+    )
 
     agent_config = load_agent_hosts()
     await hosts.load_from_config(agent_config)
@@ -144,6 +157,8 @@ async def lifespan(app: FastAPI):
     app.state.workspaces = workspaces
     app.state.design_docs = design_docs
     app.state.design_work_sm = design_work_sm
+    app.state.iteration_notes = iteration_notes
+    app.state.dev_work_sm = dev_work_sm
     app.state.hosts = hosts
     app.state.jobs = jobs
     app.state.executor = executor
@@ -282,6 +297,7 @@ from routes.agent_hosts import router as hosts_router
 from routes.artifacts import router as artifacts_router
 from routes.auth import router as auth_router
 from routes.design_works import router as design_works_router
+from routes.dev_works import router as dev_works_router
 from routes.diagnostics import create_diagnostics_router
 from routes.events import create_events_router
 from routes.repos import router as repos_router
@@ -304,4 +320,5 @@ app.include_router(create_sse_router(), prefix="/api/v1", dependencies=auth_requ
 app.include_router(create_diagnostics_router(), prefix="/api/v1", dependencies=auth_required)
 app.include_router(workspaces_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(design_works_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(dev_works_router, prefix="/api/v1", dependencies=auth_required)
 mount_dashboard_spa(app)
