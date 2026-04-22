@@ -42,7 +42,7 @@ from src.dev_prompt_composer import (
 from src.exceptions import BadRequestError
 from src.models import DevWorkStep, ProblemCategory
 from src.reviewer import ReviewOutcome, parse_review_output
-from src.workspace_events import emit_workspace_event
+from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
 
@@ -431,8 +431,9 @@ class DevWorkStepHandlersMixin:
             "updated_at=? WHERE id=?",
             (outcome.score, category_value, now, dw["id"]),
         )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="dev_work.round_completed",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],
@@ -462,15 +463,17 @@ class DevWorkStepHandlersMixin:
                 logger.exception(
                     "refresh_workspace_md failed for %s", dw["workspace_id"]
                 )
-            await emit_workspace_event(
+            await emit_and_deliver(
                 self.db,
+                self.webhooks,
                 event_name="dev_work.score_passed",
                 workspace_id=dw["workspace_id"],
                 correlation_id=dw["id"],
                 payload={"score": outcome.score, "round": round_n},
             )
-            await emit_workspace_event(
+            await emit_and_deliver(
                 self.db,
+                self.webhooks,
                 event_name="dev_work.completed",
                 workspace_id=dw["workspace_id"],
                 correlation_id=dw["id"],

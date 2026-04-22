@@ -27,7 +27,7 @@ from src.exceptions import BadRequestError, NotFoundError
 from src.mockup_renderer import MockupSpec, PathMockupRenderer
 from src.models import DesignWorkMode, DesignWorkState
 from src.semver import next_version
-from src.workspace_events import emit_workspace_event
+from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ class DesignWorkStateMachine:
         executor,          # object with async run_once(agent, worktree, timeout, task_file=?, prompt=?)
         config,            # Settings
         mockup_renderer=None,  # MockupRenderer; defaults to PathMockupRenderer (U6)
+        webhooks=None,     # WebhookNotifier (optional)
     ):
         self.db = db
         self.workspaces = workspaces
@@ -48,6 +49,7 @@ class DesignWorkStateMachine:
         self.executor = executor
         self.config = config
         self.mockup_renderer = mockup_renderer or PathMockupRenderer()
+        self.webhooks = webhooks
         # Kept per-instance so tests starting multiple SMs don't share state.
         # Single-writer invariant: only one driver task per DesignWork id is
         # ever scheduled; the read-modify-write gates/loop updates rely on it.
@@ -194,8 +196,9 @@ class DesignWorkStateMachine:
                 now,
             ),
         )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="design_work.started",
             workspace_id=workspace_id,
             correlation_id=wid,
@@ -263,8 +266,9 @@ class DesignWorkStateMachine:
                 f"design_work {dw_id!r} not found or already terminal"
             )
         dw = await self._get(dw_id)
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="design_work.cancelled",
             workspace_id=dw["workspace_id"],
             correlation_id=dw_id,
@@ -372,8 +376,9 @@ class DesignWorkStateMachine:
             logger.exception("design_work %s LLM call failed: %s", dw["id"], exc)
             rc = 1
             stdout = ""
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="design_work.llm_completed",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],
@@ -429,8 +434,9 @@ class DesignWorkStateMachine:
                 user_provided_link=link,
             )
         )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="design_work.mockup_recorded",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],
@@ -518,8 +524,9 @@ class DesignWorkStateMachine:
             logger.exception(
                 "refresh_workspace_md failed for %s", dw["workspace_id"]
             )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="design_doc.published",
             workspace_id=dw["workspace_id"],
             correlation_id=row["id"],
@@ -560,8 +567,9 @@ class DesignWorkStateMachine:
                 dw["id"],
             ),
         )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="design_work.round_completed",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],
@@ -583,9 +591,10 @@ class DesignWorkStateMachine:
                 dw["id"],
             ),
         )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
-            event_name="design.escalated",
+            self.webhooks,
+            event_name="design_work.escalated",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],
             payload={"reason": reason, "missing": missing or []},

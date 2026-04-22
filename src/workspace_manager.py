@@ -20,6 +20,7 @@ from pathlib import Path
 from string import Template
 
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
+from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class WorkspaceManager:
         db,
         project_root: Path | str | None = None,
         workspaces_root: Path | str | None = None,
+        webhooks=None,
     ):
         self.db = db
         self.project_root = (
@@ -86,6 +88,7 @@ class WorkspaceManager:
             workspaces_root = self.project_root / ".coop" / "workspaces"
         self.workspaces_root = Path(workspaces_root).expanduser().resolve()
         self._template = _load_template()
+        self.webhooks = webhooks
 
     # ---- id / time helpers (Phase 1 unchanged) ----
 
@@ -224,6 +227,15 @@ class WorkspaceManager:
             self._safe_rmtree(slug_dir)
             raise
 
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="workspace.created",
+            workspace_id=wid,
+            correlation_id=wid,
+            payload={"workspace_id": wid, "title": title, "slug": slug},
+        )
+
         return {
             "id": wid,
             "title": title,
@@ -249,6 +261,15 @@ class WorkspaceManager:
         changed = await self.archive(workspace_id)
         if not changed:
             return False
+
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="workspace.archived",
+            workspace_id=workspace_id,
+            correlation_id=workspace_id,
+            payload={"workspace_id": workspace_id},
+        )
 
         # Use the canonical slug dir under workspaces_root rather than the
         # stored root_path. Phase 1 legacy rows (created via the DB-only

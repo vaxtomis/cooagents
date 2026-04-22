@@ -159,7 +159,7 @@ async def test_escalate_on_max_loops(env):
     final = await sm.run_to_completion(dw["id"])
     assert final["current_state"] == "ESCALATED"
     ev = await env["db"].fetchone(
-        "SELECT * FROM workspace_events WHERE event_name='design.escalated' "
+        "SELECT * FROM workspace_events WHERE event_name='design_work.escalated' "
         "AND correlation_id=?",
         (dw["id"],),
     )

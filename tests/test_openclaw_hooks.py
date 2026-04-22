@@ -1,19 +1,37 @@
+"""Phase 5 OpenClaw outbound contract tests.
+
+Scope per user decision: OpenClaw is outbound-only. The OpenClaw repo must
+not need any code change. These tests freeze the invariants that make
+that possible:
+
+* slug='openclaw' builtin subscription auto-registered from config
+* Authorization: Bearer <token> header
+* Body keeps the legacy 7-field envelope (message/name/deliver/channel/to/
+  wakeMode/idempotencyKey) — OpenClaw side parses these verbatim
+* message text is simplified — zero feishu_doc / action-plan residue
+* artifact_manager param / _GATE_* constants are gone
+* builtin openclaw subscription cannot be deleted via the API
+* event contract JSON freezes the generic envelope schema (21 events)
+"""
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
+from src.config import (
+    HermesConfig,
+    HermesWebhookConfig,
+    OpenclawConfig,
+    OpenclawHooksConfig,
+    Settings,
+)
 from src.database import Database
-from src.config import OpenclawHooksConfig, Settings
-from src.artifact_manager import ArtifactManager
-from src.state_machine import StateMachine
-from src.webhook_notifier import WebhookNotifier, OPENCLAW_EVENTS
+from src.webhook_events import KNOWN_EVENTS
+from src.webhook_notifier import WebhookNotifier
 
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 async def db(tmp_path):
@@ -23,593 +41,291 @@ async def db(tmp_path):
     await d.close()
 
 
-@pytest.fixture
-async def sm(db, tmp_path):
-    (tmp_path / ".git").mkdir(exist_ok=True)
-    am = ArtifactManager(db)
-    am.render_task = AsyncMock(return_value="task-path")
-    webhook = AsyncMock()
-    webhook.notify = AsyncMock()
-    executor = AsyncMock()
-    host_mgr = AsyncMock()
-    merge_mgr = AsyncMock()
-    return StateMachine(db, am, host_mgr, executor, webhook, merge_mgr)
-
-
-@pytest.fixture
-async def wn_with_hooks(db):
-    """WebhookNotifier with OpenClaw hooks enabled."""
-    hooks_cfg = OpenclawHooksConfig(
-        enabled=True,
-        url="http://localhost:18789/hooks/agent",
-        token="test-token",
-        default_channel="feishu",
-        default_to="ou_default",
+def _settings(token="test-token"):
+    return Settings(
+        openclaw=OpenclawConfig(
+            hooks=OpenclawHooksConfig(
+                enabled=True,
+                url="http://localhost:18789/hooks/agent",
+                token=token,
+                default_channel="feishu",
+                default_to="ou_default",
+            )
+        )
     )
-    n = WebhookNotifier(db, openclaw_hooks=hooks_cfg)
-    yield n
+
+
+@pytest.fixture
+async def wn_openclaw(db):
+    settings = _settings()
+    n = WebhookNotifier(db, settings=settings)
+    await n.bootstrap_builtin_subscriptions(settings)
+    yield n, settings
     await n.close()
 
 
-@pytest.fixture
-async def wn_with_artifacts(db, tmp_path):
-    """WebhookNotifier with OpenClaw hooks AND artifact_manager enabled."""
-    hooks_cfg = OpenclawHooksConfig(
-        enabled=True,
-        url="http://localhost:18789/hooks/agent",
-        token="test-token",
-        default_channel="feishu",
-        default_to="ou_default",
-    )
-    am = ArtifactManager(db, project_root=tmp_path)
-    n = WebhookNotifier(db, openclaw_hooks=hooks_cfg, artifact_manager=am)
-    yield n, am, tmp_path
-    await n.close()
+def _fake_response(status_code=200):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.text = ""
+    return resp
 
 
-@pytest.fixture
-async def wn_no_hooks(db):
-    """WebhookNotifier with OpenClaw hooks disabled."""
-    n = WebhookNotifier(db)
-    yield n
-    await n.close()
+def _install_capture(wn):
+    """Mock the HTTP client, return a dict that will capture POST args."""
+    captured: dict = {}
 
-
-# ---------------------------------------------------------------------------
-# Task 1: Schema — notify columns
-# ---------------------------------------------------------------------------
-
-async def test_runs_table_has_notify_columns(db):
-    """Schema should include notify_channel and notify_to in runs table."""
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-        "notify_channel,notify_to,created_at,updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?)",
-        ("r1", "T-1", "/repo", "running", "INIT", "feishu", "ou_abc123",
-         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-    row = await db.fetchone("SELECT notify_channel, notify_to FROM runs WHERE id='r1'")
-    assert row["notify_channel"] == "feishu"
-    assert row["notify_to"] == "ou_abc123"
-
-
-# ---------------------------------------------------------------------------
-# Task 2: Config — OpenclawHooksConfig
-# ---------------------------------------------------------------------------
-
-def test_openclaw_hooks_config_defaults():
-    """OpenclawHooksConfig should have sensible defaults."""
-    cfg = OpenclawHooksConfig()
-    assert cfg.enabled is False
-    assert cfg.url == "http://127.0.0.1:18789/hooks/agent"
-    assert cfg.token == ""
-    assert cfg.default_channel == "last"
-    assert cfg.default_to == ""
-
-
-def test_settings_has_openclaw_hooks():
-    """Settings.openclaw should include a hooks sub-config."""
-    s = Settings()
-    assert hasattr(s.openclaw, "hooks")
-    assert isinstance(s.openclaw.hooks, OpenclawHooksConfig)
-
-
-# ---------------------------------------------------------------------------
-# Task 3: State Machine — notify fields on create_run
-# ---------------------------------------------------------------------------
-
-async def test_create_run_stores_notify_fields(sm, db, tmp_path):
-    """create_run should persist notify_channel and notify_to."""
-    run = await sm.create_run(
-        "T-1", str(tmp_path),
-        notify_channel="feishu", notify_to="ou_abc123",
-    )
-    row = await db.fetchone("SELECT notify_channel, notify_to FROM runs WHERE id=?", (run["id"],))
-    assert row["notify_channel"] == "feishu"
-    assert row["notify_to"] == "ou_abc123"
-
-
-async def test_create_run_notify_fields_optional(sm, db, tmp_path):
-    """create_run without notify fields should store NULL."""
-    run = await sm.create_run("T-2", str(tmp_path))
-    row = await db.fetchone("SELECT notify_channel, notify_to FROM runs WHERE id=?", (run["id"],))
-    assert row["notify_channel"] is None
-    assert row["notify_to"] is None
-
-
-# ---------------------------------------------------------------------------
-# Task 4: WebhookNotifier — OpenClaw delivery
-# ---------------------------------------------------------------------------
-
-async def test_openclaw_delivery_called_for_filtered_event(wn_with_hooks):
-    """OpenClaw delivery should fire for events in the allowed set."""
-    wn_with_hooks._deliver_to_openclaw = AsyncMock()
-    wn_with_hooks._deliver_with_retry = AsyncMock()
-    await wn_with_hooks.notify("gate.waiting", {"run_id": "r1"})
-    wn_with_hooks._deliver_to_openclaw.assert_called_once()
-
-
-async def test_openclaw_delivery_skipped_for_unfiltered_event(wn_with_hooks):
-    """OpenClaw delivery should NOT fire for events outside the allowed set."""
-    wn_with_hooks._deliver_to_openclaw = AsyncMock()
-    wn_with_hooks._deliver_with_retry = AsyncMock()
-    await wn_with_hooks.notify("stage.changed", {"run_id": "r1"})
-    wn_with_hooks._deliver_to_openclaw.assert_not_called()
-
-
-async def test_openclaw_delivery_skipped_when_disabled(wn_no_hooks):
-    """When hooks config is not provided, OpenClaw delivery should not happen."""
-    wn_no_hooks._deliver_to_openclaw = AsyncMock()
-    wn_no_hooks._deliver_with_retry = AsyncMock()
-    await wn_no_hooks.notify("gate.waiting", {"run_id": "r1"})
-    wn_no_hooks._deliver_to_openclaw.assert_not_called()
-
-
-async def test_openclaw_message_format(wn_with_hooks, db):
-    """The OpenClaw gate.waiting message should contain action plan and key identifiers."""
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-        "notify_channel,notify_to,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        ("r1", "PROJ-42", "/repo", "running", "DESIGN_REVIEW",
-         "feishu", "ou_user1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-
-    captured = {}
-
-    async def mock_post(url, content, headers):
+    async def fake_post(url, content, headers):
         captured["url"] = url
         captured["body"] = json.loads(content)
         captured["headers"] = headers
-        resp = MagicMock()
-        resp.status_code = 200
-        return resp
-
-    mock_client = AsyncMock()
-    mock_client.post = mock_post
-    wn_with_hooks._client = mock_client
-
-    await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r1", "gate": "design"})
-
-    assert captured["url"] == "http://localhost:18789/hooks/agent"
-    assert "Authorization" in captured["headers"]
-    assert captured["headers"]["Authorization"] == "Bearer test-token"
-    body = captured["body"]
-    msg = body["message"]
-    # Action plan present
-    assert "Action plan" in msg
-    assert "feishu_doc" in msg
-    # Key identifiers
-    assert "PROJ-42" in msg
-    assert "DESIGN_REVIEW" in msg
-    assert "DES-PROJ-42" in msg
-    # Approval template embedded
-    assert "设计审批" in msg
-    assert "设计文档" in msg
-    # Anti-summarization directive
-    assert "Do NOT summarize" in msg
-    # Delivery config
-    assert body["channel"] == "feishu"
-    assert body["to"] == "ou_user1"
-    assert body["deliver"] is True
-    assert "idempotencyKey" in body
-
-
-async def test_openclaw_gate_waiting_with_artifact(wn_with_artifacts, db):
-    """When artifact is available, message should embed content inline."""
-    wn, am, tmp_path = wn_with_artifacts
-
-    # Create run and artifact
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-        "notify_channel,notify_to,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        ("r-art", "PROJ-50", "/repo", "running", "DESIGN_REVIEW",
-         "feishu", "ou_user1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-    design_file = tmp_path / "docs" / "design" / "DES-PROJ-50.md"
-    design_file.parent.mkdir(parents=True, exist_ok=True)
-    design_file.write_text("# Design Doc\n\nThis is the design content.", encoding="utf-8")
-    await am.register("r-art", "design", str(design_file), "DESIGN_REVIEW")
-
-    captured = {}
-
-    async def mock_post(url, content, headers):
-        captured["body"] = json.loads(content)
-        resp = MagicMock()
-        resp.status_code = 200
-        return resp
-
-    mock_client = AsyncMock()
-    mock_client.post = mock_post
-    wn._client = mock_client
-
-    await wn._deliver_to_openclaw("gate.waiting", {"run_id": "r-art", "gate": "design"})
-
-    msg = captured["body"]["message"]
-    # Artifact content should be embedded
-    assert "--- artifact content (for step 2) ---" in msg
-    assert "# Design Doc" in msg
-    assert "This is the design content." in msg
-    assert "--- end artifact content ---" in msg
-    # Should NOT contain curl instructions for fetching artifacts
-    assert "/artifacts?kind=" not in msg
-
-
-async def test_openclaw_gate_waiting_fallback_without_artifact(wn_with_artifacts, db):
-    """When no artifact exists, message should include curl-based fallback steps."""
-    wn, am, tmp_path = wn_with_artifacts
-
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-        "notify_channel,notify_to,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        ("r-noart", "PROJ-51", "/repo", "running", "REQ_REVIEW",
-         "feishu", "ou_user1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-
-    captured = {}
-
-    async def mock_post(url, content, headers):
-        captured["body"] = json.loads(content)
-        resp = MagicMock()
-        resp.status_code = 200
-        return resp
-
-    mock_client = AsyncMock()
-    mock_client.post = mock_post
-    wn._client = mock_client
-
-    await wn._deliver_to_openclaw("gate.waiting", {"run_id": "r-noart", "gate": "req"})
-
-    msg = captured["body"]["message"]
-    # Fallback: should contain curl instructions
-    assert "/artifacts?kind=req" in msg
-    assert "/artifacts/{artifact_id}/content" in msg
-    # Still contains action plan and feishu_doc
-    assert "Action plan" in msg
-    assert "feishu_doc" in msg
-    assert "REQ-PROJ-51" in msg
-    assert "需求审批" in msg
-
-
-async def test_openclaw_gate_doc_titles_per_gate(wn_with_hooks, db):
-    """Each gate type should produce the correct doc title prefix."""
-    cases = [
-        ("req", "REQ_REVIEW", "REQ-PROJ-60"),
-        ("design", "DESIGN_REVIEW", "DES-PROJ-60"),
-        ("dev", "DEV_REVIEW", "TEST-REPORT-PROJ-60"),
-    ]
-    for gate, stage, expected_title in cases:
-        await db.execute(
-            "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-            "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-            (f"r-{gate}", "PROJ-60", "/repo", "running", stage,
-             "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-        )
-
-        captured = {}
-
-        async def mock_post(url, content, headers):
-            captured["body"] = json.loads(content)
-            resp = MagicMock()
-            resp.status_code = 200
-            return resp
-
-        mock_client = AsyncMock()
-        mock_client.post = mock_post
-        wn_with_hooks._client = mock_client
-
-        await wn_with_hooks._deliver_to_openclaw(
-            "gate.waiting", {"run_id": f"r-{gate}", "gate": gate}
-        )
-
-        assert expected_title in captured["body"]["message"], (
-            f"Expected '{expected_title}' in message for gate={gate}"
-        )
-
-
-async def test_openclaw_non_gate_event_message(wn_with_hooks, db):
-    """Non gate.waiting events should use simplified message format."""
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-        "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-        ("r-evt", "PROJ-70", "/repo", "running", "MERGED",
-         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-
-    captured = {}
-
-    async def mock_post(url, content, headers):
-        captured["body"] = json.loads(content)
-        resp = MagicMock()
-        resp.status_code = 200
-        return resp
-
-    mock_client = AsyncMock()
-    mock_client.post = mock_post
-    wn_with_hooks._client = mock_client
-
-    await wn_with_hooks._deliver_to_openclaw("run.completed", {"run_id": "r-evt"})
-
-    msg = captured["body"]["message"]
-    assert "[cooagents:run.completed]" in msg
-    assert "PROJ-70" in msg
-    assert "Do NOT summarize" in msg
-
-
-async def test_openclaw_uses_global_defaults_when_run_has_no_notify(wn_with_hooks, db):
-    """When run has no notify_channel/notify_to, use global defaults from config."""
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-        "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-        ("r2", "PROJ-99", "/repo", "running", "DEV_REVIEW",
-         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-
-    captured = {}
-
-    async def mock_post(url, content, headers):
-        captured["body"] = json.loads(content)
-        resp = MagicMock()
-        resp.status_code = 200
-        return resp
-
-    mock_client = AsyncMock()
-    mock_client.post = mock_post
-    wn_with_hooks._client = mock_client
-
-    await wn_with_hooks._deliver_to_openclaw("job.completed", {"run_id": "r2"})
-
-    assert captured["body"]["channel"] == "feishu"
-    assert captured["body"]["to"] == "ou_default"
-
-
-async def test_openclaw_prefers_event_stage_over_run_current_stage(wn_with_hooks, db):
-    """Timeout-like events should display the stage carried by the event payload."""
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-        ("r-stage", "PROJ-STAGE", "/repo", "running", "DESIGN_DISPATCHED", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-
-    captured = {}
-
-    async def mock_post(url, content, headers):
-        captured["body"] = json.loads(content)
-        resp = MagicMock()
-        resp.status_code = 200
-        return resp
-
-    mock_client = AsyncMock()
-    mock_client.post = mock_post
-    wn_with_hooks._client = mock_client
-
-    await wn_with_hooks._deliver_to_openclaw(
-        "job.timeout",
-        {"run_id": "r-stage", "job_id": "job-1", "stage": "DESIGN_QUEUED"},
-    )
-
-    assert "DESIGN_QUEUED" in captured["body"]["message"]
-    assert "DESIGN_DISPATCHED" not in captured["body"]["message"]
-
-
-async def test_openclaw_prefers_current_stage_over_job_stage(wn_with_hooks, db):
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-        ("r-current-stage", "PROJ-CUR", "/repo", "running", "DESIGN_RUNNING", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-
-    captured = {}
-
-    async def mock_post(url, content, headers):
-        captured["body"] = json.loads(content)
-        resp = MagicMock()
-        resp.status_code = 200
-        return resp
-
-    mock_client = AsyncMock()
-    mock_client.post = mock_post
-    wn_with_hooks._client = mock_client
-
-    await wn_with_hooks._deliver_to_openclaw(
-        "job.timeout",
-        {
-            "run_id": "r-current-stage",
-            "job_id": "job-2",
-            "job_stage": "DESIGN_RUNNING",
-            "current_stage": "DESIGN_REVIEW",
-        },
-    )
-
-    assert "DESIGN_REVIEW" in captured["body"]["message"]
-    assert "DESIGN_RUNNING" not in captured["body"]["message"]
-
-
-async def test_openclaw_delivery_retries_before_succeeding(wn_with_hooks, db):
-    """OpenClaw delivery should retry transient failures before logging failure."""
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-        "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-        ("r3", "PROJ-100", "/repo", "running", "REQ_REVIEW",
-         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-
-    attempts = {"count": 0}
-
-    async def mock_post(url, content, headers):
-        attempts["count"] += 1
-        if attempts["count"] < 3:
-            raise RuntimeError("temporary network failure")
-        resp = MagicMock()
-        resp.status_code = 200
-        return resp
-
-    mock_client = AsyncMock()
-    mock_client.post = mock_post
-    wn_with_hooks._client = mock_client
-
-    with patch("src.webhook_notifier.asyncio.sleep", new=AsyncMock()):
-        await wn_with_hooks.notify("gate.waiting", {"run_id": "r3"})
-
-    rows = await db.fetchall(
-        "SELECT * FROM events WHERE event_type='openclaw.hooks.delivery_failed'"
-    )
-    assert attempts["count"] == 3
-    assert rows == []
-
-
-async def test_openclaw_idempotency_key_changes_even_with_same_second(wn_with_hooks, db):
-    """OpenClaw idempotencyKey should stay unique for repeated events in the same second."""
-    await db.execute(
-        "INSERT INTO runs(id,ticket,repo_path,status,current_stage,"
-        "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-        ("r4", "PROJ-101", "/repo", "running", "REQ_REVIEW",
-         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
-
-    captured = []
-
-    async def mock_post(url, content, headers):
-        captured.append(json.loads(content))
-        resp = MagicMock()
-        resp.status_code = 200
-        return resp
-
-    class FixedMoment:
-        def isoformat(self):
-            return "2026-03-18T01:02:03+00:00"
-
-        def timestamp(self):
-            return 1_774_333_323
-
-    class FixedDateTime:
-        @classmethod
-        def now(cls, tz=None):
-            return FixedMoment()
-
-    mock_client = AsyncMock()
-    mock_client.post = mock_post
-    wn_with_hooks._client = mock_client
-
-    with patch("src.webhook_notifier.datetime", FixedDateTime):
-        await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r4", "gate": "req"})
-        await wn_with_hooks._deliver_to_openclaw("gate.waiting", {"run_id": "r4", "gate": "req"})
-
-    assert len(captured) == 2
-    assert captured[0]["idempotencyKey"] != captured[1]["idempotencyKey"]
+        return _fake_response(200)
+
+    client = AsyncMock()
+    client.post = fake_post
+    wn._client = client
+    return captured
 
 
 # ---------------------------------------------------------------------------
-# Task 6: Event filter completeness
+# Bootstrap
 # ---------------------------------------------------------------------------
 
-def test_openclaw_events_completeness():
-    """OPENCLAW_EVENTS should match the spec's event list."""
-    expected = {
-        "gate.waiting", "job.completed", "job.failed", "job.timeout",
-        "job.interrupted", "merge.conflict", "merge.completed",
-        "run.completed", "run.cancelled", "host.online", "host.unavailable",
+async def test_openclaw_subscription_bootstrapped(wn_openclaw):
+    wn, _ = wn_openclaw
+    subs = await wn.list_all()
+    openclaw = [s for s in subs if s["slug"] == "openclaw"]
+    assert len(openclaw) == 1
+    assert openclaw[0]["secret"] == "test-token"
+    assert openclaw[0]["url"] == "http://localhost:18789/hooks/agent"
+    assert openclaw[0]["active"] == 1
+
+
+async def test_openclaw_disabled_means_no_row(db):
+    settings = Settings(
+        openclaw=OpenclawConfig(hooks=OpenclawHooksConfig(enabled=False))
+    )
+    wn = WebhookNotifier(db, settings=settings)
+    try:
+        await wn.bootstrap_builtin_subscriptions(settings)
+        subs = await wn.list_all()
+        assert [s for s in subs if s["slug"] == "openclaw"] == []
+    finally:
+        await wn.close()
+
+
+# ---------------------------------------------------------------------------
+# Request shape — Bearer + legacy envelope
+# ---------------------------------------------------------------------------
+
+async def test_openclaw_sends_bearer_header(wn_openclaw):
+    wn, _ = wn_openclaw
+    cap = _install_capture(wn)
+    await wn.deliver(
+        "dev_work.completed",
+        workspace_id="ws-1",
+        correlation_id="dev-1",
+        payload={"score": 90},
+    )
+    import asyncio
+
+    await asyncio.gather(*wn._inflight, return_exceptions=True)
+    assert cap["headers"]["Authorization"] == "Bearer test-token"
+
+
+async def test_openclaw_body_has_legacy_seven_fields(wn_openclaw):
+    wn, _ = wn_openclaw
+    cap = _install_capture(wn)
+    await wn.deliver(
+        "workspace.created",
+        workspace_id="ws-1",
+        correlation_id="ws-1",
+        payload={"workspace_id": "ws-1", "title": "t", "slug": "t"},
+    )
+    import asyncio
+
+    await asyncio.gather(*wn._inflight, return_exceptions=True)
+    assert set(cap["body"].keys()) == {
+        "message", "name", "deliver", "channel", "to",
+        "wakeMode", "idempotencyKey",
     }
-    assert OPENCLAW_EVENTS == expected
+    assert cap["body"]["name"] == "cooagents"
+    assert cap["body"]["channel"] == "feishu"
+    assert cap["body"]["to"] == "ou_default"
+    assert cap["body"]["deliver"] is True
+
+
+async def test_openclaw_message_has_no_dead_code_markers(wn_openclaw):
+    wn, _ = wn_openclaw
+    cap = _install_capture(wn)
+    await wn.deliver(
+        "dev_work.escalated",
+        workspace_id="ws-1",
+        correlation_id="dev-1",
+        payload={"reason": "r", "rounds": 5},
+    )
+    import asyncio
+
+    await asyncio.gather(*wn._inflight, return_exceptions=True)
+    msg = cap["body"]["message"]
+    for marker in (
+        "feishu_doc",
+        "Action plan",
+        "请回复",
+        "Task: cooagents workflow",
+        "设计审批",
+        "DES-",
+        "REQ-",
+        "TEST-REPORT-",
+    ):
+        assert marker not in msg, f"dead code marker still present: {marker}"
+
+
+async def test_openclaw_message_carries_event_summary(wn_openclaw):
+    wn, _ = wn_openclaw
+    cap = _install_capture(wn)
+    await wn.deliver(
+        "dev_work.round_completed",
+        workspace_id="ws-x",
+        correlation_id="dev-x",
+        payload={"round": 2, "score": 72},
+    )
+    import asyncio
+
+    await asyncio.gather(*wn._inflight, return_exceptions=True)
+    msg = cap["body"]["message"]
+    assert msg.startswith("[cooagents:dev_work.round_completed]")
+    assert "ws=dev-x" in msg
+    assert "payload:" in msg
+
+
+async def test_openclaw_idempotency_key_uses_event_id(wn_openclaw):
+    wn, _ = wn_openclaw
+    cap = _install_capture(wn)
+    eid = await wn.deliver(
+        "dev_work.completed",
+        workspace_id="ws-1",
+        correlation_id="dev-1",
+        payload={"score": 90},
+    )
+    import asyncio
+
+    await asyncio.gather(*wn._inflight, return_exceptions=True)
+    assert cap["body"]["idempotencyKey"] == f"cooagents:{eid}"
 
 
 # ---------------------------------------------------------------------------
-# gate.waiting emission
+# Dead code removal
 # ---------------------------------------------------------------------------
 
-async def test_gate_waiting_emitted_on_review_stage(sm, db, tmp_path):
-    """Entering a *_REVIEW stage should emit gate.waiting event."""
-    run = await sm.create_run("T-GW", str(tmp_path))
-    run_id = run["id"]
-
-    # Submit requirement to advance to REQ_REVIEW
-    await sm.submit_requirement(run_id, "test requirement")
-
-    # Check that gate.waiting was emitted for req gate
-    rows = await db.fetchall(
-        "SELECT * FROM events WHERE run_id=? AND event_type='gate.waiting'", (run_id,)
-    )
-    assert len(rows) == 1
-    import json
-    payload = json.loads(rows[0]["payload_json"])
-    assert payload["gate"] == "req"
-    assert payload["stage"] == "REQ_REVIEW"
+def test_openclaw_notifier_has_no_artifact_manager_kwarg(db):
+    with pytest.raises(TypeError):
+        WebhookNotifier(db, artifact_manager=object())
 
 
-async def test_gate_waiting_emitted_on_approve_to_next_review(sm, db, tmp_path):
-    """Approving req gate -> DESIGN flow -> eventually DESIGN_REVIEW should emit gate.waiting."""
-    run = await sm.create_run("T-GW2", str(tmp_path))
-    run_id = run["id"]
+def test_old_symbols_removed():
+    import src.webhook_notifier as wn_mod
 
-    # Advance to REQ_REVIEW
-    await sm.submit_requirement(run_id, "req content")
-
-    # Approve req -> should go to DESIGN_QUEUED (no gate.waiting for DESIGN_QUEUED)
-    await sm.approve(run_id, "req", "tester")
-    updated = await db.fetchone("SELECT current_stage FROM runs WHERE id=?", (run_id,))
-    assert updated["current_stage"] == "DESIGN_QUEUED"
-
-    # gate.waiting should only have been emitted for REQ_REVIEW, not DESIGN_QUEUED
-    rows = await db.fetchall(
-        "SELECT * FROM events WHERE run_id=? AND event_type='gate.waiting'", (run_id,)
-    )
-    assert len(rows) == 1  # only for REQ_REVIEW
-
-
-async def test_no_gate_waiting_for_auto_stages(sm, db, tmp_path):
-    """Auto stages (INIT, *_QUEUED, *_DISPATCHED, etc.) should NOT emit gate.waiting."""
-    run = await sm.create_run("T-NGW", str(tmp_path))
-    run_id = run["id"]
-
-    # create_run goes INIT -> REQ_COLLECTING, neither should emit gate.waiting
-    rows = await db.fetchall(
-        "SELECT * FROM events WHERE run_id=? AND event_type='gate.waiting'", (run_id,)
-    )
-    assert len(rows) == 0
+    for name in (
+        "OPENCLAW_EVENTS",
+        "_GATE_ARTIFACT_KIND",
+        "_GATE_DOC_PREFIX",
+        "_GATE_LABEL",
+        "_GATE_DOC_TYPE",
+        "_GATE_NEXT",
+        "_MAX_ARTIFACT_BYTES",
+        "_build_gate_waiting_message",
+        "_fetch_gate_artifact",
+    ):
+        assert not hasattr(wn_mod, name), (
+            f"{name} should be removed from webhook_notifier"
+        )
 
 
 # ---------------------------------------------------------------------------
-# host.unavailable emission
+# Contract JSON
 # ---------------------------------------------------------------------------
 
-async def test_host_unavailable_emitted_on_design_queued_no_hosts(sm, db, tmp_path):
-    """Ticking DESIGN_QUEUED with no hosts should emit host.unavailable."""
-    run = await sm.create_run("T-HU", str(tmp_path))
-    run_id = run["id"]
+def _contract_path() -> Path:
+    return Path(__file__).with_name("openclaw_event_contract.json")
 
-    await sm.submit_requirement(run_id, "req content")
-    await sm.approve(run_id, "req", "tester")
-    # Simulate no available hosts
-    sm.hosts.select_host = AsyncMock(return_value=None)
-    # Now at DESIGN_QUEUED with no hosts registered
-    await sm.tick(run_id)
 
-    rows = await db.fetchall(
-        "SELECT * FROM events WHERE run_id=? AND event_type='host.unavailable'", (run_id,)
-    )
-    assert len(rows) >= 1
-    import json
-    payload = json.loads(rows[0]["payload_json"])
-    assert payload["stage"] == "DESIGN_QUEUED"
-    assert payload["agent_type"] == "claude"
+def test_event_contract_covers_all_known_events():
+    contract = json.loads(_contract_path().read_text(encoding="utf-8"))
+    assert set(contract["events"].keys()) == KNOWN_EVENTS
 
-    # Run should still be in DESIGN_QUEUED (not advanced)
-    updated = await db.fetchone("SELECT current_stage FROM runs WHERE id=?", (run_id,))
-    assert updated["current_stage"] == "DESIGN_QUEUED"
+
+def test_event_contract_envelope_keys_frozen():
+    contract = json.loads(_contract_path().read_text(encoding="utf-8"))
+    assert contract["envelope_keys"] == [
+        "event", "event_id", "ts", "correlation_id", "payload",
+    ]
+
+
+async def test_generic_path_envelope_matches_contract(db):
+    contract = json.loads(_contract_path().read_text(encoding="utf-8"))
+    wn = WebhookNotifier(db)
+    try:
+        await wn.register("http://example.com/hook")
+        captured: list[dict] = []
+
+        async def fake_post(url, content, headers):
+            captured.append(json.loads(content))
+            return _fake_response(200)
+
+        client = AsyncMock()
+        client.post = fake_post
+        wn._client = client
+
+        # Fire one representative event and verify its envelope matches.
+        await wn.deliver(
+            "workspace.created",
+            workspace_id="ws-1",
+            correlation_id="ws-1",
+            payload={"workspace_id": "ws-1", "title": "t", "slug": "t"},
+        )
+        import asyncio
+
+        await asyncio.gather(*wn._inflight, return_exceptions=True)
+        assert captured
+        assert list(captured[0].keys()) == contract["envelope_keys"]
+    finally:
+        await wn.close()
+
+
+# ---------------------------------------------------------------------------
+# Builtin cannot be deleted via HTTP
+# ---------------------------------------------------------------------------
+
+async def test_builtin_openclaw_subscription_cannot_be_deleted_via_api(
+    wn_openclaw, db
+):
+    """HTTP DELETE path refuses to remove slug='openclaw'."""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from src.exceptions import BadRequestError
+    from routes.webhooks import router
+
+    wn, _ = wn_openclaw
+
+    app = FastAPI()
+
+    @app.exception_handler(BadRequestError)
+    async def bad(request, exc):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+
+    app.include_router(router, prefix="/api/v1")
+    app.state.db = db
+    app.state.webhooks = wn
+
+    subs = await wn.list_all()
+    openclaw_id = next(s["id"] for s in subs if s["slug"] == "openclaw")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.delete(f"/api/v1/webhooks/{openclaw_id}")
+    assert resp.status_code == 400
+    assert "builtin" in resp.json()["error"].lower()

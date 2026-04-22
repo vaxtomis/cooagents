@@ -29,7 +29,7 @@ from src.exceptions import BadRequestError, NotFoundError
 from src.git_utils import ensure_worktree, run_git
 from src.models import AgentKind, DevWorkStep, ProblemCategory
 from src.reviewer import ReviewOutcome
-from src.workspace_events import emit_workspace_event
+from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         iteration_notes: Any, # DevIterationNoteManager
         executor: Any,        # async run_once(agent, worktree, timeout, task_file=?, prompt=?)
         config: Any,          # Settings
+        webhooks: Any = None,  # WebhookNotifier (optional; None disables deliver side-channel)
     ) -> None:
         self.db = db
         self.workspaces = workspaces
@@ -83,6 +84,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         self.iteration_notes = iteration_notes
         self.executor = executor
         self.config = config
+        self.webhooks = webhooks
         # Phase 2 manager owns workspaces_root; mirror it for quick path math.
         self.workspaces_root = Path(workspaces.workspaces_root).resolve()
         self._running: dict[str, asyncio.Task] = {}
@@ -228,8 +230,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 now,
             ),
         )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="dev_work.started",
             workspace_id=workspace_id,
             correlation_id=dev_id,
@@ -311,8 +314,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 f"dev_work {dev_id!r} not found or already terminal"
             )
         dw = await self._get(dev_id)
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="dev_work.cancelled",
             workspace_id=dw["workspace_id"],
             correlation_id=dev_id,
@@ -425,8 +429,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             )
             rc = 1
             stdout = ""
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="dev_work.step_completed",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],
@@ -570,8 +575,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 dw["id"],
             ),
         )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="dev_work.round_completed",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],
@@ -611,8 +617,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 dw["id"],
             ),
         )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="dev_work.escalated",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],
@@ -622,8 +629,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 "rounds": dw["iteration_rounds"],
             },
         )
-        await emit_workspace_event(
+        await emit_and_deliver(
             self.db,
+            self.webhooks,
             event_name="workspace.human_intervention",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],

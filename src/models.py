@@ -75,6 +75,46 @@ class CreateWebhookRequest(BaseModel):
     secret: str | None = None
 
 
+class CreateWebhookSubscriptionRequest(BaseModel):
+    """Phase 5 webhook subscription request.
+
+    Why: replaces ``CreateWebhookRequest`` (kept temporarily for Phase 7
+    cleanup). Validates ``events`` against the frozen registry so a typo
+    cannot write a dead subscription that never fires.
+    """
+    url: str
+    events: list[str] | None = None
+    secret: str | None = None
+    slug: str | None = None
+
+    @field_validator("events")
+    @classmethod
+    def _events_in_known_set(cls, v):
+        if v is None:
+            return v
+        from src.webhook_events import KNOWN_EVENTS
+
+        unknown = [e for e in v if e not in KNOWN_EVENTS]
+        if unknown:
+            raise ValueError(f"unknown event names: {unknown}")
+        return v
+
+    @field_validator("slug")
+    @classmethod
+    def _reject_builtin_slug(cls, v):
+        if v in {"openclaw", "hermes"}:
+            raise ValueError(
+                f"slug {v!r} is reserved for builtin subscriptions"
+            )
+        return v
+
+
+class GateActionRequest(BaseModel):
+    # actor is not in the body — Phase 5 serves Web only, actor is
+    # injected from the authenticated session.
+    note: str | None = None
+
+
 class CreateAgentHostRequest(BaseModel):
     id: str
     host: str

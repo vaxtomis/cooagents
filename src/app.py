@@ -56,10 +56,18 @@ async def lifespan(app: FastAPI):
     consumer_task = asyncio.create_task(trace_emitter.start_consumer()) if settings.tracing.enabled else None
 
     artifacts = ArtifactManager(db, project_root=project_root)
+    webhooks = WebhookNotifier(
+        db,
+        settings=settings,
+        trace_emitter=trace_emitter,
+    )
+    await webhooks.bootstrap_builtin_subscriptions(settings)
+
     workspaces = WorkspaceManager(
         db,
         project_root=project_root,
         workspaces_root=settings.security.resolved_workspace_root(),
+        webhooks=webhooks,
     )
     # Startup reconcile — FS wins. Never fail the boot on a reconcile error;
     # operator can re-trigger via POST /api/v1/workspaces/sync later.
@@ -77,12 +85,6 @@ async def lifespan(app: FastAPI):
 
     hosts = HostManager(db)
     jobs = JobManager(db, coop_dir=coop_dir, project_root=project_root)
-    webhooks = WebhookNotifier(
-        db,
-        openclaw_hooks=settings.openclaw.hooks if settings.openclaw.hooks.enabled else None,
-        trace_emitter=trace_emitter,
-        artifact_manager=artifacts,
-    )
     merger = MergeManager(db, webhooks)
 
     executor = AcpxExecutor(
@@ -120,6 +122,7 @@ async def lifespan(app: FastAPI):
         design_docs=design_docs,
         executor=executor,
         config=settings,
+        webhooks=webhooks,
     )
     iteration_notes = DevIterationNoteManager(
         db, workspaces_root=settings.security.resolved_workspace_root()
@@ -131,6 +134,7 @@ async def lifespan(app: FastAPI):
         iteration_notes=iteration_notes,
         executor=executor,
         config=settings,
+        webhooks=webhooks,
     )
 
     agent_config = load_agent_hosts()
@@ -298,6 +302,7 @@ from routes.artifacts import router as artifacts_router
 from routes.auth import router as auth_router
 from routes.design_works import router as design_works_router
 from routes.dev_works import router as dev_works_router
+from routes.gates import router as gates_router
 from routes.diagnostics import create_diagnostics_router
 from routes.events import create_events_router
 from routes.repos import router as repos_router
@@ -321,4 +326,5 @@ app.include_router(create_diagnostics_router(), prefix="/api/v1", dependencies=a
 app.include_router(workspaces_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(design_works_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(dev_works_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(gates_router, prefix="/api/v1", dependencies=auth_required)
 mount_dashboard_spa(app)

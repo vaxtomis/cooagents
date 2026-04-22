@@ -144,3 +144,22 @@ CREATE INDEX IF NOT EXISTS idx_reviews_note                ON reviews(dev_iterat
 CREATE INDEX IF NOT EXISTS idx_workspace_events_name       ON workspace_events(event_name);
 CREATE INDEX IF NOT EXISTS idx_workspace_events_workspace  ON workspace_events(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_events_ts         ON workspace_events(ts);
+
+-- 8. webhook_subscriptions — outbound webhook delivery targets
+--    Replaces the legacy `webhooks` table dropped in Phase 1.
+--    slug: 'openclaw' / 'hermes' for builtin; NULL for user-registered.
+--    secret: HMAC secret for generic path; Bearer token for OpenClaw path.
+--            Supports '$ENV:VARNAME' redirection via _resolve_secret.
+--    events_json: JSON list[str]; NULL means subscribe to all KNOWN_EVENTS.
+CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug          TEXT UNIQUE,
+  url           TEXT NOT NULL,
+  secret        TEXT,
+  events_json   TEXT,
+  active        INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_subscriptions_active
+  ON webhook_subscriptions(active);
