@@ -6,7 +6,6 @@ import {
   GitBranch,
   LayoutDashboard,
   LogOut,
-  Server,
 } from "lucide-react";
 import {
   NavLink,
@@ -17,7 +16,6 @@ import {
   useLocation,
 } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
-import { AgentHostsPage } from "./pages/AgentHostsPage";
 import { CrossWorkspaceDevWorkPage } from "./pages/CrossWorkspaceDevWorkPage";
 import { DesignWorkPage } from "./pages/DesignWorkPage";
 import { DevWorkPage } from "./pages/DevWorkPage";
@@ -43,7 +41,6 @@ const navItems: NavItem[] = [
   { to: "/", label: "概览", icon: LayoutDashboard, end: true },
   { to: "/workspaces", label: "工作区域", icon: FolderKanban },
   { to: "/dev-works", label: "跨区域 DevWorks", icon: GitBranch },
-  { to: "/agent-hosts", label: "Agent 主机", icon: Server },
 ];
 
 function resolvePageMeta(pathname: string): PageMeta {
@@ -96,15 +93,6 @@ function resolvePageMeta(pathname: string): PageMeta {
       title: "跨区域 DevWorks",
       eyebrow: "跨 Workspace 视图",
       description: "按 Workspace 分组展示所有 DevWork，仅供浏览。",
-    };
-  }
-
-  if (pathname === "/agent-hosts") {
-    return {
-      title: "Agent 主机",
-      eyebrow: "集群运维",
-      description:
-        "管理主机清单、调整并发容量、执行健康检查、移除失效 Agent。",
     };
   }
 
@@ -185,7 +173,7 @@ function ShellLayout() {
                 Workspace 驱动的运维节奏
               </p>
               <p className="mt-2 leading-relaxed">
-                概览、工作区域、跨区域 DevWorks 与 Agent 主机共享同一刷新节律。
+                概览、工作区域与跨区域 DevWorks 共享同一刷新节律。
               </p>
             </div>
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3 text-xs text-muted">
@@ -260,7 +248,6 @@ const routes = [
       { path: "workspaces/:wsId/design-works/:dwId", element: <DesignWorkPage /> },
       { path: "workspaces/:wsId/dev-works/:dvId", element: <DevWorkPage /> },
       { path: "dev-works", element: <CrossWorkspaceDevWorkPage /> },
-      { path: "agent-hosts", element: <AgentHostsPage /> },
     ],
   },
 ];

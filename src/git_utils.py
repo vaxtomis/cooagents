@@ -80,66 +80,6 @@ async def ensure_worktree(
     return branch_name, wt_path
 
 
-async def check_conflicts(worktree: str, target_branch: str = "main") -> list[str]:
-    """Dry-run merge to detect conflicts.
-
-    Returns a list of conflicted file paths (empty if no conflicts).
-    """
-    _, _, rc = await run_git(
-        "merge", "--no-commit", "--no-ff", target_branch,
-        cwd=worktree,
-        check=False,
-    )
-    if rc == 0:
-        await run_git("merge", "--abort", cwd=worktree, check=False)
-        return []
-
-    # Collect conflicted files
-    out, _, _ = await run_git(
-        "diff", "--name-only", "--diff-filter=U",
-        cwd=worktree,
-        check=False,
-    )
-    await run_git("merge", "--abort", cwd=worktree, check=False)
-    return [f for f in out.split("\n") if f.strip()]
-
-
-async def rebase_on_main(worktree: str) -> bool:
-    """Rebase the current branch on *main*.
-
-    Returns ``True`` if clean, ``False`` if conflicts were detected.
-    """
-    _, _, rc = await run_git("rebase", "main", cwd=worktree, check=False)
-    if rc != 0:
-        await run_git("rebase", "--abort", cwd=worktree, check=False)
-        return False
-    return True
-
-
-async def merge_to_main(repo_path: str, branch: str) -> tuple[bool, str]:
-    """Merge *branch* into *main*.
-
-    Returns
-    -------
-    (success, merge_commit_hash_or_error_message)
-    """
-    await run_git("checkout", "main", cwd=repo_path)
-    _, err, rc = await run_git(
-        "merge", "--no-ff", branch, cwd=repo_path, check=False
-    )
-    if rc != 0:
-        await run_git("merge", "--abort", cwd=repo_path, check=False)
-        return False, err
-    out, _, _ = await run_git("rev-parse", "HEAD", cwd=repo_path)
-    return True, out
-
-
-async def get_head_commit(worktree: str) -> str:
-    """Return the HEAD commit hash (40-char hex string)."""
-    out, _, _ = await run_git("rev-parse", "HEAD", cwd=worktree)
-    return out
-
-
 async def ensure_repo(repo_path: str, repo_url: str | None = None) -> str:
     """Ensure a git repo exists at *repo_path*.
 

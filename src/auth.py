@@ -44,7 +44,6 @@ from fastapi.responses import Response
 
 ACCESS_COOKIE = "access_token"
 REFRESH_COOKIE = "refresh_token"
-AGENT_TOKEN_HEADER = "x-agent-token"
 AGENT_SUBJECT = "agent"  # pseudo-username recorded for agent-initiated actions
 JWT_ALG = "HS256"
 
@@ -263,15 +262,6 @@ def set_auth_cookies(
     response.set_cookie(
         REFRESH_COOKIE, refresh_token,
         max_age=int(auth_cfg.refresh_ttl.total_seconds()),
-        **common,
-    )
-
-
-def set_access_cookie(response: Response, access_token: str, auth_cfg: AuthSettings) -> None:
-    common = _common_cookie_kwargs(auth_cfg)
-    response.set_cookie(
-        ACCESS_COOKIE, access_token,
-        max_age=int(auth_cfg.access_ttl.total_seconds()),
         **common,
     )
 

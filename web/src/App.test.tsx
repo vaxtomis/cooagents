@@ -34,10 +34,6 @@ vi.mock("./pages/CrossWorkspaceDevWorkPage", () => ({
   CrossWorkspaceDevWorkPage: () => <div>cross workspace dev works page</div>,
 }));
 
-vi.mock("./pages/AgentHostsPage", () => ({
-  AgentHostsPage: () => <div>agent hosts page</div>,
-}));
-
 function renderAt(path: string) {
   return render(
     <AuthProvider>
@@ -51,14 +47,12 @@ describe("App shell", () => {
     const overviewLabel = "概览";
     const workspacesLabel = "工作区域";
     const crossLabel = "跨区域 DevWorks";
-    const hostsLabel = "Agent 主机";
 
     const overview = renderAt("/");
     await waitFor(() => expect(screen.getByText("Cooagents")).toBeInTheDocument());
     expect(screen.getAllByRole("link", { name: overviewLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: workspacesLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: crossLabel }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: hostsLabel }).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: overviewLabel })).toBeInTheDocument();
     overview.unmount();
 
@@ -81,9 +75,5 @@ describe("App shell", () => {
     const cross = renderAt("/dev-works");
     await waitFor(() => expect(screen.getByRole("heading", { name: crossLabel })).toBeInTheDocument());
     cross.unmount();
-
-    const hosts = renderAt("/agent-hosts");
-    await waitFor(() => expect(screen.getByRole("heading", { name: hostsLabel })).toBeInTheDocument());
-    hosts.unmount();
   });
 });

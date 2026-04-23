@@ -1,6 +1,4 @@
-// Workspace-driven domain types (Phase 6). Mirrors src/models.py.
-// Run-centric types are removed — MergeQueue, RunRecord, RunBrief, etc.
-// Phase 7 removes the backend counterparts.
+// Workspace-driven domain types. Mirrors src/models.py.
 
 // ---------------------------------------------------------------------------
 // Shared
@@ -11,24 +9,6 @@ export interface Pagination {
   offset: number;
   has_more: boolean;
   total?: number;
-}
-
-// ---------------------------------------------------------------------------
-// Agent host (retained — AgentHostsPage still used)
-// ---------------------------------------------------------------------------
-
-export interface AgentHost {
-  id: string;
-  host: string;
-  agent_type: string;
-  max_concurrent: number;
-  ssh_key?: string | null;
-  labels_json?: string | null;
-  labels: string[];
-  status: string;
-  current_load: number;
-  created_at: string;
-  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------
