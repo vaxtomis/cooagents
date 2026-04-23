@@ -71,18 +71,30 @@ export function WorkspaceDashboardPage() {
 
   const activeWorkspaces = (workspacesQuery.data ?? []).slice().sort(compareUpdatedDesc);
   const metrics = metricsQuery.data;
+  const metricsError = metricsQuery.error;
 
-  const activeValue = metrics ? metrics.active_workspaces.toString().padStart(2, "0") : "-";
+  // Distinguish loading ("-") from error ("—") so a failed /metrics/workspaces
+  // call does not look like the initial fetch.
+  const placeholder = metricsError ? "—" : "-";
+  const activeValue = metrics ? metrics.active_workspaces.toString().padStart(2, "0") : placeholder;
   const interventionValue = metrics
     ? metrics.human_intervention_per_workspace.toFixed(2)
-    : "-";
+    : placeholder;
   const firstPassValue = metrics
     ? `${Math.round(metrics.first_pass_success_rate * 100)}%`
-    : "-";
-  const avgRoundsValue = metrics ? metrics.avg_iteration_rounds.toFixed(1) : "-";
+    : placeholder;
+  const avgRoundsValue = metrics ? metrics.avg_iteration_rounds.toFixed(1) : placeholder;
 
   return (
     <div className="space-y-6">
+      {metricsError ? (
+        <p
+          className="rounded-2xl border border-danger/15 bg-danger/8 p-4 text-sm text-muted"
+          role="alert"
+        >
+          指标数据加载失败，已显示占位符。
+        </p>
+      ) : null}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <HeroStat
           caption="当前活跃 Workspace 数量；每 15 秒自动刷新。"

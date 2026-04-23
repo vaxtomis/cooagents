@@ -9,7 +9,7 @@ Pure read: four SELECT aggregates, no mutation.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -21,15 +21,27 @@ router = APIRouter(tags=["metrics"])
 
 
 def _parse_iso(value: str | None, name: str) -> str | None:
+    """Parse and normalize to the canonical UTC isoformat used by writers.
+
+    DB rows are written as ``datetime.now(timezone.utc).isoformat()`` (offset
+    ``+00:00``). Clients may pass ``Z`` suffix or naive/alt-offset values;
+    normalize so lexicographic `>=` / `<=` binds match stored rows. Naive
+    input is assumed UTC.
+    """
     if value is None:
         return None
+    raw = value.replace("Z", "+00:00") if value.endswith("Z") else value
     try:
-        datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(raw)
     except ValueError as exc:
         raise BadRequestError(
             f"{name} must be ISO8601 (e.g. 2026-04-23T00:00:00+00:00): {exc}"
         ) from exc
-    return value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat()
 
 
 def _append_range(
@@ -58,13 +70,13 @@ async def workspace_metrics(
 
     db = request.app.state.db
 
-    # active_workspaces: status='active' + workspace.created_at window
-    active_where = ["status='active'"]
-    active_params: list[Any] = []
-    _append_range(active_where, active_params, "created_at", since, until)
+    # active_workspaces: current-state snapshot, independent of window.
+    # The window would otherwise exclude workspaces created before `since`
+    # that are still active — misleading for a "how many are live right now"
+    # gauge. Keep this metric unwindowed on purpose.
     active_row = await db.fetchone(
-        "SELECT COUNT(*) AS c FROM workspaces WHERE " + " AND ".join(active_where),
-        tuple(active_params),
+        "SELECT COUNT(*) AS c FROM workspaces WHERE status='active'",
+        (),
     )
     active_workspaces = int(active_row["c"] if active_row else 0)
 

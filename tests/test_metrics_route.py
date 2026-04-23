@@ -199,3 +199,45 @@ async def test_since_until_window(client):
         "/api/v1/metrics/workspaces", params={"since": "bogus"}
     )
     assert r.status_code == 400
+
+
+async def test_iso_normalization_matches_z_suffix_and_naive(client):
+    """Client may send ``...Z`` or naive ISO; both must bind against stored
+    ``+00:00`` rows (regression: string compare broke silently before)."""
+    db = client.db
+    await _seed_workspace(db, ws_id="ws-n1", slug="n1")
+    await _seed_event(db, event_id="h1", name="workspace.human_intervention",
+                      ts=_ts(4, 1), workspace_id="ws-n1")
+
+    # Z suffix
+    r = await client.get(
+        "/api/v1/metrics/workspaces",
+        params={"since": "2026-03-01T00:00:00Z", "until": "2026-05-01T00:00:00Z"},
+    )
+    assert r.status_code == 200
+    assert r.json()["human_intervention_per_workspace"] == pytest.approx(1.0)
+
+    # Naive (treated as UTC)
+    r = await client.get(
+        "/api/v1/metrics/workspaces",
+        params={"since": "2026-03-01T00:00:00", "until": "2026-05-01T00:00:00"},
+    )
+    assert r.status_code == 200
+    assert r.json()["human_intervention_per_workspace"] == pytest.approx(1.0)
+
+
+async def test_active_workspaces_is_not_windowed(client):
+    """`active_workspaces` is a current-state gauge; windowing would hide
+    still-active workspaces created before `since`."""
+    db = client.db
+    # Active workspace created well before the query window.
+    await _seed_workspace(
+        db, ws_id="ws-old", slug="old",
+        status="active", created_at=_ts(1, 1),
+    )
+    r = await client.get(
+        "/api/v1/metrics/workspaces",
+        params={"since": _ts(4, 1), "until": _ts(5, 1)},
+    )
+    assert r.status_code == 200
+    assert r.json()["active_workspaces"] == 1
