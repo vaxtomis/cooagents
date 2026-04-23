@@ -1,55 +1,82 @@
 # cooagents
 
-多 Agent 协作流程管理系统 —— 通过 HTTP API 编排 Claude Code / Codex 完成从需求到合并的全生命周期。支持 **OpenClaw** 与 **Hermes** 两种宿主 Agent。
+**Workspace 驱动的多 Agent 协作编排系统** —— 用 HTTP API 驱动 Claude Code / Codex 完成「设计 → 开发 → 准出」全闭环，由打分驱动的状态机自动收敛，人工只在四个关键点介入。
 
 ```mermaid
 flowchart LR
-    HOST(["🦉 OpenClaw / Hermes"]):::client -->|HTTP| API["⚙️ cooagents API"]:::core
-    DASH(["🖥️ Dashboard"]):::client -->|HTTP| API
-    API -->|"acpx / SSH"| Agent["🤖 Claude Code / Codex"]:::agent
-    Agent -.->|artifacts| API
-    API -.->|webhook| HOST
+    HOST(["🦉 OpenClaw / Hermes"]):::client -->|HTTP + Token| API["⚙️ cooagents API"]:::core
+    DASH(["🖥️ Web Dashboard"]):::client -->|Session Cookie| API
+    API --> WS[("📂 Workspace FS")]:::fs
+    API --> DB[("🗄️ SQLite (WAL)")]:::db
+    API -->|acpx / SSH| Agent["🤖 Claude Code / Codex"]:::agent
+    Agent -.->|产物| WS
+    API -.->|Webhook + HMAC| HOST
 
     classDef client fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff
-    classDef core fill:#1a1a2e,stroke:#a855f7,color:#f5f5f5
-    classDef agent fill:#14532d,stroke:#4ade80,color:#dcfce7
+    classDef core   fill:#1a1a2e,stroke:#a855f7,color:#f5f5f5
+    classDef agent  fill:#14532d,stroke:#4ade80,color:#dcfce7
+    classDef fs     fill:#3f3f46,stroke:#a1a1aa,color:#fafafa
+    classDef db     fill:#1e293b,stroke:#60a5fa,color:#e0f2fe
 ```
 
 ## 目录
 
+- [核心概念](#核心概念)
 - [核心特性](#核心特性)
 - [快速启动](#快速启动)
-- [宿主集成](#宿主集成)
-  - [OpenClaw](#openclaw)
-  - [Hermes](#hermes)
 - [配置](#配置)
-- [工作流阶段](#工作流阶段)
+- [宿主集成](#宿主集成)
 - [API 参考](#api-参考)
 - [事件与 Webhook](#事件与-webhook)
-- [测试与项目结构](#测试与项目结构)
+- [Success Metrics](#success-metrics)
+- [Dashboard](#dashboard)
+- [项目结构](#项目结构)
+- [测试](#测试)
+- [License](#license)
+
+## 核心概念
+
+v1 是**破坏性重构**后的 Workspace 模型。旧的 15 阶段线性 Run、artifact/merge_queue/agent_hosts 等表全部废弃。
+
+| 概念 | 定义 | 存储 |
+|------|------|------|
+| **Workspace** | 并行工作的容器；磁盘上一个独立文件夹 + `workspace.md` 索引；本身不进 Git。 | `workspaces` 表 + `$WORKSPACES_ROOT/<slug>/` |
+| **DesignWork** | 产出 SemVer 版本化设计文档的状态机（D0→D7），打分循环 ≤ `design.max_loops`（默认 3）。 | `design_works` 表 |
+| **DesignDoc** | DesignWork 成功产出的 `DES-<slug>-<SemVer>.md`；只增、不改。 | `design_docs` 表 + `workspaces/<slug>/designs/` |
+| **DevWork** | 指定代码仓库的 git worktree 内执行的 5 步状态机：校验 → 迭代设计 → 上下文 → 开发+自审 → 审核打分。 | `dev_works` 表 |
+| **DevIterationNote** | DevWork Step2 产出的工作簿 markdown；含轮次 / 计划 / 动态用例 / Step5 反馈。 | `dev_iteration_notes` 表 |
+| **Review** | Step5 / D5 的评分记录（score、issues、`problem_category`）。 | `reviews` 表 |
+| **Gate** | 闸门审批（v1 只有 DevWork 的 `exit` gate）；状态 `waiting/approved/rejected`。 | `dev_works.gates_json` |
+| **Workspace Event** | 统一事件总线，Webhook 与 Metrics 共用同一事件 ID。 | `workspace_events` 表 |
+
+**人工介入点只有四个**：创建 Workspace、写首份设计、挑设计版本、准出审批。其余全自动。
+
+**DevWork 回跳路由按 `problem_category` 分流**：`req_gap` / `impl_gap` / `design_hollow`；累计轮次超阈值触发 `dev_work.escalated`。
 
 ## 核心特性
 
-- **16 阶段状态机** — 需求 → 设计 → 开发 → 合并，每一步可观测、可控制
-- **多轮评估循环** — 产物不达标时自动发送修订指令（设计≤3 轮，开发≤5 轮）
-- **三级审批 Gate** — 需求 / 设计 / 开发各独立审批
-- **多主机 Agent 池** — 本地 + SSH 远程，按负载自动选择
-- **产物版本管理** — SHA256 校验、diff、`.md` / `.docx` 下载（pandoc）
-- **三层链路追踪** — Request → Run → Job 全链路 `trace_id`，响应头 `X-Trace-Id`
-- **Webhook 通知** — HMAC 签名、事件过滤、失败重试
-- **Dashboard** — React + TypeScript，任务列表、详情、产物、事件追踪
-- **双宿主适配** — OpenClaw（私有 `/hooks/agent`）与 Hermes（通用 webhook route）
+- **Workspace 驱动** — 磁盘 + DB 双向投影，启动时 `reconcile()` 校验；单 DevWork/DesignDoc 通过 partial UNIQUE index 强制串行。
+- **双状态机** — DesignWork（D0–D7，11 态）+ DevWork（STEP1–STEP5，8 态），单写入者，幂等 `tick`。
+- **打分驱动迭代** — Step5 reviewer 输出 `score + problem_category`，SM 自行决定回跳到 Step2/3/4 或收敛。
+- **版本化设计产物** — SemVer `1.0.0` + `content_hash` (SHA-256) + `byte_size`；`published` 后不可修改。
+- **Exit Gate** — `config.devwork.require_human_exit_confirm=true` 时挂起等待人工审批；`POST /api/v1/gates/.../approve` 释放。
+- **Webhook 契约** — `StrEnum` 冻结事件名（21 个）；`X-Cooagents-Signature: sha256=…` HMAC；`event_id` 消费者去重。
+- **Metrics 投影** — `GET /api/v1/metrics/workspaces?since=&until=` 返回 PRD 四指标（active / HI per ws / FPS / avg rounds），纯只读聚合。
+- **多主机 Agent 池** — 本地 + SSH 远程（asyncssh），`acpx` 适配 Claude/Codex；`allowed_tools_{design,dev}` 可做工具白名单。
+- **双宿主适配** — OpenClaw（私有 `/hooks/agent` + Bearer）与 Hermes（通用 webhook + HMAC）同端共存，启动时自动部署 Skill。
+- **Dashboard** — React 18 + Vite + Tailwind + SWR 15s 轮询；WorkspaceDashboard / WorkspaceDetail / DesignWork / DevWork / CrossWorkspaceDevWork。
+- **E2E 烟测** — `tests/test_smoke_e2e.py` 驱动真实 SM 走三条路径（happy / design-escalated / devwork-escalated）并回查 `/metrics/workspaces`。
 
-**技术栈：** FastAPI + aiosqlite + asyncssh + Jinja2 + Pydantic v2 + React + TypeScript + Tailwind CSS
+**技术栈：** FastAPI · aiosqlite (WAL) · asyncssh · Pydantic v2 · Jinja2 · SlowAPI · argon2-cffi · PyJWT · React 18 · TypeScript · Tailwind · SWR · Vitest
 
 ## 快速启动
 
 ### 环境要求
 
 - Python 3.11+
-- git、Node.js（用于安装 `acpx`）
-- （可选）pandoc —— `.docx` ↔ `.md` 转换
-- （可选）Nginx / Caddy 反向代理 —— 公网部署需终止 HTTPS
+- git、Node.js（`acpx` 安装用）
+- （可选）pandoc —— `.docx` ↔ `.md`
+- （可选）Nginx / Caddy —— 公网部署终止 HTTPS
 
 ### 安装
 
@@ -59,123 +86,149 @@ cd cooagents
 bash scripts/bootstrap.sh
 ```
 
-`bootstrap.sh` 自动完成：Python 校验 → git/node/npm 检查 → acpx 安装 → venv + pip → `web/` 构建 → 校验 `web/dist/index.html` → 目录与 DB 初始化。
-
-如果你想手动复现前端构建步骤，等价命令是：
-
-```bash
-cd web
-npm ci
-npm run build
-test -f dist/index.html
-```
+`bootstrap.sh` 做：Python/git/node 校验 → 安装 `acpx` → 创建 venv → `pip install -r requirements.txt` → `cd web && npm ci && npm run build` → 校验 `web/dist/index.html` → 建 `.coop/` 并初始化 SQLite schema。
 
 ### 生成启动凭据
 
-公网部署要求以下环境变量，缺一即拒绝启动：`ADMIN_USERNAME`、`ADMIN_PASSWORD_HASH`、`JWT_SECRET`、`AGENT_API_TOKEN`。用内置脚本一次生成：
+四个环境变量缺一即拒绝启动：`ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` / `JWT_SECRET` / `AGENT_API_TOKEN`。
 
 ```bash
-.venv/bin/python scripts/generate_password_hash.py --username admin --password '<YOUR_STRONG_PW>'
-# 把输出的 4 行写入 .env
 umask 077 && .venv/bin/python scripts/generate_password_hash.py \
   --username admin --password '<YOUR_STRONG_PW>' > .env
 chmod 600 .env
 ```
 
-### 启动服务
+### 启动
 
 ```bash
 set -a && . ./.env && set +a
 .venv/bin/uvicorn src.app:app --host 127.0.0.1 --port 8321
 ```
 
-验证：
-
 | 地址 | 说明 |
 |------|------|
 | `http://127.0.0.1:8321/` | Dashboard（需登录） |
-| `http://127.0.0.1:8321/health` | 健康检查，返回 `{"status":"ok"}` |
+| `http://127.0.0.1:8321/health` | 健康检查 `{"status":"ok"}` |
 | `http://127.0.0.1:8321/docs` | Swagger UI |
 | `http://127.0.0.1:8321/redoc` | ReDoc |
 
-> 推荐用 `/cooagents-setup` Skill 代替手工安装 —— 见下节。
+> 推荐用 `/cooagents-setup` Skill 一键完成安装 + 启动 + 注册 Agent 主机 + 写回宿主 env。
+
+## 配置
+
+### `config/settings.yaml`
+
+关键字段（完整见文件）：
+
+```yaml
+server:   { host: 127.0.0.1, port: 8321 }      # 公网部署必走反向代理
+database: { path: .coop/state.db }
+
+acpx:
+  permission_mode: approve-all
+  ttl: 600
+  model: null                       # 使用 agent 默认模型
+  allowed_tools_design: null        # 工具白名单（逗号分隔）
+  allowed_tools_dev: null
+
+turns:  { design_max_turns: 3, dev_max_turns: 3 }
+design: { max_loops: 3, execution_timeout: 600 }
+scoring:{ default_threshold: 80 }
+
+openclaw:
+  deploy_skills: true
+  targets: [{ type: local, skills_dir: "~/.openclaw/skills" }]
+  hooks:
+    enabled: false
+    url: "http://127.0.0.1:18789/hooks/agent"
+    token: ""                       # 建议 "$ENV:OPENCLAW_HOOK_TOKEN"
+
+hermes:
+  enabled: false
+  skills_dir: "~/.hermes/skills"
+  deploy_skills: true
+  webhook:
+    enabled: false
+    url: "http://127.0.0.1:8644/webhook/cooagents"
+    secret: ""                      # 建议 "$ENV:HERMES_WEBHOOK_SECRET"
+    events: []
+```
+
+### `config/agents.yaml`
+
+```yaml
+hosts:
+  - id: local-pc
+    host: local
+    agent_type: both            # claude + codex
+    max_concurrent: 2
+  - id: dev-server
+    host: dev@10.0.0.5          # SSH
+    agent_type: codex
+    max_concurrent: 4
+    ssh_key: ~/.ssh/id_rsa
+```
+
+### `.env`（权限 600）
+
+```dotenv
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD_HASH=$argon2id$v=19$m=...
+JWT_SECRET=...
+AGENT_API_TOKEN=...
+# 可选：
+HERMES_WEBHOOK_SECRET=...
+OPENCLAW_HOOK_TOKEN=...
+FEISHU_WEBHOOK_URL=...
+COOAGENTS_CONFIG_DIR=config
+COOAGENTS_COOP_DIR=.coop
+```
 
 ## 宿主集成
 
-cooagents 会把 16 阶段工作流事件推送给宿主 Agent；宿主 Agent 通过 Skill 调用 cooagents API（所有请求需带 `X-Agent-Token: $AGENT_API_TOKEN`）。两种宿主对比：
+cooagents 同时支持两种宿主；可单启、也可并存（`{runtime}=both`）。启动时 `src/skill_deployer.py` 把 `skills/cooagents-{setup,upgrade}/` 同步到宿主的 `skills/` 目录。
 
 | 维度 | OpenClaw | Hermes |
 |------|----------|--------|
-| 推送协议 | 私有 `/hooks/agent` + Bearer | 通用 webhook + HMAC-SHA256 |
+| 推送协议 | 私有 `/hooks/agent` + `Authorization: Bearer` | 通用 webhook route + `X-Cooagents-Signature` HMAC-SHA256 |
 | Skill 路径 | `~/.openclaw/skills/<name>/` | `~/.hermes/skills/<name>/` |
 | CLI | `openclaw` | `hermes` |
-| env 写入 | `openclaw config set env.KEY VAL` | 追加到 `$(hermes config env-path)` |
-| gateway 重启 | `openclaw restart` | `hermes gateway restart` |
+| env 注入 | `openclaw config set env.KEY VAL` | 追加到 `$(hermes config env-path)` |
+| 重启 | `openclaw restart` | `hermes gateway restart` |
 
-cooagents 启动时由 `src/skill_deployer.py` 自动把仓库内 `skills/` 下三个 Skill（`cooagents-setup`、`cooagents-upgrade`、`cooagents-workflow`）同步到宿主的 skills 目录。详见 [skills/cooagents-setup/references/hermes-integration.md](skills/cooagents-setup/references/hermes-integration.md)。
+### OpenClaw（一键）
 
-### OpenClaw
+1. 从仓库复制 `skills/cooagents-setup/` → `~/.openclaw/skills/cooagents-setup/`。
+2. 在 OpenClaw 对话里 `/cooagents-setup`，按提示填 `repo_path` 和 `admin_password`，Skill 自动：安装 → 启动 → 注册 Agent 主机 → 写回 `openclaw.hooks.*` 与 `env.AGENT_API_TOKEN`。
 
-#### 一键安装（推荐）
-
-1. 从仓库复制 `skills/cooagents-setup/` 到 `~/.openclaw/skills/cooagents-setup/`（首次无 cooagents 运行时的引导方式）。
-2. 在 OpenClaw 对话中调用 `/cooagents-setup`，按提示填写 `repo_path`、`admin_password`。Skill 会完成安装 + 启动 + 注册 Agent 主机 + 回写 `openclaw.hooks`、`env.AGENT_API_TOKEN`。
-
-#### 手动配置（安装已完成，只补 hooks）
+手动补 hooks：
 
 ```bash
-# 生成 hooks 专用 token（严禁复用 gateway.auth.token）
 HOOKS_TOKEN=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
-
 openclaw config set hooks.enabled true --strict-json
 openclaw config set hooks.token "$HOOKS_TOKEN"
 openclaw config set hooks.defaultSessionKey "hook:ingress"
-openclaw config set hooks.allowRequestSessionKey false --strict-json
 openclaw config set hooks.allowedSessionKeyPrefixes '["hook:"]' --strict-json
-
-# 注入 AGENT_API_TOKEN 到 OpenClaw 环境
 openclaw config set env.AGENT_API_TOKEN "$AGENT_API_TOKEN"
-
-# 在 config/settings.yaml 中把相同 token 配到 openclaw.hooks
+# 在 cooagents config/settings.yaml 的 openclaw.hooks.token 填同一个值
 ```
 
-示例 `settings.yaml`：
+### Hermes（一键）
 
-```yaml
-openclaw:
-  deploy_skills: true
-  targets:
-    - type: local
-      skills_dir: "~/.openclaw/skills"
-  hooks:
-    enabled: true
-    url: "http://127.0.0.1:18789/hooks/agent"
-    token: "$ENV:OPENCLAW_HOOKS_TOKEN"   # 或直接字面值
-```
+1. 从仓库复制 `skills/cooagents-setup/` → `~/.hermes/skills/cooagents-setup/`。
+2. 在 Hermes 里 `/cooagents-setup`，Skill 自动走 Hermes 分支：生成 HMAC secret、写入 `~/.hermes/.env`、注册 webhook route、订阅事件、注入 `AGENT_API_TOKEN`。
 
-### Hermes
-
-#### 一键安装（推荐）
-
-1. 从仓库复制 `skills/cooagents-setup/` 到 `~/.hermes/skills/cooagents-setup/`。
-2. 在 Hermes 中调用 `/cooagents-setup`，Skill 识别到当前宿主为 `hermes` 后会执行 **C-6B Hermes 分支**：生成 HMAC secret、写入 `~/.hermes/.env`、注册 webhook route、订阅 cooagents webhook、注入 `AGENT_API_TOKEN`。
-
-#### 手动配置
+手动配置核心步骤：
 
 ```bash
-# 1. 生成 HMAC secret
 HERMES_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
-
-# 2. 写入 Hermes 环境（供 webhook route 引用）
-printf "HERMES_WEBHOOK_SECRET=%s\n" "$HERMES_SECRET" >> "$(hermes config env-path)"
-printf "AGENT_API_TOKEN=%s\n"       "$AGENT_API_TOKEN" >> "$(hermes config env-path)"
+printf "HERMES_WEBHOOK_SECRET=%s\nAGENT_API_TOKEN=%s\n" \
+  "$HERMES_SECRET" "$AGENT_API_TOKEN" >> "$(hermes config env-path)"
 chmod 600 "$(hermes config env-path)"
-
-# 3. 把 secret 同步到 cooagents .env
-printf "\nHERMES_WEBHOOK_SECRET=%s\n" "$HERMES_SECRET" >> /path/to/cooagents/.env
+printf "\nHERMES_WEBHOOK_SECRET=%s\n" "$HERMES_SECRET" >> .env
 ```
 
-在 Hermes `config.yaml` 的 `platforms.webhook.extra.routes` 下追加一条 `cooagents` 路由：
+Hermes `config.yaml`：
 
 ```yaml
 platforms:
@@ -189,171 +242,178 @@ platforms:
           events: ["*"]
           secret: "${HERMES_WEBHOOK_SECRET}"
           skills: ["cooagents-workflow"]
-          prompt: |
-            cooagents 推送事件：{event_type}
-            run_id: {run_id}
-            ticket: {ticket}
-
-            payload: {payload}
           deliver: "log"
 ```
 
-重启 Hermes gateway 并在 cooagents `settings.yaml` 启用：
-
-```yaml
-hermes:
-  enabled: true
-  skills_dir: "~/.hermes/skills"
-  deploy_skills: true
-  webhook:
-    enabled: true
-    url: "http://127.0.0.1:8644/webhooks/cooagents"
-    secret: "$ENV:HERMES_WEBHOOK_SECRET"
-```
-
-最后向 cooagents 注册一条 webhook 订阅（HMAC 与 Hermes route 的 secret 相同）：
+向 cooagents 注册订阅：
 
 ```bash
 curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
   -H "X-Agent-Token: $AGENT_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"url\":\"http://127.0.0.1:8644/webhooks/cooagents\",
-       \"events\":[\"gate.waiting\",\"run.completed\",\"run.failed\",\"merge.conflict\"],
+  -d "{\"url\":\"http://127.0.0.1:8644/webhook/cooagents\",
+       \"events\":[\"dev_work.gate.exit_waiting\",\"dev_work.completed\",
+                   \"dev_work.escalated\",\"workspace.human_intervention\"],
        \"secret\":\"$HERMES_SECRET\"}"
 ```
 
-#### 验证
-
-```bash
-# 无签名时应返回 401，签名正确时返回 202
-curl -s -X POST http://127.0.0.1:8644/webhooks/cooagents \
-  -H "Content-Type: application/json" -d '{"ping":"1"}' -o /dev/null -w "%{http_code}\n"
-
-# Hermes 拿到 AGENT_API_TOKEN
-hermes exec 'echo $AGENT_API_TOKEN'
-```
-
-> `openclaw` 与 `hermes` 两个分支可以同时启用（`{runtime}=both`）；状态机 `POST /tick` 本身幂等，重复投递不会产生重复 approve。
-
-## 配置
-
-### `config/settings.yaml`（关键字段）
-
-```yaml
-server: { host: 0.0.0.0, port: 8321 }
-database: { path: .coop/state.db }
-timeouts: { dispatch_startup: 300, design_execution: 1800, dev_execution: 3600 }
-acpx: { permission_mode: approve-all, ttl: 600 }
-turns: { design_max_turns: 3, dev_max_turns: 5 }
-tracing: { enabled: true, retention_days: 7 }
-
-# 二选一或两者并存
-openclaw: { hooks: { enabled: false, url: "...", token: "..." } }
-hermes:   { webhook: { enabled: false, url: "...", secret: "..." } }
-```
-
-### `config/agents.yaml`
-
-```yaml
-hosts:
-  - id: local-pc
-    host: local
-    agent_type: both        # claude + codex
-    max_concurrent: 2
-  - id: dev-server
-    host: dev@10.0.0.5      # SSH 远程
-    agent_type: codex
-    max_concurrent: 4
-    ssh_key: ~/.ssh/id_rsa
-```
-
-### `.env`（安装时生成，权限 600）
-
-```
-ADMIN_USERNAME=...
-ADMIN_PASSWORD_HASH=...
-JWT_SECRET=...
-AGENT_API_TOKEN=...
-HERMES_WEBHOOK_SECRET=...     # 仅 Hermes 启用时
-```
-
-## 工作流模型
-
-v1 采用 **Workspace 驱动** 模型（完整设计见 `.claude/PRPs/prds/workspace-driven-task-refactor.prd.md`）：
-
-- **Workspace** 是并行工作的容器，对应磁盘上的一个独立文件夹 + `workspace.md` 索引；Workspace 本身不进 Git。
-- **DesignWork**（D0→D7 状态机）产出 SemVer 版本化设计文档 `DES-<slug>-<ver>.md`。
-- **DevWork**（5 步状态机：校验 → 迭代设计 → 上下文检索 → 开发+自审 → 审核打分）在指定代码仓库的 git worktree 里执行，由打分驱动的闭环自动收敛；回跳路由按 `problem_category` (`req_gap` / `impl_gap` / `design_hollow`) 分流，累计轮次超阈值触发 `devwork.escalated`。
-- 人工介入点：创建 Workspace、写首份设计、挑设计版本、准入/准出四处；其余全自动。
-
 ## API 参考
 
-核心端点（完整 Swagger 见 `/docs`）：
+所有 `/api/v1/*`（`/auth/*` 除外）需 Session Cookie 或 `X-Agent-Token`（等于 `AGENT_API_TOKEN`）。完整 Swagger 见 `/docs`。
 
-| 分组 | 端点 | 说明 |
-|------|------|------|
-| Workspace | `POST/GET/DELETE /api/v1/workspaces[/{id}]` | Workspace 生命周期 |
-| DesignWork | `POST /api/v1/design-works` / `GET /api/v1/design-works?workspace_id=X` | 设计工作状态机 |
-| DesignDoc | `GET /api/v1/design-docs[/{id}][/content]` | 设计文档只读投影 |
-| DevWork | `POST /api/v1/dev-works` / `GET /api/v1/dev-works?workspace_id=X` | 开发工作状态机 |
-| IterationNote | `GET /api/v1/dev-works/{id}/iteration-notes` / `GET /api/v1/dev-iteration-notes/{id}/content` | 迭代设计文件 |
-| Review | `GET /api/v1/reviews?dev_work_id=X` | Step5 / D5 评分记录 |
-| Event | `GET /api/v1/workspaces/{id}/events` | Workspace 事件流（只读） |
-| Gate | `POST /api/v1/gates/{gate_id}/{approve|reject}` | 闸门双通道审批 |
-| Webhook | `POST/GET/DELETE /api/v1/webhooks` | 订阅（新契约） |
+### Workspace
 
-所有 `/api/v1/*`（除 `/auth/*`）需 Session 认证（登录后携带 cookie）。
+| Method | Path | 说明 |
+|--------|------|------|
+| POST | `/api/v1/workspaces` | 创建（同时落盘 scaffold） |
+| GET | `/api/v1/workspaces?status=active` | 列表 |
+| GET | `/api/v1/workspaces/{id}` | 详情 |
+| DELETE | `/api/v1/workspaces/{id}` | 归档（status=archived） |
+| POST | `/api/v1/workspaces/sync` | DB ↔ FS 一致性报告 |
+| GET | `/api/v1/workspaces/{id}/events` | 只读事件流 |
+
+### DesignWork / DesignDoc
+
+| Method | Path | 说明 |
+|--------|------|------|
+| POST | `/api/v1/design-works` | 创建 DesignWork（进入 D0→D1） |
+| GET | `/api/v1/design-works?workspace_id=X` | 列表 |
+| GET | `/api/v1/design-works/{id}` | 详情 |
+| POST | `/api/v1/design-works/{id}/tick` | 单步推进（幂等） |
+| POST | `/api/v1/design-works/{id}/cancel` | 取消 |
+| GET | `/api/v1/design-docs?workspace_id=X` | 设计文档索引 |
+| GET | `/api/v1/design-docs/{id}` | 元数据 |
+| GET | `/api/v1/design-docs/{id}/content` | Markdown 原文 |
+
+### DevWork / IterationNote
+
+| Method | Path | 说明 |
+|--------|------|------|
+| POST | `/api/v1/dev-works` | 创建 DevWork（准入自动完成） |
+| GET | `/api/v1/dev-works?workspace_id=X` | 列表 |
+| GET | `/api/v1/dev-works/{id}` | 详情 |
+| POST | `/api/v1/dev-works/{id}/tick` | 单步推进 |
+| POST | `/api/v1/dev-works/{id}/cancel` | 取消 |
+| GET | `/api/v1/dev-works/{id}/iteration-notes` | 迭代记录索引 |
+| GET | `/api/v1/dev-iteration-notes/{id}/content` | Markdown 原文 |
+
+### Gate / Review / Metrics / Webhook
+
+| Method | Path | 说明 |
+|--------|------|------|
+| GET | `/api/v1/gates/{gate_id}` | gate_id = `dev:<dev_work_id>:exit` |
+| POST | `/api/v1/gates/{gate_id}/{approve\|reject}` | 准出审批，60/min 限流 |
+| GET | `/api/v1/reviews?dev_work_id=X` | Step5 / D5 评分记录 |
+| GET | `/api/v1/metrics/workspaces?since=&until=` | PRD 四指标聚合 |
+| POST/GET/DELETE | `/api/v1/webhooks[/{id}]` | 订阅管理（新契约） |
+| GET | `/api/v1/webhooks/{id}/deliveries` | 投递历史 |
+| POST | `/api/v1/repos/ensure` | 克隆/拉取代码仓到指定路径 |
 
 ## 事件与 Webhook
 
-新契约统一信封：
+出站信封（统一）：
 
 ```json
-{"event":"<event_name>","event_id":"<uuid>","ts":"<ISO8601>","correlation_id":"<id>","payload":{...}}
+{
+  "event": "<event_name>",
+  "event_id": "<uuid>",
+  "ts": "<ISO8601>",
+  "workspace_id": "ws-...",
+  "correlation_id": "<dev_work_id | design_work_id | ...>",
+  "payload": { "...": "..." }
+}
 ```
 
-| 分类 | 事件（节选） |
-|------|----------|
-| Workspace | `workspace.created` `workspace.archived` `workspace.human_intervention` |
-| DesignWork | `design_work.started` `design_work.round_completed` `design_work.escalated` |
+HTTP 头：
+
+- `X-Cooagents-Event: <event_name>`
+- `X-Cooagents-Signature: sha256=<hmac_hex>`（`body` 用订阅 `secret` 做 HMAC-SHA256）
+- `X-Cooagents-Event-Id: <uuid>`（消费者去重用）
+
+事件清单（冻结；见 [src/webhook_events.py](src/webhook_events.py)；契约快照测试 [test_envelope_contract.py](tests/test_envelope_contract.py)）：
+
+| 分类 | 事件 |
+|------|------|
+| Workspace | `workspace.created` · `workspace.archived` · `workspace.human_intervention` |
+| DesignWork | `design_work.started` · `design_work.llm_completed` · `design_work.mockup_recorded` · `design_work.round_completed` · `design_work.escalated` · `design_work.cancelled` |
 | DesignDoc | `design_doc.published` |
-| DevWork | `dev_work.started` `dev_work.step_started` `dev_work.step_completed` `dev_work.round_completed` `dev_work.score_passed` `dev_work.escalated` `dev_work.completed` |
-| Gate | `dev_work.gate.entry_waiting` `dev_work.gate.exit_waiting` |
+| DevWork | `dev_work.started` · `dev_work.step_started` · `dev_work.step_completed` · `dev_work.round_completed` · `dev_work.score_passed` · `dev_work.escalated` · `dev_work.completed` · `dev_work.cancelled` |
+| DevWork Gate | `dev_work.gate.exit_waiting` |
+| DevWork Merge | `dev_work.merge_conflict`（forward-compat，v1 无 emit） |
+| Internal | `webhook.delivery_failed`（投递失败自记录） |
 
-签名：`X-Cooagents-Signature: sha256=<hmac>`。事件自带 `event_id` 用于消费方去重。
+> **注意**：不存在 `dev_work.gate.entry_waiting` —— 「准入」即用户 `POST /dev-works` 的动作本身，不是 SM 等待态。
 
-订阅示例：
+## Success Metrics
 
-```bash
-curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://your-callback","secret":"hmac-secret",
-       "events":["dev_work.gate.entry_waiting","dev_work.completed"]}'
+`GET /api/v1/metrics/workspaces` 返回 PRD 四项指标：
+
+```json
+{
+  "human_intervention_per_workspace": 1.25,
+  "active_workspaces": 3,
+  "first_pass_success_rate": 0.67,
+  "avg_iteration_rounds": 2.1
+}
 ```
 
-## 测试与项目结构
+| 字段 | 计算 | 说明 |
+|------|------|------|
+| `active_workspaces` | `COUNT(*) WHERE status='active'` | **不**随 `since/until` 窗口过滤 —— 这是「当前活跃」瞬时值 |
+| `human_intervention_per_workspace` | `#HI events / #workspaces`（窗口内） | HI = `workspace.human_intervention` 事件 |
+| `first_pass_success_rate` | 终态 `dev_works` 中 `first_pass_success=1` 的比例 | 分母是 `COMPLETED ∪ ESCALATED` |
+| `avg_iteration_rounds` | 终态 `dev_works` 的 `iteration_rounds` 均值 | |
 
-```bash
-pytest tests/ -v                         # full suite
-pytest tests/test_dev_work_sm.py         # 单模块
-```
+窗口参数：`?since=&until=` 接受 ISO8601（`Z` 后缀 / naive / 带偏移都支持，内部归一到 `+00:00`）。分母为 0 时返回 `0.0`（不会除零）。
 
-目录速览：
+## Dashboard
 
-```
+React 18 + Vite + Tailwind，SWR 15 秒轮询。
+
+- **WorkspaceDashboard** —— 四块 HeroStat（直接取 `/metrics/workspaces`）+ 活跃 Workspace 清单
+- **WorkspaceDetail** —— Workspace 元数据 + 所属 DesignDoc / DesignWork / DevWork 表
+- **DesignWorkPage** —— D0→D7 状态机进度条 + LLM 轮次 + Review 打分
+- **DevWorkPage** —— STEP1–STEP5 进度条 + IterationNote + Step5 打分 + exit-gate 审批面板
+- **CrossWorkspaceDevWorkPage** —— 跨 Workspace 的 DevWork 聚合视图
+- **AgentHostsPage** —— Agent 主机池状态
+- **LoginPage** —— 基于 Session Cookie 的登录
+
+## 项目结构
+
+```text
 cooagents/
-├── config/          # settings.yaml
-├── db/schema.sql    # 8 表（workspace 模型）
-├── docs/            # docs & openclaw-tools.json
-├── scripts/         # bootstrap.sh、generate_password_hash.py
-├── skills/          # cooagents-{setup,upgrade}/ —— 启动时部署到宿主
-├── src/             # FastAPI、workspace / design / dev 状态机、webhook notifier
-├── routes/          # HTTP 路由
-├── templates/       # Jinja2 任务指令模板
-├── tests/           # pytest 套件
-└── web/             # React + TS + Tailwind Dashboard
+├── config/                  settings.yaml · agents.yaml
+├── db/schema.sql            8 表：workspaces / design_docs / design_works /
+│                             dev_works / dev_iteration_notes / reviews /
+│                             workspace_events / webhook_subscriptions
+├── docs/                    design / dev / internals / openclaw-tools.json
+├── scripts/                 bootstrap.sh · generate_password_hash.py
+├── skills/                  cooagents-{setup,upgrade}/ —— 启动时部署到宿主
+├── src/                     FastAPI app + 两个 SM + manager + webhook notifier
+├── routes/                  HTTP 路由（每类实体一文件）
+├── templates/               Jinja2 任务指令模板（STEP* / TURN* / GATE* / 信封）
+├── tests/                   pytest（含 test_smoke_e2e.py 三条端到端路径）
+└── web/                     React + TS + Tailwind Dashboard
 ```
+
+## 测试
+
+```bash
+# 全量
+pytest tests/ -v
+
+# 关键单测
+pytest tests/test_design_work_sm.py tests/test_dev_work_sm.py
+pytest tests/test_metrics_route.py tests/test_gates_route.py
+pytest tests/test_envelope_contract.py      # 冻结事件契约
+pytest tests/test_smoke_e2e.py              # 端到端三路径
+
+# 前端
+cd web && npx vitest run
+```
+
+覆盖面：SM（DesignWork / DevWork）、路由层（每个实体独立）、manager（workspace / design_doc / dev_iteration_note）、auth / database / git_utils / acpx_executor / reviewer / semver / file_converter / skill_deployer / webhook_notifier / openclaw_hooks。
 
 ## License
 
-MIT
+MIT — 见 [LICENSE](LICENSE)。
