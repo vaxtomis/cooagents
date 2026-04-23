@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -47,7 +48,13 @@ def test_setup_skill_mandates_auth_env_generation():
 def test_generate_password_hash_script_emits_real_env_values():
     root = Path(__file__).resolve().parents[1]
     script = root / "scripts" / "generate_password_hash.py"
-    python = root / ".venv" / "bin" / "python"
+    # Support both POSIX (.venv/bin/python) and Windows (.venv/Scripts/python.exe)
+    # venv layouts; fall back to the interpreter running the tests if no venv.
+    candidates = [
+        root / ".venv" / "bin" / "python",
+        root / ".venv" / "Scripts" / "python.exe",
+    ]
+    python = next((p for p in candidates if p.exists()), Path(sys.executable))
     proc = subprocess.run(
         [str(python), str(script), "--username", "admin", "--password", "hunter22"],
         cwd=root,
@@ -73,25 +80,6 @@ def test_setup_skill_uses_hermes_webhooks_route():
     skill = Path("skills/cooagents-setup/SKILL.md").read_text(encoding="utf-8")
     assert "http://127.0.0.1:8644/webhooks/cooagents" in skill
     assert "http://127.0.0.1:8644/webhook/cooagents" not in skill
-
-
-def test_workflow_skill_uses_agent_token_header():
-    """All curl calls in the workflow skill must carry X-Agent-Token."""
-    for path in [
-        "skills/cooagents-workflow/SKILL.md",
-        "skills/cooagents-workflow/references/api-playbook.md",
-        "skills/cooagents-workflow/references/error-handling.md",
-    ]:
-        text = Path(path).read_text(encoding="utf-8")
-        assert "X-Agent-Token: $AGENT_API_TOKEN" in text, path
-
-
-def test_workflow_skill_no_longer_sends_by_field():
-    """approve/reject/retry/resolve-conflict payloads must not carry `by`."""
-    skill = Path("skills/cooagents-workflow/SKILL.md").read_text(encoding="utf-8")
-    # No JSON payload in the skill should include a "by" key.
-    assert '"by":"' not in skill
-    assert '"by": "' not in skill
 
 
 def test_readme_describes_local_dashboard_build_in_bootstrap():

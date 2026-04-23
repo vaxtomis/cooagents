@@ -277,36 +277,14 @@ AGENT_API_TOKEN=...
 HERMES_WEBHOOK_SECRET=...     # 仅 Hermes 启用时
 ```
 
-## 工作流阶段
+## 工作流模型
 
-```mermaid
-flowchart LR
-    RC["REQ_COLLECTING"]:::stage --> RR{"REQ_REVIEW 🚦"}:::gate
-    UP["📄 上传需求"] -.->|跳过| DQ
-    RR -->|approve| DQ["DESIGN_QUEUED"]:::stage
-    DQ --> DR["DESIGN_RUNNING"]:::running
-    DR -->|revise ≤3| DR
-    DR --> DRV{"DESIGN_REVIEW 🚦"}:::gate --> VQ["DEV_QUEUED"]:::stage
-    VQ --> VR["DEV_RUNNING"]:::running
-    VR -->|revise ≤5| VR
-    VR --> VRV{"DEV_REVIEW 🚦"}:::gate --> MQ["MERGE_QUEUED"]:::stage
-    MQ --> MG["MERGING"]:::stage --> MD(["✅ MERGED"]):::done
-    MG --> MC{"MERGE_CONFLICT 🚦"}:::gate -->|resolve| MQ
-    DR & VR -->|fail/timeout| FL(["❌ FAILED"]):::fail
+v1 采用 **Workspace 驱动** 模型（完整设计见 `.claude/PRPs/prds/workspace-driven-task-refactor.prd.md`）：
 
-    classDef stage fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff
-    classDef gate fill:#2d1b4e,stroke:#c084fc,color:#f5f5f5
-    classDef running fill:#14532d,stroke:#4ade80,color:#dcfce7
-    classDef done fill:#14532d,stroke:#22c55e,color:#dcfce7
-    classDef fail fill:#450a0a,stroke:#ef4444,color:#fecaca
-```
-
-- 🚦 审批 Gate：需调 `approve` / `reject` 推进
-- 📄 上传需求：`POST /runs/upload-requirement` 上传 `.md` / `.docx` 直接跳至 `DESIGN_QUEUED`
-- revise：产物缺失时自动发送修订指令，达到上限强制推进到 REVIEW
-- 中断/超时进入 `FAILED`，可 `retry` / `recover`
-
-完整阶段表见 [docs/PROCESS.md](docs/PROCESS.md)。
+- **Workspace** 是并行工作的容器，对应磁盘上的一个独立文件夹 + `workspace.md` 索引；Workspace 本身不进 Git。
+- **DesignWork**（D0→D7 状态机）产出 SemVer 版本化设计文档 `DES-<slug>-<ver>.md`。
+- **DevWork**（5 步状态机：校验 → 迭代设计 → 上下文检索 → 开发+自审 → 审核打分）在指定代码仓库的 git worktree 里执行，由打分驱动的闭环自动收敛；回跳路由按 `problem_category` (`req_gap` / `impl_gap` / `design_hollow`) 分流，累计轮次超阈值触发 `devwork.escalated`。
+- 人工介入点：创建 Workspace、写首份设计、挑设计版本、准入/准出四处；其余全自动。
 
 ## API 参考
 
@@ -314,79 +292,62 @@ flowchart LR
 
 | 分组 | 端点 | 说明 |
 |------|------|------|
-| Run | `POST /api/v1/runs` | 创建任务 |
-| Run | `POST /api/v1/runs/upload-requirement` | 上传需求文档（multipart） |
-| Run | `POST /api/v1/runs/{id}/tick` | 推进一步 |
-| Run | `POST /api/v1/runs/{id}/approve` `...reject` | Gate 审批 |
-| Run | `POST /api/v1/runs/{id}/retry` `...recover` `...resolve-conflict` | 恢复 |
-| Artifact | `GET /api/v1/runs/{id}/artifacts[/{aid}/content\|diff\|download]` | 产物 |
-| Host | `GET /POST/PUT/DELETE /api/v1/agent-hosts` | 主机池 |
-| Webhook | `POST/GET/DELETE /api/v1/webhooks` | 订阅 |
-| Trace | `GET /api/v1/runs/{id}/trace` `/jobs/{jid}/diagnosis` `/traces/{trace_id}` | 链路诊断 |
+| Workspace | `POST/GET/DELETE /api/v1/workspaces[/{id}]` | Workspace 生命周期 |
+| DesignWork | `POST /api/v1/design-works` / `GET /api/v1/design-works?workspace_id=X` | 设计工作状态机 |
+| DesignDoc | `GET /api/v1/design-docs[/{id}][/content]` | 设计文档只读投影 |
+| DevWork | `POST /api/v1/dev-works` / `GET /api/v1/dev-works?workspace_id=X` | 开发工作状态机 |
+| IterationNote | `GET /api/v1/dev-works/{id}/iteration-notes` / `GET /api/v1/dev-iteration-notes/{id}/content` | 迭代设计文件 |
+| Review | `GET /api/v1/reviews?dev_work_id=X` | Step5 / D5 评分记录 |
+| Event | `GET /api/v1/workspaces/{id}/events` | Workspace 事件流（只读） |
+| Gate | `POST /api/v1/gates/{gate_id}/{approve|reject}` | 闸门双通道审批 |
+| Webhook | `POST/GET/DELETE /api/v1/webhooks` | 订阅（新契约） |
 
-所有请求需 `X-Agent-Token: $AGENT_API_TOKEN`；所有响应带 `X-Trace-Id`。
-
-示例：
-
-```bash
-# 创建任务
-curl -X POST http://127.0.0.1:8321/api/v1/runs \
-  -H "X-Agent-Token: $AGENT_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"ticket":"PROJ-42","repo_path":"/path/to/repo",
-       "repo_url":"git@github.com:user/project.git"}'
-
-# 审批设计
-curl -X POST http://127.0.0.1:8321/api/v1/runs/{id}/approve \
-  -H "X-Agent-Token: $AGENT_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"gate":"design","by":"reviewer"}'
-```
-
-OpenClaw 16 函数定义见 [docs/openclaw-tools.json](docs/openclaw-tools.json)。
+所有 `/api/v1/*`（除 `/auth/*`）需 Session 认证（登录后携带 cookie）。
 
 ## 事件与 Webhook
 
-| 类别 | 事件（节选） |
+新契约统一信封：
+
+```json
+{"event":"<event_name>","event_id":"<uuid>","ts":"<ISO8601>","correlation_id":"<id>","payload":{...}}
+```
+
+| 分类 | 事件（节选） |
 |------|----------|
-| 阶段 | `stage.changed` |
-| Gate | `gate.waiting` `gate.approved` `gate.rejected` |
-| Job | `job.completed` `job.failed` `job.timeout` `job.interrupted` |
-| Run | `run.completed` `run.cancelled` `run.failed` `run.retried` |
-| 合并 | `merge.completed` `merge.conflict` `merge.conflict_resolved` |
-| 主机 | `host.online` `host.offline` `host.unavailable` |
-| 会话 | `session.created` `session.closed` |
-| 追踪 | `request.received` `request.completed` `request.error` |
+| Workspace | `workspace.created` `workspace.archived` `workspace.human_intervention` |
+| DesignWork | `design_work.started` `design_work.round_completed` `design_work.escalated` |
+| DesignDoc | `design_doc.published` |
+| DevWork | `dev_work.started` `dev_work.step_started` `dev_work.step_completed` `dev_work.round_completed` `dev_work.score_passed` `dev_work.escalated` `dev_work.completed` |
+| Gate | `dev_work.gate.entry_waiting` `dev_work.gate.exit_waiting` |
+
+签名：`X-Cooagents-Signature: sha256=<hmac>`。事件自带 `event_id` 用于消费方去重。
 
 订阅示例：
 
 ```bash
 curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
-  -H "X-Agent-Token: $AGENT_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://your-callback","secret":"hmac-secret",
-       "events":["gate.waiting","run.completed","merge.conflict"]}'
+       "events":["dev_work.gate.entry_waiting","dev_work.completed"]}'
 ```
-
-投递使用 `X-Signature-256: sha256=<hex>` 的 HMAC 头（与 Hermes route 兼容）。
 
 ## 测试与项目结构
 
 ```bash
-pytest tests/ -v                    # 285 tests
-pytest tests/test_state_machine.py  # 单模块
+pytest tests/ -v                         # full suite
+pytest tests/test_dev_work_sm.py         # 单模块
 ```
 
 目录速览：
 
 ```
 cooagents/
-├── config/          # settings.yaml、agents.yaml
-├── db/schema.sql    # 10 表
-├── docs/            # PROCESS.md、openclaw-tools.json、CODEMAPS（本地）
+├── config/          # settings.yaml
+├── db/schema.sql    # 8 表（workspace 模型）
+├── docs/            # docs & openclaw-tools.json
 ├── scripts/         # bootstrap.sh、generate_password_hash.py
-├── skills/          # cooagents-{setup,upgrade,workflow}/ —— 启动时部署到宿主
-├── src/             # FastAPI、状态机、acpx、skill_deployer 等
+├── skills/          # cooagents-{setup,upgrade}/ —— 启动时部署到宿主
+├── src/             # FastAPI、workspace / design / dev 状态机、webhook notifier
 ├── routes/          # HTTP 路由
 ├── templates/       # Jinja2 任务指令模板
 ├── tests/           # pytest 套件

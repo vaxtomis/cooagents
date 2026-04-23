@@ -1,5 +1,5 @@
 import pytest
-from src.config import load_settings, load_agent_hosts, Settings
+from src.config import load_settings, Settings
 
 def test_load_settings_defaults():
     settings = load_settings()
@@ -13,12 +13,6 @@ def test_load_settings_from_path(tmp_path):
     settings = load_settings(cfg)
     assert settings.server.host == "0.0.0.0"
     assert settings.server.port == 9999
-
-def test_load_agent_hosts_empty(tmp_path):
-    cfg = tmp_path / "agents.yaml"
-    cfg.write_text("hosts: []\n")
-    hosts = load_agent_hosts(cfg)
-    assert hosts == []
 
 def test_acpx_config_defaults():
     from src.config import Settings

@@ -266,30 +266,3 @@ def load_settings(path: Path | str | None = None) -> Settings:
             settings.hermes.webhook.secret = env_secret
 
     return settings
-
-
-def load_agent_hosts(path: Path | str | None = None) -> list[dict[str, Any]]:
-    """Load the list of agent host definitions from a YAML file.
-
-    Parameters
-    ----------
-    path:
-        Path to the YAML configuration file. Defaults to
-        ``<project_root>/config/agents.yaml``.
-
-    Returns
-    -------
-    list[dict]
-        List of host definition dicts (may be empty).
-    """
-    if path is None:
-        path = ROOT / "config" / "agents.yaml"
-    path = Path(path)
-
-    if not path.exists():
-        return []
-
-    with path.open("r", encoding="utf-8") as fh:
-        data: dict[str, Any] = yaml.safe_load(fh) or {}
-
-    return data.get("hosts", []) or []

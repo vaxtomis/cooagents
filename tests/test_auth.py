@@ -106,7 +106,7 @@ async def test_login_flow_sets_cookies_and_rejects_bad_password(tmp_path):
 
 @pytest.mark.asyncio
 async def test_protected_endpoint_requires_auth(tmp_path):
-    """Smoke test: mount runs router with auth dependency and expect 401."""
+    """Smoke test: mount workspaces router with auth dependency and expect 401."""
     from fastapi import Depends
     from src.auth import get_current_user, AuthError
     from fastapi.responses import JSONResponse
@@ -118,11 +118,11 @@ async def test_protected_endpoint_requires_auth(tmp_path):
     async def _h(request, exc):
         return JSONResponse(status_code=exc.status_code, content={"error": str(exc)})
 
-    from routes.runs import router as runs_router
-    app.include_router(runs_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
+    from routes.workspaces import router as workspaces_router
+    app.include_router(workspaces_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        r = await client.get("/api/v1/runs")
+        r = await client.get("/api/v1/workspaces")
         assert r.status_code == 401
 
 
@@ -251,32 +251,6 @@ def test_client_ip_honours_xff_from_trusted_proxy(monkeypatch):
 
     # Peer is NOT trusted: XFF is ignored; peer returned.
     assert client_ip(_req("8.8.8.8", "203.0.113.7")) == "8.8.8.8"
-
-
-def test_redact_truncates_oversized_input():
-    """M-3: redact caps input size so regex work stays bounded."""
-    from routes.diagnostics import _redact, _REDACT_MAX_BYTES
-
-    big = "x" * (_REDACT_MAX_BYTES + 100)
-    out = _redact(big + "sk-ABCDEFGHIJKLMNOP")
-    # Output must not exceed the cap (+ small margin for substitutions).
-    assert len(out) <= _REDACT_MAX_BYTES + 50
-    assert "sk-***" in out
-
-
-def test_redact_scrubs_aws_and_anthropic_keys():
-    """M-2: extended secret coverage."""
-    from routes.diagnostics import _redact
-
-    sample = (
-        "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"
-        "ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz\n"
-        "-----BEGIN RSA PRIVATE KEY-----\n"
-    )
-    cleaned = _redact(sample)
-    assert "AKIAIOSFODNN7EXAMPLE" not in cleaned
-    assert "sk-ant-api03-abcdefghijklmnopqrstuvwxyz" not in cleaned
-    assert "-----BEGIN RSA PRIVATE KEY-----" not in cleaned
 
 
 @pytest.mark.asyncio

@@ -84,11 +84,9 @@ class WebhookNotifier:
         db: Any,
         *,
         settings: Any = None,
-        trace_emitter: Any = None,
     ) -> None:
         self.db = db
         self._settings = settings
-        self._trace = trace_emitter
         self._client = None
         self._inflight: set[asyncio.Task] = set()
 
@@ -100,23 +98,6 @@ class WebhookNotifier:
 
             self._client = httpx.AsyncClient(timeout=10)
         return self._client
-
-    async def _trace_event(
-        self,
-        event_type: str,
-        payload: dict | None = None,
-        *,
-        level: str = "info",
-        error_detail: Any = None,
-    ) -> None:
-        if self._trace:
-            await self._trace.emit(
-                event_type,
-                payload,
-                level=level,
-                error_detail=error_detail,
-                source="webhook",
-            )
 
     # ---- Subscription management ----
 
@@ -287,20 +268,7 @@ class WebhookNotifier:
                 await asyncio.sleep(delay)
             success, failure = await attempt()
             if success:
-                await self._trace_event(
-                    "webhook.delivery.success",
-                    {"event": event_name, "subscription_id": sub.get("id")},
-                )
                 return
-        await self._trace_event(
-            "webhook.delivery.failed",
-            {
-                "event": event_name,
-                "subscription_id": sub.get("id"),
-                **(failure or {}),
-            },
-            level="error",
-        )
         await self._record_failure(sub, event_name, failure or {})
 
     async def _deliver_generic(

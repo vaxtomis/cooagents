@@ -63,7 +63,7 @@ echo "Building web dashboard..."
 echo "web dashboard  ✓"
 
 # ---------- 7. Create runtime directories ----------
-mkdir -p .coop/runs .coop/jobs
+mkdir -p .coop
 echo "runtime dirs  ✓"
 
 # ---------- 8. Initialize database ----------
