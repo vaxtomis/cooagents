@@ -1,0 +1,97 @@
+"""DevWork iteration-note read-only projection routes (Phase 5.5).
+
+Endpoints:
+    GET /api/v1/dev-works/{dev_id}/iteration-notes
+        — list notes for a DevWork; 404 if DevWork unknown.
+    GET /api/v1/dev-iteration-notes/{note_id}/content
+        — stream the markdown body of a single iteration note.
+
+Read-only by contract.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
+
+from src.exceptions import BadRequestError, NotFoundError
+from src.models import DevIterationNote
+
+router = APIRouter(tags=["dev-iteration-notes"])
+
+
+def _row_to_note(row: dict) -> DevIterationNote:
+    score_history: list[int] | None = None
+    raw = row.get("score_history_json")
+    if raw:
+        try:
+            decoded = json.loads(raw)
+            if isinstance(decoded, list):
+                score_history = [int(x) for x in decoded]
+        except (ValueError, TypeError):
+            score_history = None
+    return DevIterationNote(
+        id=row["id"],
+        dev_work_id=row["dev_work_id"],
+        round=row["round"],
+        markdown_path=row["markdown_path"],
+        score_history=score_history,
+        created_at=row["created_at"],
+    )
+
+
+def _safe_resolve_under_root(raw_path: str, workspaces_root: Path) -> Path:
+    root = workspaces_root.resolve()
+    resolved = Path(raw_path).resolve(strict=False)
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise BadRequestError(
+            "iteration note path escapes workspaces_root"
+        ) from exc
+    return resolved
+
+
+@router.get("/dev-works/{dev_id}/iteration-notes")
+async def list_iteration_notes(
+    dev_id: str, request: Request
+) -> list[DevIterationNote]:
+    db = request.app.state.db
+    # Distinguish "unknown DevWork" (404) from "DevWork has no notes" (200 [])
+    dev_row = await db.fetchone(
+        "SELECT id FROM dev_works WHERE id=?", (dev_id,)
+    )
+    if not dev_row:
+        raise NotFoundError(f"dev_work {dev_id!r} not found")
+
+    rows = await db.fetchall(
+        "SELECT * FROM dev_iteration_notes WHERE dev_work_id=? "
+        "ORDER BY round ASC",
+        (dev_id,),
+    )
+    return [_row_to_note(r) for r in rows]
+
+
+@router.get("/dev-iteration-notes/{note_id}/content")
+async def get_iteration_note_content(note_id: str, request: Request):
+    db = request.app.state.db
+    row = await db.fetchone(
+        "SELECT * FROM dev_iteration_notes WHERE id=?", (note_id,)
+    )
+    if not row:
+        raise NotFoundError(f"dev_iteration_note {note_id!r} not found")
+
+    workspaces_root = request.app.state.settings.security.resolved_workspace_root()
+    resolved = _safe_resolve_under_root(row["markdown_path"], workspaces_root)
+
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(
+            status_code=410,
+            detail=f"dev_iteration_note {note_id!r} file is missing on disk",
+        )
+    return FileResponse(
+        path=str(resolved),
+        media_type="text/markdown; charset=utf-8",
+    )

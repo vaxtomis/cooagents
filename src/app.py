@@ -300,9 +300,13 @@ from fastapi import Depends
 from routes.agent_hosts import router as hosts_router
 from routes.artifacts import router as artifacts_router
 from routes.auth import router as auth_router
+from routes.design_docs import router as design_docs_router
 from routes.design_works import router as design_works_router
+from routes.dev_iteration_notes import router as dev_iteration_notes_router
 from routes.dev_works import router as dev_works_router
 from routes.gates import router as gates_router
+from routes.reviews import router as reviews_router
+from routes.workspace_events import router as workspace_events_router
 from routes.diagnostics import create_diagnostics_router
 from routes.events import create_events_router
 from routes.repos import router as repos_router
@@ -325,6 +329,10 @@ app.include_router(create_sse_router(), prefix="/api/v1", dependencies=auth_requ
 app.include_router(create_diagnostics_router(), prefix="/api/v1", dependencies=auth_required)
 app.include_router(workspaces_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(design_works_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(design_docs_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(dev_works_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(dev_iteration_notes_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(reviews_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(workspace_events_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(gates_router, prefix="/api/v1", dependencies=auth_required)
 mount_dashboard_spa(app)
