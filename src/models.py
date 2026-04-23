@@ -331,6 +331,17 @@ class WorkspaceSyncReport(BaseModel):
     in_sync: list[str] = Field(default_factory=list)
 
 
+class WorkspaceMetrics(BaseModel):
+    """PRD Phase 8 Success Metrics — lifetime by default; windowed via ?since=&until=.
+
+    Rates are ``0.0`` when their denominator is zero (no division-by-zero leak).
+    """
+    human_intervention_per_workspace: float
+    active_workspaces: int
+    first_pass_success_rate: float
+    avg_iteration_rounds: float
+
+
 # ---------------------------------------------------------------------------
 # Phase 3 — DesignWork request/response DTOs
 # ---------------------------------------------------------------------------

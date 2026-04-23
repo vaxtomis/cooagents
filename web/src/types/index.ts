@@ -198,6 +198,15 @@ export interface WorkspaceSyncReport {
   in_sync: string[];
 }
 
+// Phase 8 — four PRD Success Metrics served by GET /api/v1/metrics/workspaces.
+// Rates are always numbers (0.0 when denominator is 0); never null.
+export interface WorkspaceMetrics {
+  human_intervention_per_workspace: number;
+  active_workspaces: number;
+  first_pass_success_rate: number;
+  avg_iteration_rounds: number;
+}
+
 // ---------------------------------------------------------------------------
 // Gate contract
 // ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.models import GateActionRequest
 from src.request_utils import client_ip
 from src.webhook_events import WebhookEvent
+from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
 
@@ -148,19 +149,22 @@ async def act_on_gate(
             "post-gate tick failed for %s work_id=%s", kind, work_id
         )
 
-    webhooks = getattr(request.app.state, "webhooks", None)
-    if webhooks is not None:
-        await webhooks.deliver(
-            WebhookEvent.WORKSPACE_HUMAN_INTERVENTION,
-            workspace_id=row["workspace_id"],
-            correlation_id=work_id,
-            payload={
-                "actor": actor,
-                "action": action,
-                "target": gate_id,
-                "note": req.note,
-            },
-        )
+    # Phase 8: write to workspace_events AND fan out via webhook with a shared
+    # event_id, so the `human_intervention` metric is queryable without
+    # scraping webhook delivery logs.
+    await emit_and_deliver(
+        request.app.state.db,
+        getattr(request.app.state, "webhooks", None),
+        event_name=WebhookEvent.WORKSPACE_HUMAN_INTERVENTION.value,
+        workspace_id=row["workspace_id"],
+        correlation_id=work_id,
+        payload={
+            "actor": actor,
+            "action": action,
+            "target": gate_id,
+            "note": req.note,
+        },
+    )
     return {
         "gate_id": gate_id,
         "status": gate["status"],

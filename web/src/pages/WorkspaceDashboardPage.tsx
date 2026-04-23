@@ -1,17 +1,11 @@
-import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import useSWR from "swr";
-import { listDevWorks } from "../api/devWorks";
-import { listWorkspaceEvents } from "../api/workspaceEvents";
+import { getWorkspaceMetrics } from "../api/metrics";
 import { listWorkspaces } from "../api/workspaces";
 import { SectionPanel } from "../components/SectionPanel";
 import { StatusBadge } from "../components/StatusBadge";
 import { useWorkspacePolling } from "../hooks/useWorkspacePolling";
-import type { DevWork, Workspace, WorkspaceEventsEnvelope } from "../types";
-
-const DASHBOARD_WORKSPACE_CAP = 20;
-const INTERVENTION_EVENT = "workspace.human_intervention";
-const EVENT_FETCH_LIMIT = 200;
+import type { Workspace } from "../types";
 
 function HeroStat({
   title,
@@ -69,51 +63,23 @@ export function WorkspaceDashboardPage() {
     polling,
   );
 
-  const activeWorkspaces = workspacesQuery.data ?? [];
-  const topWorkspaces = useMemo(
-    () => [...activeWorkspaces].sort(compareUpdatedDesc).slice(0, DASHBOARD_WORKSPACE_CAP),
-    [activeWorkspaces],
-  );
-  const topIds = useMemo(() => topWorkspaces.map((ws) => ws.id), [topWorkspaces]);
-  const fanOutKey = topIds.length > 0 ? JSON.stringify(topIds) : null;
-
-  const devWorksFanOut = useSWR(
-    fanOutKey ? ["dashboard", "dev-works", fanOutKey] : null,
-    async () => {
-      const results = await Promise.all(topIds.map((id) => listDevWorks(id).catch(() => [] as DevWork[])));
-      return results.flat();
-    },
+  const metricsQuery = useSWR(
+    ["metrics", "workspaces"],
+    () => getWorkspaceMetrics(),
     polling,
   );
 
-  const interventionFanOut = useSWR(
-    fanOutKey ? ["dashboard", "interventions", fanOutKey] : null,
-    async () => {
-      const results = await Promise.all(
-        topIds.map((id) =>
-          listWorkspaceEvents(id, { limit: EVENT_FETCH_LIMIT, event_name: [INTERVENTION_EVENT] }).catch(
-            () => ({ events: [], pagination: { limit: 0, offset: 0, has_more: false } } as WorkspaceEventsEnvelope),
-          ),
-        ),
-      );
-      return results;
-    },
-    polling,
-  );
+  const activeWorkspaces = (workspacesQuery.data ?? []).slice().sort(compareUpdatedDesc);
+  const metrics = metricsQuery.data;
 
-  const devWorks = devWorksFanOut.data ?? [];
-  const interventionEnvelopes = interventionFanOut.data ?? [];
-
-  const interventionCount = interventionEnvelopes.reduce((sum, env) => sum + env.events.length, 0);
-  const truncated = interventionEnvelopes.some((env) => env.pagination.has_more);
-
-  const total = devWorks.length;
-  const successes = devWorks.filter((d) => d.first_pass_success === true).length;
-  const firstPassRate = total === 0 ? null : Math.round((successes / total) * 100);
-  const averageRounds =
-    total === 0
-      ? null
-      : devWorks.reduce((sum, d) => sum + d.iteration_rounds, 0) / total;
+  const activeValue = metrics ? metrics.active_workspaces.toString().padStart(2, "0") : "-";
+  const interventionValue = metrics
+    ? metrics.human_intervention_per_workspace.toFixed(2)
+    : "-";
+  const firstPassValue = metrics
+    ? `${Math.round(metrics.first_pass_success_rate * 100)}%`
+    : "-";
+  const avgRoundsValue = metrics ? metrics.avg_iteration_rounds.toFixed(1) : "-";
 
   return (
     <div className="space-y-6">
@@ -121,26 +87,22 @@ export function WorkspaceDashboardPage() {
         <HeroStat
           caption="当前活跃 Workspace 数量；每 15 秒自动刷新。"
           title="并行 active 数"
-          value={activeWorkspaces.length.toString().padStart(2, "0")}
+          value={activeValue}
         />
         <HeroStat
-          caption={
-            truncated
-              ? "最近 30 天内的人工介入事件（样本截断；部分 Workspace 命中 200 条上限）。"
-              : "最近 30 天内的人工介入事件。"
-          }
-          title="人工介入"
-          value={interventionCount.toString().padStart(2, "0")}
+          caption="人工介入事件总数 / Workspace 总数（含已归档），全量统计。"
+          title="人工介入 / Workspace"
+          value={interventionValue}
         />
         <HeroStat
-          caption="first_pass_success === true 的 DevWork 占比。"
+          caption="终态 DevWork 中 first_pass_success === true 的占比。"
           title="一次性准出率"
-          value={firstPassRate === null ? "-" : `${firstPassRate}%`}
+          value={firstPassValue}
         />
         <HeroStat
-          caption="DevWork 迭代轮次平均值。"
+          caption="终态 DevWork 的迭代轮次平均值。"
           title="平均循环轮次"
-          value={averageRounds === null ? "-" : averageRounds.toFixed(1)}
+          value={avgRoundsValue}
         />
       </div>
 
@@ -161,12 +123,6 @@ export function WorkspaceDashboardPage() {
           </div>
         )}
       </SectionPanel>
-
-      <p className="text-xs text-muted-soft">
-        指标基于最近活跃的 {DASHBOARD_WORKSPACE_CAP} 个 Workspace 聚合；Phase 8 接入
-        <code className="mx-1 font-mono">/api/metrics/workspaces</code>
-        后改为全量。
-      </p>
     </div>
   );
 }
