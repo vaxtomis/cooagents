@@ -1,55 +1,30 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { approveRun, rejectRun } from "../api/runs";
-import { ApprovalAction } from "./ApprovalAction";
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { StatusBadge } from "./StatusBadge";
 
-vi.mock("../api/runs", () => ({
-  approveRun: vi.fn(),
-  rejectRun: vi.fn(),
-}));
-
-afterEach(() => {
-  vi.clearAllMocks();
-});
-
 describe("StatusBadge", () => {
-  it("maps approved statuses to the expected label and tone", () => {
+  it("maps running to success tone", () => {
     render(<StatusBadge status="running" />);
-
     const badge = screen.getByRole("status", { name: "运行中" });
     expect(badge).toHaveAttribute("data-tone", "success");
     expect(badge).toHaveClass("bg-success/10", "text-success");
   });
-});
 
-describe("ApprovalAction", () => {
-  it("triggers the correct approve and reject API calls", async () => {
-    vi.mocked(approveRun).mockResolvedValue({ ok: true } as never);
-    vi.mocked(rejectRun).mockResolvedValue({ ok: true } as never);
+  it("maps STEP5_REVIEW (uppercase enum) to a warning label", () => {
+    render(<StatusBadge status="STEP5_REVIEW" />);
+    const badge = screen.getByRole("status", { name: "Step5 评审" });
+    expect(badge).toHaveAttribute("data-tone", "warning");
+  });
 
-    render(
-      <ApprovalAction
-        gate="req"
-        reason="Needs more detail"
-        runId="run-1"
-      />,
-    );
+  it("maps archived workspace status", () => {
+    render(<StatusBadge status="archived" />);
+    const badge = screen.getByRole("status", { name: "已归档" });
+    expect(badge).toHaveAttribute("data-tone", "muted");
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "批准" }));
-    await waitFor(() => {
-      expect(approveRun).toHaveBeenCalledWith("run-1", {
-        comment: undefined,
-        gate: "req",
-      });
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "驳回" }));
-    await waitFor(() => {
-      expect(rejectRun).toHaveBeenCalledWith("run-1", {
-        gate: "req",
-        reason: "Needs more detail",
-      });
-    });
+  it("falls through to muted for unknown status", () => {
+    render(<StatusBadge status="totally-unknown" />);
+    const badge = screen.getByRole("status", { name: "totally-unknown" });
+    expect(badge).toHaveAttribute("data-tone", "muted");
   });
 });

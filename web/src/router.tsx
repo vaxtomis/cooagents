@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Bot,
-  CirclePlay,
-  GitMerge,
+  FolderKanban,
+  GitBranch,
   LayoutDashboard,
   LogOut,
   Server,
@@ -18,11 +18,13 @@ import {
 } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { AgentHostsPage } from "./pages/AgentHostsPage";
-import { DashboardPage } from "./pages/DashboardPage";
+import { CrossWorkspaceDevWorkPage } from "./pages/CrossWorkspaceDevWorkPage";
+import { DesignWorkPage } from "./pages/DesignWorkPage";
+import { DevWorkPage } from "./pages/DevWorkPage";
 import { LoginPage } from "./pages/LoginPage";
-import { MergeQueuePage } from "./pages/MergeQueuePage";
-import { RunDetailPage } from "./pages/RunDetailPage";
-import { RunsListPage } from "./pages/RunsListPage";
+import { WorkspaceDashboardPage } from "./pages/WorkspaceDashboardPage";
+import { WorkspaceDetailPage } from "./pages/WorkspaceDetailPage";
+import { WorkspacesPage } from "./pages/WorkspacesPage";
 
 type NavItem = {
   to: string;
@@ -39,36 +41,61 @@ type PageMeta = {
 
 const navItems: NavItem[] = [
   { to: "/", label: "概览", icon: LayoutDashboard, end: true },
-  { to: "/runs", label: "Runs", icon: CirclePlay },
+  { to: "/workspaces", label: "工作区域", icon: FolderKanban },
+  { to: "/dev-works", label: "跨区域 DevWorks", icon: GitBranch },
   { to: "/agent-hosts", label: "Agent 主机", icon: Server },
-  { to: "/merge-queue", label: "Merge 队列", icon: GitMerge },
 ];
 
 function resolvePageMeta(pathname: string): PageMeta {
   if (pathname === "/") {
     return {
       title: "概览",
-      eyebrow: "仪表盘总览",
+      eyebrow: "Workspace 仪表盘",
       description:
-        "审批状态、活跃运行、主机健康度与首阶段运维摘要的实时总览。",
+        "活跃 Workspace、人工介入、一次性准出率与平均循环轮次的聚合视图。",
     };
   }
 
-  if (pathname === "/runs") {
+  if (pathname === "/workspaces") {
     return {
-      title: "Runs",
-      eyebrow: "服务端查询",
-      description:
-        "搜索、筛选、排序并翻页浏览运行数据，点击即可进入运行详情。",
+      title: "工作区域",
+      eyebrow: "Workspace 清单",
+      description: "创建、筛选、归档 Workspace；点击进入详情。",
     };
   }
 
-  if (pathname.startsWith("/runs/")) {
+  if (/^\/workspaces\/[^/]+\/design-works\/[^/]+$/.test(pathname)) {
     return {
-      title: "运行详情",
-      eyebrow: "实时运行时间线",
+      title: "DesignWork 详情",
+      eyebrow: "设计工作",
       description:
-        "查看当前运行状态：任务、产物、事件追踪、审批操作、取消控制，以及基于 SSE 的实时刷新。",
+        "查看 D0-D7 流程、missing_sections、设计文档预览、tick/cancel 操作以及审核历史。",
+    };
+  }
+
+  if (/^\/workspaces\/[^/]+\/dev-works\/[^/]+$/.test(pathname)) {
+    return {
+      title: "DevWork 详情",
+      eyebrow: "开发工作",
+      description:
+        "Step1-5 进度、迭代设计文件、审核历史与闸门操作面板。",
+    };
+  }
+
+  if (/^\/workspaces\/[^/]+$/.test(pathname)) {
+    return {
+      title: "Workspace 详情",
+      eyebrow: "设计 / 开发 / 事件",
+      description:
+        "管理 DesignWork、DesignDoc、DevWork 与工作区事件。",
+    };
+  }
+
+  if (pathname === "/dev-works") {
+    return {
+      title: "跨区域 DevWorks",
+      eyebrow: "跨 Workspace 视图",
+      description: "按 Workspace 分组展示所有 DevWork，仅供浏览。",
     };
   }
 
@@ -81,20 +108,7 @@ function resolvePageMeta(pathname: string): PageMeta {
     };
   }
 
-  if (pathname === "/merge-queue") {
-    return {
-      title: "Merge 队列",
-      eyebrow: "队列管理",
-      description:
-        "查看待合并项、跟踪冲突状态、关联运行数据，执行合并或跳过操作。",
-    };
-  }
-
-  return {
-    title: "",
-    eyebrow: "",
-    description: "",
-  };
+  return { title: "", eyebrow: "", description: "" };
 }
 
 function ShellNavLink({ item, compact = false }: { item: NavItem; compact?: boolean }) {
@@ -168,10 +182,10 @@ function ShellLayout() {
           <div className="mt-auto space-y-3">
             <div className="rounded-2xl border border-border-strong bg-panel-strong/40 p-4 text-sm text-muted">
               <p className="font-serif text-base font-medium leading-snug text-copy">
-                章节般的运维节奏
+                Workspace 驱动的运维节奏
               </p>
               <p className="mt-2 leading-relaxed">
-                概览、Runs、主机管理与合并控制共享同一实时终端。
+                概览、工作区域、跨区域 DevWorks 与 Agent 主机共享同一刷新节律。
               </p>
             </div>
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3 text-xs text-muted">
@@ -240,11 +254,13 @@ const routes = [
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <DashboardPage /> },
-      { path: "runs", element: <RunsListPage /> },
-      { path: "runs/:runId", element: <RunDetailPage /> },
+      { index: true, element: <WorkspaceDashboardPage /> },
+      { path: "workspaces", element: <WorkspacesPage /> },
+      { path: "workspaces/:wsId", element: <WorkspaceDetailPage /> },
+      { path: "workspaces/:wsId/design-works/:dwId", element: <DesignWorkPage /> },
+      { path: "workspaces/:wsId/dev-works/:dvId", element: <DevWorkPage /> },
+      { path: "dev-works", element: <CrossWorkspaceDevWorkPage /> },
       { path: "agent-hosts", element: <AgentHostsPage /> },
-      { path: "merge-queue", element: <MergeQueuePage /> },
     ],
   },
 ];

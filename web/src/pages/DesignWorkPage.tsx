@@ -1,0 +1,258 @@
+import { useMemo, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import useSWR from "swr";
+import { ApiError } from "../api/client";
+import { cancelDesignWork, getDesignWork, tickDesignWork } from "../api/designWorks";
+import { getDesignDocContent } from "../api/designDocs";
+import { listReviews } from "../api/reviews";
+import { DesignWorkStateProgress } from "../components/DesignWorkStateProgress";
+import { MarkdownPanel } from "../components/MarkdownPanel";
+import { MetricCard, SectionPanel } from "../components/SectionPanel";
+import { StatusBadge } from "../components/StatusBadge";
+import { useWorkspacePolling } from "../hooks/useWorkspacePolling";
+import { extractError } from "../lib/extractError";
+import type { Review } from "../types";
+
+function ReviewRow({ review }: { review: Review }) {
+  return (
+    <article className="rounded-2xl border border-border bg-panel-strong/80 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium text-copy">
+          第 {review.round} 轮 · 评分 {review.score ?? "-"}
+        </p>
+        {review.problem_category ? <StatusBadge status={review.problem_category} /> : null}
+      </div>
+      {review.reviewer ? <p className="mt-2 text-xs text-muted">审核者 {review.reviewer}</p> : null}
+      {review.issues && review.issues.length > 0 ? (
+        <details className="mt-3 text-xs text-muted">
+          <summary className="cursor-pointer">Issues ({review.issues.length})</summary>
+          <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
+            {JSON.stringify(review.issues, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+      {review.findings && review.findings.length > 0 ? (
+        <details className="mt-2 text-xs text-muted">
+          <summary className="cursor-pointer">Findings ({review.findings.length})</summary>
+          <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
+            {JSON.stringify(review.findings, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+    </article>
+  );
+}
+
+type DesignDocContentState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "ok"; content: string }
+  | { kind: "missing" }
+  | { kind: "error"; message: string };
+
+export function DesignWorkPage() {
+  const { wsId, dwId } = useParams();
+  if (!wsId || !dwId) {
+    return (
+      <section className="rounded-[32px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
+        <h2 className="font-serif text-xl font-medium text-copy">路径参数缺失</h2>
+      </section>
+    );
+  }
+  return <DesignWorkContent wsId={wsId} dwId={dwId} />;
+}
+
+function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
+  const polling = useWorkspacePolling();
+  const [actionPending, setActionPending] = useState<"tick" | "cancel" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const dwQuery = useSWR(["design-work", dwId], () => getDesignWork(dwId), polling);
+  const reviewsQuery = useSWR(
+    ["reviews", "design", dwId],
+    () => listReviews({ design_work_id: dwId }),
+    polling,
+  );
+
+  const designWork = dwQuery.data;
+  const outputDocId = designWork?.output_design_doc_id ?? null;
+
+  const docContentQuery = useSWR(
+    outputDocId ? ["design-doc-content", outputDocId] : null,
+    () => getDesignDocContent(outputDocId as string),
+    { shouldRetryOnError: false, revalidateOnFocus: false },
+  );
+
+  const docState = useMemo<DesignDocContentState>(() => {
+    if (!outputDocId) return { kind: "idle" };
+    if (docContentQuery.error) {
+      const err = docContentQuery.error;
+      if (err instanceof ApiError) {
+        if (err.status === 410) return { kind: "missing" };
+        return { kind: "error", message: err.message };
+      }
+      return { kind: "error", message: "设计文档加载失败" };
+    }
+    if (!docContentQuery.data) return { kind: "loading" };
+    return { kind: "ok", content: docContentQuery.data };
+  }, [outputDocId, docContentQuery.error, docContentQuery.data]);
+
+  const reviewsDesc = useMemo(
+    () => (reviewsQuery.data ? [...reviewsQuery.data].reverse() : []),
+    [reviewsQuery.data],
+  );
+
+  if (dwQuery.error) {
+    return (
+      <section className="rounded-[32px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
+        <h2 className="font-serif text-xl font-medium text-copy">DesignWork 加载失败</h2>
+        <p className="mt-2 text-sm text-muted">{extractError(dwQuery.error, "")}</p>
+        <button
+          className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90"
+          onClick={() => void dwQuery.mutate()}
+          type="button"
+        >
+          重试
+        </button>
+      </section>
+    );
+  }
+
+  if (!designWork) {
+    return <div className="h-[240px] animate-pulse rounded-[32px] border border-border bg-panel" />;
+  }
+
+  const escalated = designWork.current_state === "ESCALATED";
+  const cancelled = designWork.current_state === "CANCELLED";
+  const terminal = escalated || cancelled || designWork.current_state === "COMPLETED";
+
+  async function runAction(action: "tick" | "cancel") {
+    setActionPending(action);
+    setActionError(null);
+    try {
+      if (action === "tick") {
+        await tickDesignWork(dwId);
+      } else {
+        await cancelDesignWork(dwId);
+      }
+      await dwQuery.mutate();
+    } catch (err) {
+      setActionError(extractError(err, "操作失败"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <SectionPanel
+        actions={
+          <Link className="text-xs text-muted hover:text-copy" to={`/workspaces/${wsId}`}>
+            ← 返回 Workspace
+          </Link>
+        }
+        kicker="DesignWork"
+        title={designWork.title ?? designWork.sub_slug ?? designWork.id}
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <StatusBadge status={designWork.current_state} />
+          <span className="text-sm text-muted">loop {designWork.loop}</span>
+          <span className="text-sm text-muted">mode {designWork.mode}</span>
+          {designWork.version ? (
+            <span className="font-mono text-xs text-muted">{designWork.version}</span>
+          ) : null}
+        </div>
+
+        <div className="mt-5">
+          <DesignWorkStateProgress current={designWork.current_state} />
+        </div>
+
+        {escalated ? (
+          <p className="mt-5 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
+            DesignWork 已升级，需人工介入；tick 已禁用。
+          </p>
+        ) : null}
+
+        {designWork.missing_sections && designWork.missing_sections.length > 0 ? (
+          <div className="mt-5 space-y-2">
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">missing_sections</p>
+            <div className="flex flex-wrap gap-2">
+              {designWork.missing_sections.map((section) => (
+                <span
+                  className="rounded-full border border-warning/25 bg-warning/10 px-3 py-1 text-[11px] text-warning"
+                  key={section}
+                >
+                  {section}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button
+            className="rounded-lg bg-copy px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] disabled:opacity-50"
+            disabled={actionPending !== null || escalated || terminal}
+            onClick={() => void runAction("tick")}
+            type="button"
+          >
+            {actionPending === "tick" ? "Tick 中..." : "Tick"}
+          </button>
+          <button
+            className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
+            disabled={actionPending !== null || terminal}
+            onClick={() => void runAction("cancel")}
+            type="button"
+          >
+            {actionPending === "cancel" ? "取消中..." : "取消"}
+          </button>
+        </div>
+        {actionError ? <p className="mt-3 text-xs text-danger">{actionError}</p> : null}
+      </SectionPanel>
+
+      <SectionPanel kicker="摘要" title="状态与产物">
+        <div className="grid gap-3 md:grid-cols-3">
+          <MetricCard label="状态" value={designWork.current_state} />
+          <MetricCard label="循环轮次" value={String(designWork.loop)} />
+          <MetricCard label="DesignDoc" value={designWork.output_design_doc_id ?? "-"} />
+        </div>
+      </SectionPanel>
+
+      <SectionPanel kicker="设计文档" title="最终交付">
+        {docState.kind === "idle" ? (
+          <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+            尚未产出 DesignDoc。
+          </p>
+        ) : docState.kind === "loading" ? (
+          <div className="h-40 animate-pulse rounded-2xl border border-border bg-panel-strong/70" />
+        ) : docState.kind === "missing" ? (
+          <p className="rounded-2xl border border-warning/25 bg-warning/10 px-4 py-4 text-sm text-warning">
+            源文件已缺失，请运行 <code className="font-mono">POST /workspaces/sync</code> 后刷新。
+          </p>
+        ) : docState.kind === "error" ? (
+          <p className="rounded-2xl border border-danger/25 bg-danger/10 px-4 py-4 text-sm text-danger">
+            {docState.message}
+          </p>
+        ) : (
+          <MarkdownPanel content={docState.content} />
+        )}
+      </SectionPanel>
+
+      <SectionPanel kicker="审核历史" title="Reviews">
+        {reviewsQuery.error ? (
+          <p className="text-xs text-danger">{extractError(reviewsQuery.error, "加载失败")}</p>
+        ) : reviewsDesc.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+            暂无审核记录。
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {reviewsDesc.map((review) => (
+              <ReviewRow key={review.id} review={review} />
+            ))}
+          </div>
+        )}
+      </SectionPanel>
+    </div>
+  );
+}

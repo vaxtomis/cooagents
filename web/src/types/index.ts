@@ -1,33 +1,10 @@
-export type GateName = "req" | "design" | "dev";
-export type RunStatus = "running" | "completed" | "failed" | "cancelled" | string;
-export type JobStatus =
-  | "starting"
-  | "running"
-  | "completed"
-  | "failed"
-  | "timeout"
-  | "cancelled"
-  | "interrupted"
-  | string;
+// Workspace-driven domain types (Phase 6). Mirrors src/models.py.
+// Run-centric types are removed — MergeQueue, RunRecord, RunBrief, etc.
+// Phase 7 removes the backend counterparts.
 
-export const DASHBOARD_STAGE_FLOW = [
-  "REQ_COLLECTING",
-  "REQ_REVIEW",
-  "DESIGN_QUEUED",
-  "DESIGN_DISPATCHED",
-  "DESIGN_RUNNING",
-  "DESIGN_REVIEW",
-  "DEV_QUEUED",
-  "DEV_DISPATCHED",
-  "DEV_RUNNING",
-  "DEV_REVIEW",
-  "MERGE_QUEUED",
-  "MERGING",
-  "MERGE_CONFLICT",
-  "MERGED",
-] as const;
-
-export type DashboardStage = (typeof DASHBOARD_STAGE_FLOW)[number] | "INIT" | "FAILED" | string;
+// ---------------------------------------------------------------------------
+// Shared
+// ---------------------------------------------------------------------------
 
 export interface Pagination {
   limit: number;
@@ -36,220 +13,9 @@ export interface Pagination {
   total?: number;
 }
 
-export interface StepRecord {
-  id?: number;
-  run_id: string;
-  from_stage: DashboardStage;
-  to_stage: DashboardStage;
-  triggered_by?: string | null;
-  created_at: string;
-}
-
-export interface ApprovalRecord {
-  id?: number;
-  run_id: string;
-  gate: GateName;
-  decision: "approved" | "rejected";
-  by: string;
-  comment?: string | null;
-  created_at: string;
-}
-
-export interface EventRecord {
-  id?: number;
-  run_id?: string | null;
-  event_type: string;
-  created_at: string;
-  payload?: unknown;
-  trace_id?: string | null;
-  job_id?: string | null;
-  span_type?: string | null;
-  level?: string | null;
-  duration_ms?: number | null;
-  error_detail?: string | null;
-  source?: string | null;
-  ticket?: string | null;
-}
-
-export interface ArtifactRecord {
-  id: number;
-  run_id: string;
-  kind: string;
-  path: string;
-  version: number;
-  status: string;
-  content_hash?: string | null;
-  byte_size?: number | null;
-  stage?: DashboardStage | null;
-  git_ref?: string | null;
-  review_comment?: string | null;
-  created_at: string;
-}
-
-export interface ArtifactContentResponse extends ArtifactRecord {
-  content: string;
-}
-
-export interface ArtifactDiffResponse {
-  artifact_id: number;
-  diff: string;
-}
-
-export interface JobRecord {
-  id: string;
-  run_id: string;
-  host_id?: string | null;
-  agent_type: string;
-  stage: DashboardStage | string;
-  status: JobStatus;
-  task_file?: string | null;
-  worktree?: string | null;
-  base_commit?: string | null;
-  pid?: number | null;
-  ssh_session_id?: string | null;
-  snapshot_json?: string | null;
-  resume_count?: number | null;
-  session_name?: string | null;
-  turn_count?: number | null;
-  events_file?: string | null;
-  timeout_sec?: number | null;
-  running_started_at?: string | null;
-  started_at: string;
-  ended_at?: string | null;
-}
-
-export interface JobOutputResponse {
-  job_id: string;
-  output: string;
-}
-
-export interface RunRecord {
-  id: string;
-  run_id?: string;
-  ticket: string;
-  repo_path: string;
-  repo_url?: string | null;
-  status: RunStatus;
-  current_stage: DashboardStage;
-  description?: string | null;
-  failed_at_stage?: DashboardStage | null;
-  design_worktree?: string | null;
-  design_branch?: string | null;
-  dev_worktree?: string | null;
-  dev_branch?: string | null;
-  preferences_json?: string | null;
-  notify_channel?: string | null;
-  notify_to?: string | null;
-  created_at: string;
-  updated_at: string;
-  steps?: StepRecord[];
-  approvals?: ApprovalRecord[];
-  recent_events?: EventRecord[];
-  artifacts?: ArtifactRecord[];
-}
-
-export interface RunsListResponse {
-  items: RunRecord[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-export interface BriefCurrentStage {
-  stage: DashboardStage;
-  description: string;
-  action_type: string;
-  since?: string | null;
-  elapsed_sec?: number | null;
-  summary: string;
-  job_id?: string;
-  job_status?: JobStatus;
-  agent_type?: string;
-  turn_count?: number;
-  host?: string | null;
-}
-
-export interface RunBrief {
-  run_id: string;
-  ticket: string;
-  status: RunStatus;
-  created_at: string;
-  current: BriefCurrentStage;
-  previous?: {
-    stage: DashboardStage;
-    result?: string | null;
-    reason?: string | null;
-    by?: string | null;
-    at?: string | null;
-    triggered_by?: string | null;
-  } | null;
-  progress: {
-    gates_passed: GateName[];
-    gates_remaining: GateName[];
-    artifacts_count: number;
-  };
-}
-
-export interface RunTraceResponse {
-  run_id: string;
-  status: RunStatus;
-  current_stage: DashboardStage;
-  failed_at_stage?: DashboardStage | null;
-  created_at: string;
-  summary: {
-    total_events: number;
-    errors: number;
-    warnings: number;
-    stages_visited: DashboardStage[];
-    total_duration_ms?: number | null;
-    jobs: Array<{
-      job_id: string;
-      stage: DashboardStage | string;
-      status: JobStatus;
-      duration_ms?: number | null;
-    }>;
-  };
-  events: EventRecord[];
-  pagination: Pagination;
-}
-
-export interface JobDiagnosisResponse {
-  job_id: string;
-  run_id?: string | null;
-  host_id?: string | null;
-  agent_type: string;
-  stage: DashboardStage | string;
-  status: JobStatus;
-  session_name?: string | null;
-  started_at?: string | null;
-  ended_at?: string | null;
-  diagnosis: {
-    duration_ms?: number | null;
-    turn_count?: number | null;
-    error_summary?: string | null;
-    error_detail?: string | null;
-    last_output_excerpt?: string | null;
-    failure_context: {
-      stage_at_failure?: string | null;
-      host_status_at_failure?: string | null;
-      retry_count?: number | null;
-    };
-  };
-  events: EventRecord[];
-  turns: Array<Record<string, unknown>>;
-}
-
-export interface TraceLookupResponse {
-  trace_id: string;
-  origin: string;
-  first_seen?: string | null;
-  last_seen?: string | null;
-  total_duration_ms?: number | null;
-  affected_runs: string[];
-  affected_jobs: string[];
-  error_count: number;
-  events: EventRecord[];
-}
+// ---------------------------------------------------------------------------
+// Agent host (retained — AgentHostsPage still used)
+// ---------------------------------------------------------------------------
 
 export interface AgentHost {
   id: string;
@@ -265,36 +31,217 @@ export interface AgentHost {
   updated_at: string;
 }
 
-export interface MergeQueueItem {
-  id: number;
-  run_id: string;
-  branch: string;
-  priority: number;
-  status: string;
-  conflict_files: string[];
+// ---------------------------------------------------------------------------
+// Workspace-driven enums (string-literal unions — mirror Python enums).
+// ---------------------------------------------------------------------------
+
+export type WorkspaceStatus = "active" | "archived";
+export type DesignWorkMode = "new" | "optimize";
+
+export type DesignWorkState =
+  | "INIT"
+  | "MODE_BRANCH"
+  | "PRE_VALIDATE"
+  | "PROMPT_COMPOSE"
+  | "LLM_GENERATE"
+  | "MOCKUP"
+  | "POST_VALIDATE"
+  | "PERSIST"
+  | "COMPLETED"
+  | "ESCALATED"
+  | "CANCELLED";
+
+export type DesignDocStatus = "draft" | "published" | "superseded";
+
+export type DevWorkStep =
+  | "INIT"
+  | "STEP1_VALIDATE"
+  | "STEP2_ITERATION"
+  | "STEP3_CONTEXT"
+  | "STEP4_DEVELOP"
+  | "STEP5_REVIEW"
+  | "COMPLETED"
+  | "ESCALATED"
+  | "CANCELLED";
+
+export type ProblemCategory = "req_gap" | "impl_gap" | "design_hollow";
+
+export type AgentKind = "claude" | "codex";
+
+// Canonical ordered happy-path arrays for stepper components.
+export const DESIGN_WORK_STATE_ORDER = [
+  "INIT",
+  "MODE_BRANCH",
+  "PRE_VALIDATE",
+  "PROMPT_COMPOSE",
+  "LLM_GENERATE",
+  "MOCKUP",
+  "POST_VALIDATE",
+  "PERSIST",
+  "COMPLETED",
+] as const satisfies readonly DesignWorkState[];
+
+export const DEV_WORK_STEP_ORDER = [
+  "INIT",
+  "STEP1_VALIDATE",
+  "STEP2_ITERATION",
+  "STEP3_CONTEXT",
+  "STEP4_DEVELOP",
+  "STEP5_REVIEW",
+  "COMPLETED",
+] as const satisfies readonly DevWorkStep[];
+
+// ---------------------------------------------------------------------------
+// Workspace-driven domain models
+// ---------------------------------------------------------------------------
+
+export interface Workspace {
+  id: string;
+  title: string;
+  slug: string;
+  status: WorkspaceStatus;
+  root_path: string;
   created_at: string;
   updated_at: string;
 }
 
-export interface CreateRunPayload {
-  ticket: string;
+export interface DesignWork {
+  id: string;
+  workspace_id: string;
+  mode: DesignWorkMode;
+  current_state: DesignWorkState;
+  loop: number;
+  missing_sections: string[] | null;
+  output_design_doc_id: string | null;
+  escalated_at: string | null;
+  title: string | null;
+  sub_slug: string | null;
+  version: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DesignDoc {
+  id: string;
+  workspace_id: string;
+  slug: string;
+  version: string;
+  path: string;
+  parent_version: string | null;
+  needs_frontend_mockup: boolean;
+  rubric_threshold: number;
+  status: DesignDocStatus;
+  content_hash: string | null;
+  byte_size: number | null;
+  created_at: string;
+  published_at: string | null;
+}
+
+export interface DevWork {
+  id: string;
+  workspace_id: string;
+  design_doc_id: string;
+  current_step: DevWorkStep;
+  iteration_rounds: number;
+  first_pass_success: boolean | null;
+  last_score: number | null;
+  last_problem_category: ProblemCategory | null;
+  escalated_at: string | null;
+  completed_at: string | null;
+  worktree_path: string | null;
+  worktree_branch: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DevIterationNote {
+  id: string;
+  dev_work_id: string;
+  round: number;
+  markdown_path: string;
+  score_history: number[] | null;
+  created_at: string;
+}
+
+export interface Review {
+  id: string;
+  dev_work_id: string | null;
+  design_work_id: string | null;
+  dev_iteration_note_id: string | null;
+  round: number;
+  score: number | null;
+  issues: Record<string, unknown>[] | null;
+  findings: Record<string, unknown>[] | null;
+  problem_category: ProblemCategory | null;
+  reviewer: string | null;
+  created_at: string;
+}
+
+export interface WorkspaceEvent {
+  id: number | null;
+  event_id: string;
+  event_name: string;
+  workspace_id: string | null;
+  correlation_id: string | null;
+  payload: Record<string, unknown> | null;
+  ts: string;
+}
+
+export interface WorkspaceEventsEnvelope {
+  events: WorkspaceEvent[];
+  pagination: Pagination;
+}
+
+export interface WorkspaceSyncReport {
+  fs_only: string[];
+  db_only: string[];
+  in_sync: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Gate contract
+// ---------------------------------------------------------------------------
+
+export type GateStatus = "waiting" | "approved" | "rejected";
+
+export interface GateInfo {
+  gate_id: string;
+  workspace_id?: string;
+  work_id?: string;
+  gate_key?: string;
+  status: GateStatus;
+  actor?: string | null;
+  note?: string | null;
+  acted_at?: string | null;
+  // Backend may include additional contextual fields not modeled here.
+  extra?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Request payloads
+// ---------------------------------------------------------------------------
+
+export interface CreateWorkspacePayload {
+  title: string;
+  slug: string;
+}
+
+export interface CreateDesignWorkPayload {
+  workspace_id: string;
+  title: string;
+  slug: string;
+  user_input: string;
+  mode?: DesignWorkMode;
+  parent_version?: string | null;
+  needs_frontend_mockup?: boolean;
+  agent?: AgentKind;
+  rubric_threshold?: number;
+}
+
+export interface CreateDevWorkPayload {
+  workspace_id: string;
+  design_doc_id: string;
   repo_path: string;
-  description?: string;
-  notify_channel?: string;
-  notify_to?: string;
-  repo_url?: string;
-  design_agent?: string;
-  dev_agent?: string;
-}
-
-// The server derives `by` from the authenticated session; clients must not
-// send it, so it's omitted from the payload shape.
-export interface ApprovePayload {
-  gate: GateName;
-  comment?: string;
-}
-
-export interface RejectPayload {
-  gate: GateName;
-  reason: string;
+  prompt: string;
+  agent?: AgentKind;
 }

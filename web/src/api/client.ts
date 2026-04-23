@@ -128,6 +128,7 @@ export async function apiRequest<T>(
     }
     if (response.status === 401) {
       notifyUnauthenticated();
+      throw new ApiError(401, "Unauthenticated", null);
     }
   }
 
@@ -141,7 +142,10 @@ export async function apiRequest<T>(
     throw new ApiError(response.status, message, data);
   }
 
-  return { data: data as T, response };
+  // Caller-asserted shape — no runtime schema validation today. If the backend
+  // contract drifts, callers operate on malformed objects. Critical paths
+  // should add explicit narrowing or schema parsing at the call site.
+  return { data: data as unknown as T, response };
 }
 
 export async function apiFetch<T>(
@@ -154,4 +158,46 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const { data } = await apiRequest<T>(path, options);
   return data;
+}
+
+// Fetch an endpoint that returns a raw body (e.g. Content-Type: text/markdown).
+// Mirrors apiRequest's 401-refresh + ApiError contract but returns the decoded
+// text directly instead of parsing JSON.
+export async function apiFetchText(
+  path: string,
+  options: Omit<RequestInit, "body"> & {
+    query?: QueryParams;
+    skipAuthRetry?: boolean;
+  } = {},
+): Promise<string> {
+  const { query, skipAuthRetry, headers, ...init } = options;
+  const resolvedHeaders = new Headers(headers);
+  resolvedHeaders.set("Accept", "text/markdown, text/plain, */*");
+
+  const fetchInit: RequestInit = { ...init, headers: resolvedHeaders };
+
+  let response = await rawFetch(path, fetchInit, query);
+  if (response.status === 401 && !skipAuthRetry) {
+    const refreshed = await attemptRefresh();
+    if (refreshed) {
+      response = await rawFetch(path, fetchInit, query);
+    }
+    if (response.status === 401) {
+      notifyUnauthenticated();
+      throw new ApiError(401, "Unauthenticated", null);
+    }
+  }
+
+  if (!response.ok) {
+    // Error responses may still be JSON — preserve the structured payload so
+    // callers can distinguish 404 / 410 / 400 on the content endpoints.
+    const data = await parseResponseBody(response);
+    const message =
+      typeof data === "object" && data !== null && "message" in data
+        ? String((data as { message?: unknown }).message)
+        : `API request failed with status ${response.status}`;
+    throw new ApiError(response.status, message, data);
+  }
+
+  return response.text();
 }

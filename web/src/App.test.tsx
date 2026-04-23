@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { RouterProvider } from "react-router-dom";
-import { vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "./auth/AuthContext";
 import { createAppRouter } from "./router";
 
@@ -10,24 +10,32 @@ vi.mock("./api/auth", () => ({
   logout: vi.fn(async () => {}),
 }));
 
-vi.mock("./pages/DashboardPage", () => ({
-  DashboardPage: () => <div>dashboard page</div>,
+vi.mock("./pages/WorkspaceDashboardPage", () => ({
+  WorkspaceDashboardPage: () => <div>workspace dashboard page</div>,
 }));
 
-vi.mock("./pages/RunsListPage", () => ({
-  RunsListPage: () => <div>runs page</div>,
+vi.mock("./pages/WorkspacesPage", () => ({
+  WorkspacesPage: () => <div>workspaces page</div>,
 }));
 
-vi.mock("./pages/RunDetailPage", () => ({
-  RunDetailPage: () => <div>run detail page</div>,
+vi.mock("./pages/WorkspaceDetailPage", () => ({
+  WorkspaceDetailPage: () => <div>workspace detail page</div>,
+}));
+
+vi.mock("./pages/DesignWorkPage", () => ({
+  DesignWorkPage: () => <div>design work page</div>,
+}));
+
+vi.mock("./pages/DevWorkPage", () => ({
+  DevWorkPage: () => <div>dev work page</div>,
+}));
+
+vi.mock("./pages/CrossWorkspaceDevWorkPage", () => ({
+  CrossWorkspaceDevWorkPage: () => <div>cross workspace dev works page</div>,
 }));
 
 vi.mock("./pages/AgentHostsPage", () => ({
   AgentHostsPage: () => <div>agent hosts page</div>,
-}));
-
-vi.mock("./pages/MergeQueuePage", () => ({
-  MergeQueuePage: () => <div>merge queue page</div>,
 }));
 
 function renderAt(path: string) {
@@ -39,34 +47,43 @@ function renderAt(path: string) {
 }
 
 describe("App shell", () => {
-  it("renders the sidebar navigation and phase 2 routes", async () => {
-    const overviewLabel = "\u6982\u89c8";
-    const hostsLabel = "Agent \u4e3b\u673a";
-    const queueLabel = "Merge \u961f\u5217";
+  it("renders sidebar navigation and workspace-centric routes", async () => {
+    const overviewLabel = "概览";
+    const workspacesLabel = "工作区域";
+    const crossLabel = "跨区域 DevWorks";
+    const hostsLabel = "Agent 主机";
 
     const overview = renderAt("/");
     await waitFor(() => expect(screen.getByText("Cooagents")).toBeInTheDocument());
     expect(screen.getAllByRole("link", { name: overviewLabel }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "Runs" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: workspacesLabel }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: crossLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: hostsLabel }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: queueLabel }).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: overviewLabel })).toBeInTheDocument();
     overview.unmount();
 
-    const runs = renderAt("/runs");
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument());
-    runs.unmount();
+    const workspaces = renderAt("/workspaces");
+    await waitFor(() => expect(screen.getByRole("heading", { name: workspacesLabel })).toBeInTheDocument());
+    workspaces.unmount();
 
-    const detail = renderAt("/runs/run-123");
-    await waitFor(() => expect(screen.getByRole("heading", { name: "运行详情" })).toBeInTheDocument());
+    const detail = renderAt("/workspaces/ws-123");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Workspace 详情" })).toBeInTheDocument());
     detail.unmount();
+
+    const dwDetail = renderAt("/workspaces/ws-1/design-works/dw-1");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "DesignWork 详情" })).toBeInTheDocument());
+    dwDetail.unmount();
+
+    const dvDetail = renderAt("/workspaces/ws-1/dev-works/dv-1");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "DevWork 详情" })).toBeInTheDocument());
+    dvDetail.unmount();
+
+    const cross = renderAt("/dev-works");
+    await waitFor(() => expect(screen.getByRole("heading", { name: crossLabel })).toBeInTheDocument());
+    cross.unmount();
 
     const hosts = renderAt("/agent-hosts");
     await waitFor(() => expect(screen.getByRole("heading", { name: hostsLabel })).toBeInTheDocument());
     hosts.unmount();
-
-    const queue = renderAt("/merge-queue");
-    await waitFor(() => expect(screen.getByRole("heading", { name: queueLabel })).toBeInTheDocument());
-    queue.unmount();
   });
 });
