@@ -51,9 +51,10 @@ async def test_workspace_files_kind_check_rejects_unknown(db):
 
 @pytest.mark.parametrize("kind", [
     "design_doc", "design_input", "iteration_note",
-    "prompt", "image", "workspace_md", "other",
+    "prompt", "image", "workspace_md",
+    "context", "artifact", "other",
 ])
-async def test_workspace_files_kind_check_accepts_all_seven(db, kind):
+async def test_workspace_files_kind_check_accepts_all_nine(db, kind):
     await _seed_workspace(db, f"ws-{kind}", kind)
     await db.execute(
         "INSERT INTO workspace_files(id,workspace_id,relative_path,kind,"
@@ -61,6 +62,20 @@ async def test_workspace_files_kind_check_accepts_all_seven(db, kind):
         (f"wf-{kind}", f"ws-{kind}", f"x/{kind}.md", kind,
          "2026-04-24T00:00:00Z", "2026-04-24T00:00:00Z"),
     )
+
+
+async def test_workspace_files_kind_check_rejects_old_value_index(db):
+    """Guard against regression: 'index' was the PRD draft name; the live
+    schema renames it to 'workspace_md'. A caller re-reading the PRD must
+    still be blocked."""
+    await _seed_workspace(db, "ws-ix", "ix")
+    with pytest.raises(sqlite3.IntegrityError):
+        await db.execute(
+            "INSERT INTO workspace_files(id,workspace_id,relative_path,kind,"
+            "created_at,updated_at) VALUES(?,?,?,?,?,?)",
+            ("wf-ix", "ws-ix", "index.md", "index",
+             "2026-04-24T00:00:00Z", "2026-04-24T00:00:00Z"),
+        )
 
 
 async def test_workspace_files_unique_workspace_relpath(db):

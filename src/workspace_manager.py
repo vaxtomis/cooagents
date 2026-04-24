@@ -18,9 +18,13 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
+from typing import TYPE_CHECKING
 
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.workspace_events import emit_and_deliver
+
+if TYPE_CHECKING:
+    from src.storage.registry import WorkspaceFileRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,7 @@ class WorkspaceManager:
         project_root: Path | str | None = None,
         workspaces_root: Path | str | None = None,
         webhooks=None,
+        registry: "WorkspaceFileRegistry | None" = None,
     ):
         self.db = db
         self.project_root = (
@@ -89,6 +94,12 @@ class WorkspaceManager:
         self.workspaces_root = Path(workspaces_root).expanduser().resolve()
         self._template = _load_template()
         self.webhooks = webhooks
+        self.registry = registry
+
+    def _require_registry(self) -> "WorkspaceFileRegistry":
+        if self.registry is None:
+            raise BadRequestError("workspace registry not configured")
+        return self.registry
 
     # ---- id / time helpers (Phase 1 unchanged) ----
 
@@ -204,12 +215,19 @@ class WorkspaceManager:
             workspace_id=wid, title=title, slug=slug, created_at=now, status="active"
         )
 
-        # 1) FS write
+        registry = self._require_registry()
+
+        # 1) FS scaffold — mkdir subdirs, then write workspace.md via the
+        #    underlying store. We bypass the registry's 2-step put_bytes here
+        #    because the `workspaces` row doesn't exist yet, so `repo.upsert`
+        #    would fail the workspace_id FK. See Phase 3 plan Task 9 GOTCHA 1.
         try:
             slug_dir.mkdir(parents=True, exist_ok=False)
             for sub in _SUBDIRS:
                 (slug_dir / sub).mkdir(exist_ok=False)
-            (slug_dir / "workspace.md").write_text(md_content, encoding="utf-8")
+            await registry.store.put_bytes(
+                f"{slug}/workspace.md", md_content.encode("utf-8"),
+            )
         except OSError as exc:
             self._safe_rmtree(slug_dir)
             raise BadRequestError(
@@ -224,6 +242,28 @@ class WorkspaceManager:
                 (wid, title, slug, "active", str(slug_dir), now, now),
             )
         except Exception:
+            self._safe_rmtree(slug_dir)
+            raise
+
+        # 3) Register the freshly-written workspace.md in workspace_files.
+        #    Failure at this stage must compensate the DB INSERT + FS scaffold
+        #    so the aggregate operation stays atomic.
+        ws_row = {"id": wid, "slug": slug}
+        try:
+            await registry.index_existing(
+                workspace_row=ws_row,
+                relative_path="workspace.md",
+                kind="workspace_md",
+            )
+        except Exception:
+            try:
+                await self.db.execute(
+                    "DELETE FROM workspaces WHERE id=?", (wid,),
+                )
+            except Exception:
+                logger.exception(
+                    "rollback DELETE FROM workspaces failed for %s", wid
+                )
             self._safe_rmtree(slug_dir)
             raise
 
@@ -277,9 +317,11 @@ class WorkspaceManager:
         # workspaces_root invariant; refusing to archive them would be a
         # regression. Phase 2 rows always store `workspaces_root/<slug>`
         # here, so the two paths match.
-        slug_dir = self._slug_dir(row["slug"])
-        md_path = slug_dir / "workspace.md"
-        if md_path.exists():
+        registry = self._require_registry()
+        ref = await registry.stat(
+            workspace_slug=row["slug"], relative_path="workspace.md",
+        )
+        if ref is not None:
             refreshed = self.render_workspace_md(
                 workspace_id=row["id"],
                 title=row["title"],
@@ -287,12 +329,13 @@ class WorkspaceManager:
                 created_at=row["created_at"],
                 status="archived",
             )
-            md_path.write_text(refreshed, encoding="utf-8")
+            await registry.put_markdown(
+                workspace_row=row, relative_path="workspace.md",
+                text=refreshed, kind="workspace_md",
+            )
         else:
             logger.warning(
-                "workspace.md missing for %s at %s — skipping rewrite",
-                row["id"],
-                md_path,
+                "workspace.md missing for %s — skipping rewrite", row["id"],
             )
         return True
 
@@ -394,12 +437,13 @@ class WorkspaceManager:
         if ws is None:
             logger.warning("refresh_workspace_md: workspace %s missing", workspace_id)
             return
-        slug_dir = self._slug_dir(ws["slug"])
-        self._assert_under_root(slug_dir)
-        md_path = slug_dir / "workspace.md"
-        if not md_path.exists():
+        registry = self._require_registry()
+        ref = await registry.stat(
+            workspace_slug=ws["slug"], relative_path="workspace.md",
+        )
+        if ref is None:
             logger.warning(
-                "refresh_workspace_md: workspace.md missing at %s", md_path
+                "refresh_workspace_md: workspace.md missing for %s", workspace_id,
             )
             return
 
@@ -455,10 +499,15 @@ class WorkspaceManager:
             "\n".join(dev_lines) if dev_lines else "_暂无 DevWork。_"
         )
 
-        text = md_path.read_text(encoding="utf-8")
+        text = await registry.read_text(
+            workspace_slug=ws["slug"], relative_path="workspace.md",
+        )
         new_text = _replace_section(text, "## 设计工作", designs_section)
         new_text = _replace_section(new_text, "## 开发工作", dev_section)
-        md_path.write_text(new_text, encoding="utf-8")
+        await registry.put_markdown(
+            workspace_row=ws, relative_path="workspace.md",
+            text=new_text, kind="workspace_md",
+        )
 
     @staticmethod
     def _parse_front_matter(md: Path) -> dict[str, str]:

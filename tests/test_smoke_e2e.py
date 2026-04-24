@@ -25,7 +25,17 @@ from src.dev_work_sm import DevWorkStateMachine
 from src.exceptions import BadRequestError, NotFoundError
 from src.git_utils import run_git
 from src.models import DesignWorkMode
+from src.storage import LocalFileStore
+from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.workspace_manager import WorkspaceManager
+
+
+def _build_registry_stack(db, ws_root: Path):
+    ws_root.mkdir(parents=True, exist_ok=True)
+    store = LocalFileStore(workspaces_root=ws_root)
+    repo = WorkspaceFilesRepo(db)
+    registry = WorkspaceFileRegistry(store=store, repo=repo)
+    return registry
 
 from tests.test_design_work_sm import (
     FIXTURES as DESIGN_FIXTURES,
@@ -76,10 +86,14 @@ async def test_smoke_happy_path(tmp_path):
     await db.connect()
     try:
         ws_root = tmp_path / "ws"
-        wm = WorkspaceManager(db, project_root=tmp_path, workspaces_root=ws_root)
+        registry = _build_registry_stack(db, ws_root)
+        wm = WorkspaceManager(
+            db, project_root=tmp_path, workspaces_root=ws_root,
+            registry=registry,
+        )
         ws = await wm.create_with_scaffold(title="T", slug="t")
-        ddm = DesignDocManager(db, workspaces_root=ws_root)
-        ini = DevIterationNoteManager(db, workspaces_root=ws_root)
+        ddm = DesignDocManager(db, registry=registry)
+        ini = DevIterationNoteManager(db)
 
         # Seed published DesignDoc directly (faster than driving DesignWork SM here)
         design_text = DESIGN_FIXTURE.read_text(encoding="utf-8")
@@ -104,7 +118,7 @@ async def test_smoke_happy_path(tmp_path):
         ])
         sm = DevWorkStateMachine(
             db=db, workspaces=wm, design_docs=ddm, iteration_notes=ini,
-            executor=executor, config=_build_dev_config(),
+            executor=executor, config=_build_dev_config(), registry=registry,
         )
         dw = await sm.create(
             workspace_id=ws["id"], design_doc_id=dd["id"],
@@ -131,14 +145,18 @@ async def test_smoke_design_escalated(tmp_path):
     await db.connect()
     try:
         ws_root = tmp_path / "ws"
-        wm = WorkspaceManager(db, project_root=tmp_path, workspaces_root=ws_root)
+        registry = _build_registry_stack(db, ws_root)
+        wm = WorkspaceManager(
+            db, project_root=tmp_path, workspaces_root=ws_root,
+            registry=registry,
+        )
         ws = await wm.create_with_scaffold(title="T", slug="t")
-        ddm = DesignDocManager(db, workspaces_root=ws_root)
+        ddm = DesignDocManager(db, registry=registry)
 
         stub = DesignStubExecutor(DESIGN_FIXTURES / "always_missing")
         sm = DesignWorkStateMachine(
             db=db, workspaces=wm, design_docs=ddm, executor=stub,
-            config=_build_design_config(max_loops=3),
+            config=_build_design_config(max_loops=3), registry=registry,
         )
         dw = await sm.create(
             workspace_id=ws["id"], title="T", sub_slug="demo",
@@ -174,10 +192,14 @@ async def test_smoke_devwork_escalated(tmp_path):
     await db.connect()
     try:
         ws_root = tmp_path / "ws"
-        wm = WorkspaceManager(db, project_root=tmp_path, workspaces_root=ws_root)
+        registry = _build_registry_stack(db, ws_root)
+        wm = WorkspaceManager(
+            db, project_root=tmp_path, workspaces_root=ws_root,
+            registry=registry,
+        )
         ws = await wm.create_with_scaffold(title="T", slug="t")
-        ddm = DesignDocManager(db, workspaces_root=ws_root)
-        ini = DevIterationNoteManager(db, workspaces_root=ws_root)
+        ddm = DesignDocManager(db, registry=registry)
+        ini = DevIterationNoteManager(db)
 
         design_text = DESIGN_FIXTURE.read_text(encoding="utf-8")
         dd = await ddm.persist(
@@ -202,6 +224,7 @@ async def test_smoke_devwork_escalated(tmp_path):
         sm = DevWorkStateMachine(
             db=db, workspaces=wm, design_docs=ddm, iteration_notes=ini,
             executor=executor, config=_build_dev_config(max_rounds=1),
+            registry=registry,
         )
         dw = await sm.create(
             workspace_id=ws["id"], design_doc_id=dd["id"],

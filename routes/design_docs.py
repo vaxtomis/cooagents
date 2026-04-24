@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 
 from src.exceptions import BadRequestError, NotFoundError
 from src.models import DesignDoc
+from src.storage.base import normalize_key
 
 router = APIRouter(tags=["design-docs"])
 
@@ -40,17 +41,19 @@ def _row_to_design_doc(row: dict) -> DesignDoc:
     )
 
 
-def _safe_resolve_under_root(raw_path: str, workspaces_root: Path) -> Path:
-    """Resolve *raw_path* and ensure it remains under *workspaces_root*.
+def _safe_resolve_under_root(
+    raw_path: str, workspaces_root: Path, workspace_slug: str,
+) -> Path:
+    """Compose ``<workspaces_root>/<slug>/<raw_path>`` and validate under root.
 
-    Defense-in-depth on top of the manager-level checks at write time —
-    re-validates the on-disk path read from the DB row in case an operator
-    has manually edited it.
+    Phase 3: ``raw_path`` is workspace-relative POSIX. ``normalize_key``
+    rejects absolute paths, backslashes, drive letters, and '..' traversal
+    before composition; the ``relative_to`` check is defence-in-depth against
+    symlink-based escapes.
     """
-    # Resolve both sides — defense against symlink-based escapes even if a
-    # future settings layer hands us an unresolved root.
+    rel = normalize_key(raw_path).as_posix()
     root = workspaces_root.resolve()
-    resolved = Path(raw_path).resolve(strict=False)
+    resolved = (root / workspace_slug / rel).resolve(strict=False)
     try:
         resolved.relative_to(root)
     except ValueError as exc:
@@ -101,13 +104,22 @@ async def get_design_doc(doc_id: str, request: Request) -> DesignDoc:
 async def get_design_doc_content(doc_id: str, request: Request):
     db = request.app.state.db
     row = await db.fetchone(
-        "SELECT path FROM design_docs WHERE id=?", (doc_id,)
+        "SELECT path, workspace_id FROM design_docs WHERE id=?", (doc_id,)
     )
     if not row:
         raise NotFoundError(f"design_doc {doc_id!r} not found")
+    ws = await db.fetchone(
+        "SELECT slug FROM workspaces WHERE id=?", (row["workspace_id"],)
+    )
+    if not ws:
+        raise NotFoundError(
+            f"workspace {row['workspace_id']!r} not found for design_doc"
+        )
 
     workspaces_root = request.app.state.settings.security.resolved_workspace_root()
-    resolved = _safe_resolve_under_root(row["path"], workspaces_root)
+    resolved = _safe_resolve_under_root(
+        row["path"], workspaces_root, ws["slug"]
+    )
 
     if not resolved.exists() or not resolved.is_file():
         # Distinguish "no such DB row" (404) from "row points at a deleted file"

@@ -89,6 +89,8 @@ async def _seed_doc(
     path_override: str | None = None,
     body: str = "# Hello\n",
 ):
+    # Phase 3 contract: design_docs.path is workspace-relative POSIX.
+    rel_path = f"designs/DES-{slug}-{version}.md"
     target = (
         Path(path_override)
         if path_override is not None
@@ -97,6 +99,7 @@ async def _seed_doc(
     if write_file:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body, encoding="utf-8")
+    stored_path = str(target) if path_override is not None else rel_path
     await db.execute(
         "INSERT INTO design_docs(id,workspace_id,slug,version,path,parent_version,"
         "needs_frontend_mockup,rubric_threshold,status,content_hash,byte_size,"
@@ -106,7 +109,7 @@ async def _seed_doc(
             workspace_id,
             slug,
             version,
-            str(target),
+            stored_path,
             None,
             0,
             85,
@@ -225,10 +228,10 @@ async def test_content_file_missing_410(client):
     db = client.db
     ws_root = client.ws_root
     await _seed_workspace(db)
-    missing = ws_root / "demo" / "designs" / "DES-gone-1.0.0.md"
+    # Row points at a relative path with no file on disk (row kept after
+    # an operator deleted the markdown manually).
     await _seed_doc(
         db, ws_root, doc_id="des-gone", slug="gone", write_file=False,
-        path_override=str(missing),
     )
     r = await client.get("/api/v1/design-docs/des-gone/content")
     assert r.status_code == 410

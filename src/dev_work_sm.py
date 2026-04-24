@@ -76,6 +76,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         iteration_notes: Any, # DevIterationNoteManager
         executor: Any,        # async run_once(agent, worktree, timeout, task_file=?, prompt=?)
         config: Any,          # Settings
+        registry: Any,        # WorkspaceFileRegistry (Phase 3)
         webhooks: Any = None,  # WebhookNotifier (optional; None disables deliver side-channel)
     ) -> None:
         self.db = db
@@ -84,10 +85,16 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         self.iteration_notes = iteration_notes
         self.executor = executor
         self.config = config
+        self.registry = registry
         self.webhooks = webhooks
-        # Phase 2 manager owns workspaces_root; mirror it for quick path math.
+        # Phase 2 manager owns workspaces_root; mirror it for quick path math
+        # (absolute paths embedded in LLM prompts).
         self.workspaces_root = Path(workspaces.workspaces_root).resolve()
         self._running: dict[str, asyncio.Task] = {}
+
+    def _abs_for(self, ws: dict[str, Any], relative_path: str) -> str:
+        """Compose an absolute POSIX path under ``<root>/<slug>/`` for LLM use."""
+        return (self.workspaces_root / ws["slug"] / relative_path).as_posix()
 
     # ---- driver ----
 
@@ -376,9 +383,12 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 problem_category=ProblemCategory.design_hollow,
             )
             return
+        ws = await self.workspaces.get(dw["workspace_id"])
         try:
-            text = Path(dd["path"]).read_text(encoding="utf-8")
-        except OSError as exc:
+            text = await self.registry.read_text(
+                workspace_slug=ws["slug"], relative_path=dd["path"],
+            )
+        except NotFoundError as exc:
             await self._escalate(
                 dw,
                 reason=f"design_doc file unreadable: {exc}",

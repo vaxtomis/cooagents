@@ -14,6 +14,8 @@ from httpx import ASGITransport, AsyncClient
 
 from src.database import Database
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
+from src.storage import LocalFileStore
+from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.workspace_manager import WorkspaceManager
 
 
@@ -25,8 +27,12 @@ async def client(tmp_path):
     db = Database(db_path=tmp_path / "test.db", schema_path="db/schema.sql")
     await db.connect()
 
+    ws_root.mkdir(exist_ok=True)
+    store = LocalFileStore(workspaces_root=ws_root)
+    repo = WorkspaceFilesRepo(db)
+    registry = WorkspaceFileRegistry(store=store, repo=repo)
     workspaces = WorkspaceManager(
-        db, project_root=tmp_path, workspaces_root=ws_root
+        db, project_root=tmp_path, workspaces_root=ws_root, registry=registry,
     )
     test_app.state.db = db
     test_app.state.workspaces = workspaces

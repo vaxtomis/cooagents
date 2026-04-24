@@ -20,6 +20,7 @@ from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.skill_deployer import deploy_skills
+from src.storage import LocalFileStore, WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.webhook_notifier import WebhookNotifier
 from src.workspace_manager import WorkspaceManager
 
@@ -39,11 +40,15 @@ async def lifespan(app: FastAPI):
     await webhooks.bootstrap_builtin_subscriptions(settings)
 
     workspaces_root = settings.security.resolved_workspace_root()
+    store = LocalFileStore(workspaces_root=workspaces_root)
+    files_repo = WorkspaceFilesRepo(db)
+    registry = WorkspaceFileRegistry(store=store, repo=files_repo)
     workspaces = WorkspaceManager(
         db,
         project_root=project_root,
         workspaces_root=workspaces_root,
         webhooks=webhooks,
+        registry=registry,
     )
     try:
         report = await workspaces.reconcile()
@@ -63,16 +68,17 @@ async def lifespan(app: FastAPI):
         coop_dir=coop_dir,
         project_root=project_root,
     )
-    design_docs = DesignDocManager(db, workspaces_root=workspaces_root)
+    design_docs = DesignDocManager(db, registry=registry)
     design_work_sm = DesignWorkStateMachine(
         db=db,
         workspaces=workspaces,
         design_docs=design_docs,
         executor=executor,
         config=settings,
+        registry=registry,
         webhooks=webhooks,
     )
-    iteration_notes = DevIterationNoteManager(db, workspaces_root=workspaces_root)
+    iteration_notes = DevIterationNoteManager(db)
     dev_work_sm = DevWorkStateMachine(
         db=db,
         workspaces=workspaces,
@@ -80,6 +86,7 @@ async def lifespan(app: FastAPI):
         iteration_notes=iteration_notes,
         executor=executor,
         config=settings,
+        registry=registry,
         webhooks=webhooks,
     )
 
@@ -91,6 +98,7 @@ async def lifespan(app: FastAPI):
     app.state.dev_work_sm = dev_work_sm
     app.state.executor = executor
     app.state.webhooks = webhooks
+    app.state.registry = registry
     app.state.settings = settings
     app.state.start_time = time.time()
 

@@ -11,6 +11,8 @@ from src.database import Database
 from src.design_doc_manager import DesignDocManager
 from src.design_work_sm import DesignWorkStateMachine
 from src.models import DesignWorkMode
+from src.storage import LocalFileStore
+from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.workspace_manager import WorkspaceManager
 
 FIXTURES = Path(__file__).parent / "fixtures" / "design"
@@ -76,12 +78,19 @@ def _build_config(max_loops=3, default_threshold=80):
 async def env(tmp_path):
     db = Database(db_path=tmp_path / "t.db", schema_path="db/schema.sql")
     await db.connect()
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    store = LocalFileStore(workspaces_root=ws_root)
+    repo = WorkspaceFilesRepo(db)
+    registry = WorkspaceFileRegistry(store=store, repo=repo)
     wm = WorkspaceManager(
-        db, project_root=tmp_path, workspaces_root=tmp_path / "ws"
+        db, project_root=tmp_path, workspaces_root=ws_root, registry=registry,
     )
     ws = await wm.create_with_scaffold(title="T", slug="t")
-    ddm = DesignDocManager(db, workspaces_root=tmp_path / "ws")
-    yield dict(db=db, wm=wm, ws=ws, ddm=ddm, root=tmp_path)
+    ddm = DesignDocManager(db, registry=registry)
+    yield dict(
+        db=db, wm=wm, ws=ws, ddm=ddm, registry=registry, root=tmp_path,
+    )
     await db.close()
 
 
@@ -89,7 +98,7 @@ async def test_happy_path_new(env):
     stub = StubExecutor(FIXTURES / "perfect")
     sm = DesignWorkStateMachine(
         db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
-        executor=stub, config=_build_config(),
+        executor=stub, config=_build_config(), registry=env["registry"],
     )
     dw = await sm.create(
         workspace_id=env["ws"]["id"], title="T", sub_slug="demo",
@@ -113,7 +122,7 @@ async def test_rubric_api_override_wins(env):
     stub = StubExecutor(FIXTURES / "perfect")
     sm = DesignWorkStateMachine(
         db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
-        executor=stub, config=_build_config(),
+        executor=stub, config=_build_config(), registry=env["registry"],
     )
     dw = await sm.create(
         workspace_id=env["ws"]["id"], title="T", sub_slug="demo-x",
@@ -133,7 +142,7 @@ async def test_missing_then_fixed_next_round(env):
     stub = StubExecutor(FIXTURES / "missing_then_fixed")
     sm = DesignWorkStateMachine(
         db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
-        executor=stub, config=_build_config(),
+        executor=stub, config=_build_config(), registry=env["registry"],
     )
     dw = await sm.create(
         workspace_id=env["ws"]["id"], title="T", sub_slug="demo2",
@@ -150,6 +159,7 @@ async def test_escalate_on_max_loops(env):
     sm = DesignWorkStateMachine(
         db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
         executor=stub, config=_build_config(max_loops=3),
+        registry=env["registry"],
     )
     dw = await sm.create(
         workspace_id=env["ws"]["id"], title="T", sub_slug="demo3",
@@ -170,7 +180,7 @@ async def test_optimize_mode_stubbed(env):
     stub = StubExecutor(FIXTURES / "perfect")
     sm = DesignWorkStateMachine(
         db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
-        executor=stub, config=_build_config(),
+        executor=stub, config=_build_config(), registry=env["registry"],
     )
     dw = await sm.create(
         workspace_id=env["ws"]["id"], title="T", sub_slug="demo4",
@@ -190,7 +200,7 @@ async def test_mockup_full_loop(env):
     stub = StubExecutor(FIXTURES / "mockup_with_link")
     sm = DesignWorkStateMachine(
         db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
-        executor=stub, config=_build_config(),
+        executor=stub, config=_build_config(), registry=env["registry"],
     )
     dw = await sm.create(
         workspace_id=env["ws"]["id"], title="T", sub_slug="demo5",
@@ -217,7 +227,7 @@ async def test_pre_validate_rejects_too_short_input(env):
     stub = StubExecutor(FIXTURES / "perfect")
     sm = DesignWorkStateMachine(
         db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
-        executor=stub, config=_build_config(),
+        executor=stub, config=_build_config(), registry=env["registry"],
     )
     dw = await sm.create(
         workspace_id=env["ws"]["id"], title="T", sub_slug="too-short",
@@ -234,7 +244,7 @@ async def test_cancel(env):
     stub = StubExecutor(FIXTURES / "perfect")
     sm = DesignWorkStateMachine(
         db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
-        executor=stub, config=_build_config(),
+        executor=stub, config=_build_config(), registry=env["registry"],
     )
     dw = await sm.create(
         workspace_id=env["ws"]["id"], title="T", sub_slug="cancel-me",

@@ -89,6 +89,8 @@ async def _seed_note(
     round_n: int = 1, write_file: bool = True, path_override: str | None = None,
     score_history: list[int] | None = None,
 ):
+    # Phase 3 contract: dev_iteration_notes.markdown_path is workspace-relative.
+    rel_path = f"devworks/{dev_work_id}/iteration-round-{round_n}.md"
     target = (
         Path(path_override)
         if path_override is not None
@@ -98,10 +100,11 @@ async def _seed_note(
     if write_file:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(f"# round {round_n}\n", encoding="utf-8")
+    stored_path = str(target) if path_override is not None else rel_path
     await db.execute(
         "INSERT INTO dev_iteration_notes(id,dev_work_id,round,markdown_path,"
         "score_history_json,created_at) VALUES(?,?,?,?,?,?)",
-        (note_id, dev_work_id, round_n, str(target),
+        (note_id, dev_work_id, round_n, stored_path,
          json.dumps(score_history) if score_history is not None else None,
          _now()),
     )
@@ -178,10 +181,9 @@ async def test_content_file_missing_410(client):
     db = client.db
     ws_root = client.ws_root
     await _seed_full(db, ws_root)
-    missing = ws_root / "demo" / "devworks" / "dev-aaa" / "iteration-round-9.md"
+    # Relative path, no file written — row exists but markdown is gone.
     await _seed_note(
         db, ws_root, note_id="note-gone", round_n=9, write_file=False,
-        path_override=str(missing),
     )
     r = await client.get("/api/v1/dev-iteration-notes/note-gone/content")
     assert r.status_code == 410

@@ -140,7 +140,8 @@ CREATE TABLE IF NOT EXISTS workspace_files (
   relative_path     TEXT NOT NULL,                 -- POSIX, no leading '/'
   kind              TEXT NOT NULL CHECK(kind IN (
                         'design_doc','design_input','iteration_note',
-                        'prompt','image','workspace_md','other')),
+                        'prompt','image','workspace_md',
+                        'context','artifact','other')),
   content_hash      TEXT,                          -- sha256 of local bytes; NULL before first write
   byte_size         INTEGER,
   oss_key           TEXT,                          -- NULL when oss.enabled=false or never flushed

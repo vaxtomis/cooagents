@@ -106,6 +106,11 @@ export interface DesignDoc {
   workspace_id: string;
   slug: string;
   version: string;
+  /**
+   * Workspace-relative POSIX path, e.g. "designs/DES-login-1.0.0.md".
+   * Phase 3: flipped from an absolute filesystem path to this relative form.
+   * To fetch the file body, call GET /api/v1/design-docs/{id}/content.
+   */
   path: string;
   parent_version: string | null;
   needs_frontend_mockup: boolean;
@@ -138,6 +143,10 @@ export interface DevIterationNote {
   id: string;
   dev_work_id: string;
   round: number;
+  /**
+   * Workspace-relative POSIX path, e.g.
+   * "devworks/<dev_work_id>/iteration-round-<n>.md".
+   */
   markdown_path: string;
   score_history: number[] | null;
   created_at: string;

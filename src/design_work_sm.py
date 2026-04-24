@@ -27,6 +27,7 @@ from src.exceptions import BadRequestError, NotFoundError
 from src.mockup_renderer import MockupSpec, PathMockupRenderer
 from src.models import DesignWorkMode, DesignWorkState
 from src.semver import next_version
+from src.storage.registry import WorkspaceFileRegistry
 from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class DesignWorkStateMachine:
         design_docs,       # DesignDocManager
         executor,          # object with async run_once(agent, worktree, timeout, task_file=?, prompt=?)
         config,            # Settings
+        registry: WorkspaceFileRegistry,
         mockup_renderer=None,  # MockupRenderer; defaults to PathMockupRenderer (U6)
         webhooks=None,     # WebhookNotifier (optional)
     ):
@@ -48,6 +50,7 @@ class DesignWorkStateMachine:
         self.design_docs = design_docs
         self.executor = executor
         self.config = config
+        self.registry = registry
         self.mockup_renderer = mockup_renderer or PathMockupRenderer()
         self.webhooks = webhooks
         # Kept per-instance so tests starting multiple SMs don't share state.
@@ -148,20 +151,20 @@ class DesignWorkStateMachine:
 
         wid = self._new_id()
         now = self._now()
-        input_path = (
-            Path(ws["root_path"]) / "designs" / ".drafts" / f"{wid}-input.md"
+        input_rel = f"designs/.drafts/{wid}-input.md"
+        await self.registry.put_markdown(
+            workspace_row=ws,
+            relative_path=input_rel,
+            text=user_input,
+            kind="design_input",
         )
-        input_path.parent.mkdir(parents=True, exist_ok=True)
-        input_path.write_text(user_input, encoding="utf-8")
 
         # U7: persist title / sub_slug / version / output_path on the row.
         version = (
             next_version(parent_version, "new") if mode == DesignWorkMode.new else None
         )
-        output_path = (
-            str(Path(ws["root_path"]) / "designs" / f"DES-{sub_slug}-{version}.md")
-            if version
-            else None
+        output_rel = (
+            f"designs/DES-{sub_slug}-{version}.md" if version else None
         )
         gates_payload = (
             {"rubric_threshold_override": rubric_threshold}
@@ -186,11 +189,11 @@ class DesignWorkStateMachine:
                 0,
                 None,
                 agent,
-                str(input_path),
+                input_rel,
                 title,
                 sub_slug,
                 version,
-                output_path,
+                output_rel,
                 json.dumps(gates_payload) if gates_payload else None,
                 now,
                 now,
@@ -308,9 +311,13 @@ class DesignWorkStateMachine:
     async def _d2_pre_validate(self, dw: dict) -> None:
         # mode=new: user_input must be substantive. Structural checks on the
         # LLM output happen at D5.
+        ws = await self.workspaces.get(dw["workspace_id"])
         try:
-            text = Path(dw["user_input_path"]).read_text(encoding="utf-8")
-        except OSError:
+            text = await self.registry.read_text(
+                workspace_slug=ws["slug"],
+                relative_path=dw["user_input_path"],
+            )
+        except NotFoundError:
             await self._escalate(dw, reason="user_input file missing")
             return
         if len(text.strip()) < 10:
@@ -324,11 +331,17 @@ class DesignWorkStateMachine:
         ws = await self.workspaces.get(dw["workspace_id"])
         missing = _decode_missing(dw.get("missing_sections_json"))
         title = dw["title"]
-        sub_slug = dw["sub_slug"]
         version = dw["version"]
-        output_path = dw["output_path"]
+        output_rel = dw["output_path"]
 
-        user_input = Path(dw["user_input_path"]).read_text(encoding="utf-8")
+        user_input = await self.registry.read_text(
+            workspace_slug=ws["slug"], relative_path=dw["user_input_path"],
+        )
+        # LLM receives an absolute output path so it can `Write` without
+        # guessing a cwd; relative paths are workspace-internal only.
+        output_abs = (
+            self._abs_for(ws, output_rel) if output_rel else None
+        )
         prompt = compose_prompt(
             PromptInputs(
                 workspace_slug=ws["slug"],
@@ -336,30 +349,43 @@ class DesignWorkStateMachine:
                 version=version,
                 user_input=user_input,
                 needs_frontend_mockup=bool(dw["needs_frontend_mockup"]),
-                output_path=output_path,
+                output_path=output_abs,
                 parent_version=dw["parent_version"],
                 missing_sections=missing,
             )
         )
 
-        prompt_path = (
-            Path(ws["root_path"])
-            / "designs"
-            / ".drafts"
-            / f"{dw['id']}-prompt-loop{dw['loop']}.md"
+        prompt_rel = f"designs/.drafts/{dw['id']}-prompt-loop{dw['loop']}.md"
+        await self.registry.put_markdown(
+            workspace_row=ws, relative_path=prompt_rel,
+            text=prompt, kind="prompt",
         )
-        prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        prompt_path.write_text(prompt, encoding="utf-8")
-        await self._update_gates_field(dw["id"], "last_prompt_path", str(prompt_path))
+        await self._update_gates_field(dw["id"], "last_prompt_path", prompt_rel)
         await self._transition(
             dw, DesignWorkState.PROMPT_COMPOSE, DesignWorkState.LLM_GENERATE
         )
 
+    def _abs_for(self, ws: dict, relative_path: str) -> str:
+        """Compose an absolute POSIX-ish path for LLM-embedded prompts.
+
+        Uses forward slashes (via ``Path.as_posix``) so the LLM sees a
+        predictable separator regardless of host OS.
+        """
+        root = Path(self.workspaces.workspaces_root)
+        return (root / ws["slug"] / relative_path).as_posix()
+
     async def _d4_llm_generate(self, dw: dict) -> None:
         ws = await self.workspaces.get(dw["workspace_id"])
         gates = _decode_gates(dw.get("gates_json"))
-        prompt_path = gates.get("last_prompt_path")
-        if not prompt_path or not Path(prompt_path).exists():
+        prompt_rel = gates.get("last_prompt_path")
+        ref = (
+            await self.registry.stat(
+                workspace_slug=ws["slug"], relative_path=prompt_rel,
+            )
+            if prompt_rel
+            else None
+        )
+        if not prompt_rel or ref is None:
             # Force a D3 redo if the prompt file is gone (server restart
             # before the prompt hit disk; or manual cleanup).
             await self._transition(
@@ -367,10 +393,11 @@ class DesignWorkStateMachine:
             )
             return
         timeout = self.config.design.execution_timeout  # U5
-        worktree = str(Path(ws["root_path"]) / "designs")
+        worktree = self._abs_for(ws, "designs")
+        prompt_abs = self._abs_for(ws, prompt_rel)
         try:
             stdout, rc = await self.executor.run_once(
-                dw["agent"], worktree, timeout, task_file=prompt_path,
+                dw["agent"], worktree, timeout, task_file=prompt_abs,
             )
         except Exception as exc:
             logger.exception("design_work %s LLM call failed: %s", dw["id"], exc)
@@ -405,11 +432,19 @@ class DesignWorkStateMachine:
         # v1 (U6): PathMockupRenderer is a pass-through; it doesn't generate
         # images. The call exists so Phase 4+ can swap in pencil/stitch MCP
         # by replacing the renderer — no state machine change required.
-        output_path = dw["output_path"]
+        ws = await self.workspaces.get(dw["workspace_id"])
+        output_rel = dw["output_path"]
         link = None
         page_structure_md = ""
-        if output_path and Path(output_path).exists():
-            text = Path(output_path).read_text(encoding="utf-8")
+        text = None
+        if output_rel:
+            try:
+                text = await self.registry.read_text(
+                    workspace_slug=ws["slug"], relative_path=output_rel,
+                )
+            except NotFoundError:
+                text = None
+        if text is not None:
             # Accept optional list markers / leading whitespace in front of
             # the marker — LLMs commonly emit `- 设计图链接或路径: …`.
             m_link = re.search(
@@ -424,7 +459,6 @@ class DesignWorkStateMachine:
             )
             page_structure_md = m.group(1).strip() if m else ""
 
-        ws = await self.workspaces.get(dw["workspace_id"])
         result = await self.mockup_renderer.render(
             MockupSpec(
                 workspace_slug=ws["slug"],
@@ -447,8 +481,16 @@ class DesignWorkStateMachine:
         )
 
     async def _d5_post_validate(self, dw: dict) -> None:
-        output_path = dw["output_path"]
-        if not output_path or not Path(output_path).exists():
+        ws = await self.workspaces.get(dw["workspace_id"])
+        output_rel = dw["output_path"]
+        ref = (
+            await self.registry.stat(
+                workspace_slug=ws["slug"], relative_path=output_rel,
+            )
+            if output_rel
+            else None
+        )
+        if not output_rel or ref is None:
             missing_all = [
                 *self.config.design.required_sections,
                 *(
@@ -462,7 +504,9 @@ class DesignWorkStateMachine:
             )
             return
 
-        text = Path(output_path).read_text(encoding="utf-8")
+        text = await self.registry.read_text(
+            workspace_slug=ws["slug"], relative_path=output_rel,
+        )
         report = validate_design_markdown(
             text,
             required_sections=self.config.design.required_sections,
@@ -480,10 +524,12 @@ class DesignWorkStateMachine:
 
     async def _d6_persist(self, dw: dict) -> None:
         ws = await self.workspaces.get(dw["workspace_id"])
-        output_path = dw["output_path"]
+        output_rel = dw["output_path"]
         slug = dw["sub_slug"]
         version = dw["version"]
-        text = Path(output_path).read_text(encoding="utf-8")
+        text = await self.registry.read_text(
+            workspace_slug=ws["slug"], relative_path=output_rel,
+        )
 
         # U2: rubric priority — API override > LLM front-matter > default.
         report = validate_design_markdown(

@@ -6,3 +6,7 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: requires external services (OSS, etc.); skipped without credentials",
+    "slow: long-running tests gated by OSS_RUN_SLOW=1",
+]

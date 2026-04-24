@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 
 from src.exceptions import BadRequestError, NotFoundError
 from src.models import DevIterationNote
+from src.storage.base import normalize_key
 
 router = APIRouter(tags=["dev-iteration-notes"])
 
@@ -42,9 +43,18 @@ def _row_to_note(row: dict) -> DevIterationNote:
     )
 
 
-def _safe_resolve_under_root(raw_path: str, workspaces_root: Path) -> Path:
+def _safe_resolve_under_root(
+    raw_path: str, workspaces_root: Path, workspace_slug: str,
+) -> Path:
+    """Compose ``<workspaces_root>/<slug>/<raw_path>`` and validate under root.
+
+    ``normalize_key`` rejects absolute paths, backslashes, drive letters, and
+    '..' traversal before composition; the ``relative_to`` check is
+    defence-in-depth against symlink-based escapes.
+    """
+    rel = normalize_key(raw_path).as_posix()
     root = workspaces_root.resolve()
-    resolved = Path(raw_path).resolve(strict=False)
+    resolved = (root / workspace_slug / rel).resolve(strict=False)
     try:
         resolved.relative_to(root)
     except ValueError as exc:
@@ -52,6 +62,18 @@ def _safe_resolve_under_root(raw_path: str, workspaces_root: Path) -> Path:
             "iteration note path escapes workspaces_root"
         ) from exc
     return resolved
+
+
+async def _workspace_slug_for_note(db, note_id: str) -> str | None:
+    row = await db.fetchone(
+        "SELECT w.slug AS slug "
+        "FROM dev_iteration_notes n "
+        "JOIN dev_works d ON d.id = n.dev_work_id "
+        "JOIN workspaces w ON w.id = d.workspace_id "
+        "WHERE n.id=?",
+        (note_id,),
+    )
+    return row["slug"] if row else None
 
 
 @router.get("/dev-works/{dev_id}/iteration-notes")
@@ -83,8 +105,15 @@ async def get_iteration_note_content(note_id: str, request: Request):
     if not row:
         raise NotFoundError(f"dev_iteration_note {note_id!r} not found")
 
+    slug = await _workspace_slug_for_note(db, note_id)
+    if slug is None:
+        raise NotFoundError(
+            f"workspace for dev_iteration_note {note_id!r} not found"
+        )
     workspaces_root = request.app.state.settings.security.resolved_workspace_root()
-    resolved = _safe_resolve_under_root(row["markdown_path"], workspaces_root)
+    resolved = _safe_resolve_under_root(
+        row["markdown_path"], workspaces_root, slug,
+    )
 
     if not resolved.exists() or not resolved.is_file():
         raise HTTPException(

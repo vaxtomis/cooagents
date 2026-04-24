@@ -13,6 +13,8 @@ from src.database import Database
 from src.design_doc_manager import DesignDocManager
 from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
+from src.storage import LocalFileStore
+from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.git_utils import run_git
 from src.models import DevWorkStep, ProblemCategory
 from src.workspace_manager import WorkspaceManager
@@ -191,9 +193,15 @@ async def env(tmp_path):
     db = Database(db_path=tmp_path / "t.db", schema_path="db/schema.sql")
     await db.connect()
     ws_root = tmp_path / "ws"
-    wm = WorkspaceManager(db, project_root=tmp_path, workspaces_root=ws_root)
+    ws_root.mkdir()
+    store = LocalFileStore(workspaces_root=ws_root)
+    repo = WorkspaceFilesRepo(db)
+    registry = WorkspaceFileRegistry(store=store, repo=repo)
+    wm = WorkspaceManager(
+        db, project_root=tmp_path, workspaces_root=ws_root, registry=registry,
+    )
     ws = await wm.create_with_scaffold(title="T", slug="t")
-    ddm = DesignDocManager(db, workspaces_root=ws_root)
+    ddm = DesignDocManager(db, registry=registry)
     design_text = DESIGN_FIXTURE.read_text(encoding="utf-8")
     dd = await ddm.persist(
         workspace_row=ws, slug="demo", version="1.0.0",
@@ -208,8 +216,8 @@ async def env(tmp_path):
     dd["status"] = "published"
     repo_dir = tmp_path / "repo"
     await _init_repo(repo_dir)
-    ini = DevIterationNoteManager(db, workspaces_root=ws_root)
-    yield dict(db=db, wm=wm, ws=ws, ddm=ddm, ini=ini,
+    ini = DevIterationNoteManager(db)
+    yield dict(db=db, wm=wm, ws=ws, ddm=ddm, ini=ini, registry=registry,
                dd=dd, repo=str(repo_dir), ws_root=ws_root, root=tmp_path)
     await db.close()
 
@@ -222,6 +230,7 @@ def _make_sm(env, executor, cfg=None):
         iteration_notes=env["ini"],
         executor=executor,
         config=cfg or _build_config(),
+        registry=env["registry"],
     )
 
 
@@ -369,7 +378,8 @@ async def test_max_rounds_escalates(env):
 
 async def test_step1_invalid_design_escalates(env):
     # Corrupt the design doc file so validator fails.
-    Path(env["dd"]["path"]).write_text("no front-matter here", encoding="utf-8")
+    dd_abs = env["ws_root"] / env["ws"]["slug"] / env["dd"]["path"]
+    dd_abs.write_text("no front-matter here", encoding="utf-8")
     script = []  # LLM never invoked
     executor = ScriptedExecutor(script)
     sm = _make_sm(env, executor)

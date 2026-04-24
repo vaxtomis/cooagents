@@ -112,17 +112,23 @@ async def client(tmp_path):
 
     db = Database(db_path=tmp_path / "t.db", schema_path="db/schema.sql")
     await db.connect()
+    ws_root.mkdir(exist_ok=True)
+    from src.storage import LocalFileStore
+    from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
+    store = LocalFileStore(workspaces_root=ws_root)
+    repo = WorkspaceFilesRepo(db)
+    registry = WorkspaceFileRegistry(store=store, repo=repo)
     workspaces = WorkspaceManager(
-        db, project_root=tmp_path, workspaces_root=ws_root
+        db, project_root=tmp_path, workspaces_root=ws_root, registry=registry,
     )
-    design_docs = DesignDocManager(db, workspaces_root=ws_root)
-    iteration_notes = DevIterationNoteManager(db, workspaces_root=ws_root)
+    design_docs = DesignDocManager(db, registry=registry)
+    iteration_notes = DevIterationNoteManager(db)
     executor = ScriptedExecutor()
     settings = _build_settings(workspace_root=tmp_path)
     sm = DevWorkStateMachine(
         db=db, workspaces=workspaces, design_docs=design_docs,
         iteration_notes=iteration_notes, executor=executor,
-        config=settings,
+        config=settings, registry=registry,
     )
 
     test_app.state.db = db

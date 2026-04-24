@@ -5,7 +5,9 @@ import pytest
 
 from src.database import Database
 from src.design_doc_manager import DesignDocManager
-from src.exceptions import BadRequestError, ConflictError, NotFoundError
+from src.exceptions import ConflictError, NotFoundError
+from src.storage import LocalFileStore
+from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.workspace_manager import WorkspaceManager
 
 
@@ -13,12 +15,19 @@ from src.workspace_manager import WorkspaceManager
 async def env(tmp_path):
     db = Database(db_path=tmp_path / "t.db", schema_path="db/schema.sql")
     await db.connect()
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    store = LocalFileStore(workspaces_root=ws_root)
+    repo = WorkspaceFilesRepo(db)
+    registry = WorkspaceFileRegistry(store=store, repo=repo)
     wm = WorkspaceManager(
-        db, project_root=tmp_path, workspaces_root=tmp_path / "ws"
+        db, project_root=tmp_path, workspaces_root=ws_root, registry=registry,
     )
     ws = await wm.create_with_scaffold(title="Demo", slug="demo")
-    ddm = DesignDocManager(db, workspaces_root=tmp_path / "ws")
-    yield dict(db=db, wm=wm, ws=ws, ddm=ddm, root=tmp_path)
+    ddm = DesignDocManager(db, registry=registry)
+    yield dict(
+        db=db, wm=wm, ws=ws, ddm=ddm, registry=registry, root=tmp_path,
+    )
     await db.close()
 
 
@@ -30,12 +39,19 @@ async def test_persist_writes_file_and_row(env):
         needs_frontend_mockup=False, rubric_threshold=85,
     )
     assert row["status"] == "draft"
+    assert row["path"] == "designs/DES-login-1.0.0.md"
     target = env["root"] / "ws" / "demo" / "designs" / "DES-login-1.0.0.md"
     assert target.exists()
     assert target.read_text(encoding="utf-8") == md
     # content_hash matches
     assert row["content_hash"] == hashlib.sha256(md.encode("utf-8")).hexdigest()
     assert row["byte_size"] == len(md.encode("utf-8"))
+    # workspace_files row registered
+    wf = await env["registry"].repo.get(
+        env["ws"]["id"], "designs/DES-login-1.0.0.md",
+    )
+    assert wf is not None
+    assert wf["kind"] == "design_doc"
 
 
 async def test_persist_conflict_on_dup_version(env):
@@ -58,8 +74,8 @@ async def test_publish_links_to_design_work(env):
         "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             "desw-1", env["ws"]["id"], "new", "PERSIST", 0, "claude",
-            "T", "a", "1.0.0", "/tmp/x", "2026-01-01T00:00:00+00:00",
-            "2026-01-01T00:00:00+00:00",
+            "T", "a", "1.0.0", "designs/DES-a-1.0.0.md",
+            "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00",
         ),
     )
     row = await env["ddm"].persist(
@@ -85,8 +101,8 @@ async def test_publish_twice_raises(env):
         "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             "desw-2", env["ws"]["id"], "new", "PERSIST", 0, "claude",
-            "T", "b", "1.0.0", "/tmp/x", "2026-01-01T00:00:00+00:00",
-            "2026-01-01T00:00:00+00:00",
+            "T", "b", "1.0.0", "designs/DES-b-1.0.0.md",
+            "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00",
         ),
     )
     row = await env["ddm"].persist(
@@ -115,10 +131,8 @@ async def test_rollback_fs_on_db_error(env, monkeypatch):
             parent_version=None, needs_frontend_mockup=False, rubric_threshold=80,
         )
     assert not target.exists()
-
-
-async def test_doc_path_escape_blocked(env):
-    bad_ws = dict(env["ws"])
-    bad_ws["slug"] = "..\\..\\outside"  # attempts to escape root
-    with pytest.raises(BadRequestError):
-        env["ddm"]._doc_path(bad_ws, "x", "1.0.0")
+    # workspace_files row for the rolled-back doc must not survive
+    wf_rows = await env["db"].fetchall(
+        "SELECT * FROM workspace_files WHERE relative_path='designs/DES-rb-1.0.0.md'"
+    )
+    assert wf_rows == []

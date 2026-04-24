@@ -428,6 +428,17 @@ cd web && npx vitest run
 
 覆盖面：SM（DesignWork / DevWork）、路由层（每个实体独立）、manager（workspace / design_doc / dev_iteration_note）、auth / database / git_utils / acpx_executor / reviewer / semver / file_converter / skill_deployer / webhook_notifier / openclaw_hooks。
 
+### Running OSS integration tests
+
+Set the following env vars before invoking `pytest tests/integration -v`:
+- `OSS_BUCKET` — bucket name of the test bucket (NOT a prod bucket)
+- `OSS_ENDPOINT` — e.g. `https://oss-cn-hangzhou.aliyuncs.com`
+- `OSS_REGION` — e.g. `cn-hangzhou`
+- `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` — RAM user credentials with `oss:PutObject`, `oss:GetObject`, `oss:DeleteObject`, `oss:HeadObject`, `oss:ListObjects` on the test bucket
+- Set `OSS_RUN_SLOW=1` to additionally run the 1010-key pagination test
+
+Tests auto-skip when any required variable is missing.
+
 ## License
 
 MIT — 见 [LICENSE](LICENSE)。

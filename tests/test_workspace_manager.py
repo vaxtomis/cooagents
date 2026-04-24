@@ -1,8 +1,11 @@
+import hashlib
 from pathlib import Path
 
 import pytest
 
 from src.database import Database
+from src.storage import LocalFileStore
+from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.workspace_manager import WorkspaceManager
 
 
@@ -77,8 +80,13 @@ async def test_duplicate_slug_raises(wm):
 
 @pytest.fixture
 async def wm_fs(db, tmp_path):
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir(exist_ok=True)
+    store = LocalFileStore(workspaces_root=ws_root)
+    repo = WorkspaceFilesRepo(db)
+    registry = WorkspaceFileRegistry(store=store, repo=repo)
     return WorkspaceManager(
-        db, project_root=tmp_path, workspaces_root=tmp_path / "ws"
+        db, project_root=tmp_path, workspaces_root=ws_root, registry=registry,
     )
 
 
@@ -89,10 +97,35 @@ async def test_create_with_scaffold_writes_fs(wm_fs, tmp_path):
     assert slug_dir.is_dir()
     assert (slug_dir / "designs").is_dir()
     assert (slug_dir / "devworks").is_dir()
-    md = (slug_dir / "workspace.md").read_text(encoding="utf-8")
+    md_bytes = (slug_dir / "workspace.md").read_bytes()
+    md = md_bytes.decode("utf-8")
     assert md.startswith("---\n")
     assert "id: " + ws["id"] in md
     assert "status: active" in md
+    # workspace_files row registered for workspace.md
+    wf = await wm_fs.registry.repo.get(ws["id"], "workspace.md")
+    assert wf is not None
+    assert wf["kind"] == "workspace_md"
+    assert wf["content_hash"] == hashlib.sha256(md_bytes).hexdigest()
+    assert wf["byte_size"] == len(md_bytes)
+
+
+async def test_create_with_scaffold_rolls_back_on_index_existing_failure(
+    wm_fs, tmp_path, monkeypatch,
+):
+    async def boom(**kwargs):
+        raise RuntimeError("simulated index failure")
+
+    monkeypatch.setattr(wm_fs.registry, "index_existing", boom)
+    with pytest.raises(RuntimeError):
+        await wm_fs.create_with_scaffold(title="X", slug="rb-ix")
+    # both sides rolled back
+    assert not (tmp_path / "ws" / "rb-ix").exists()
+    assert await wm_fs.get_by_slug("rb-ix") is None
+    rows = await wm_fs.db.fetchall(
+        "SELECT * FROM workspace_files WHERE relative_path='workspace.md'"
+    )
+    assert rows == []
 
 
 @pytest.mark.parametrize(
