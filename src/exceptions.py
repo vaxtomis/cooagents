@@ -12,3 +12,15 @@ class ConflictError(Exception):
 
 class BadRequestError(Exception):
     """Raised when request input is invalid (400)."""
+
+
+class IndexConvergenceError(Exception):
+    """Raised when regenerate_workspace_md exhausts its CAS retry budget."""
+
+
+class RecoveryScanError(Exception):
+    """Raised when startup_recovery_scan hits an unrecoverable per-workspace
+    failure after all per-row best-effort paths have been exhausted.
+
+    Surfaces to operators via the lifespan try/except — does NOT block boot.
+    """

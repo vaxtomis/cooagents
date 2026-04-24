@@ -189,6 +189,34 @@ class HermesConfig(BaseModel):
     webhook: HermesWebhookConfig = HermesWebhookConfig()
 
 
+class RecoveryScanConfig(BaseModel):
+    """Boot-time recovery-scan behavior (Phase 5).
+
+    The scan reconciles local FS ↔ DB ↔ OSS HEAD on app startup and self-heals
+    inconsistencies left by mid-write crashes (see src/sync/recovery.py).
+
+    ``enabled=false`` disables the pass entirely — appropriate for tests, CI
+    smoke environments, or deployments where operators manually trigger
+    reconciliation via the materialize/regenerate routes.
+
+    ``trust_window_hours`` bounds per-boot OSS HEAD cost: DB rows whose
+    ``last_synced_at`` is within the window are trusted and skip the HEAD
+    round-trip. ``0`` disables the trust window (always HEAD — strictest
+    consistency, slowest boot). ``24`` (default) is the rule of thumb.
+    """
+    enabled: bool = True
+    trust_window_hours: int = Field(default=24, ge=0)
+
+
+class StorageConfig(BaseModel):
+    """Storage subsystem config (Phase 5 + Phase 6).
+
+    Phase 5 adds ``recovery_scan``. Phase 6 will add ``oss: OSSConfig``
+    alongside it when the OSS backend becomes user-switchable.
+    """
+    recovery_scan: RecoveryScanConfig = RecoveryScanConfig()
+
+
 class SecurityConfig(BaseModel):
     """Security boundaries enforced at API layer.
 
@@ -221,6 +249,7 @@ class Settings(BaseModel):
     hermes: HermesConfig = HermesConfig()
     tracing: TracingConfig = TracingConfig()
     security: SecurityConfig = SecurityConfig()
+    storage: StorageConfig = StorageConfig()
     design: DesignConfig = DesignConfig()
     scoring: ScoringConfig = ScoringConfig()
     devwork: DevWorkConfig = DevWorkConfig()

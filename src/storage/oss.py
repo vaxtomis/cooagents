@@ -3,10 +3,10 @@
 
 Surface-compatible with ``LocalFileStore`` — same five async methods, same
 ``FileRef`` shape, same ``BadRequestError`` / ``NotFoundError`` vocabulary.
-Adds one new exception subclass, ``EtagMismatch(BadRequestError)``, raised
-when a conditional PUT fails its ETag precondition (412 Precondition
-Failed). Phase 5's ``register()`` narrows on ``EtagMismatch`` to decide
-retry semantics.
+Raises ``EtagMismatch`` (defined in ``src.storage.base`` as a plain
+``Exception`` subclass) when a conditional PUT fails its ETag precondition
+(412 Precondition Failed). Phase 5's ``register()`` narrows on
+``EtagMismatch`` to drive retry semantics.
 
 Credentials are externally injected: the constructor accepts any
 SDK-compatible ``CredentialsProvider`` (static, env-backed, STS, …),
@@ -33,13 +33,14 @@ import alibabacloud_oss_v2.aio as oss_aio
 from alibabacloud_oss_v2 import exceptions as oss_exceptions
 
 from src.exceptions import BadRequestError, NotFoundError
-from src.storage.base import FileRef, normalize_key
+from src.storage.base import EtagMismatch, FileRef, normalize_key
 
 logger = logging.getLogger(__name__)
 
 
-class EtagMismatch(BadRequestError):
-    """Conditional PUT/DELETE failed its ETag precondition (HTTP 412)."""
+# Backward-compat re-export: Phase 4 integration tests import EtagMismatch
+# from this module. The canonical definition lives in src.storage.base.
+__all__ = ["EtagMismatch", "OSSFileStore"]
 
 
 def _normalize_etag(raw: str | None) -> str | None:
@@ -176,9 +177,9 @@ class OSSFileStore:
             await client.close()
 
     async def put_bytes(self, key: str, data: bytes) -> FileRef:
-        return await self._put_bytes_conditional(key, data)
+        return await self.put_bytes_conditional(key, data)
 
-    async def _put_bytes_conditional(
+    async def put_bytes_conditional(
         self,
         key: str,
         data: bytes,

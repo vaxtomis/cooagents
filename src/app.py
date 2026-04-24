@@ -18,9 +18,17 @@ from src.design_doc_manager import DesignDocManager
 from src.design_work_sm import DesignWorkStateMachine
 from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
-from src.exceptions import BadRequestError, ConflictError, NotFoundError
+from src.exceptions import (
+    BadRequestError,
+    ConflictError,
+    IndexConvergenceError,
+    NotFoundError,
+    RecoveryScanError,
+)
 from src.skill_deployer import deploy_skills
-from src.storage import LocalFileStore, WorkspaceFileRegistry, WorkspaceFilesRepo
+from src.storage import EtagMismatch, LocalFileStore, WorkspaceFileRegistry, WorkspaceFilesRepo
+from src.sync.recovery import StartupRecoveryScan
+from src.sync.workspace_sync import WorkspaceSync
 from src.webhook_notifier import WebhookNotifier
 from src.workspace_manager import WorkspaceManager
 
@@ -50,6 +58,37 @@ async def lifespan(app: FastAPI):
         webhooks=webhooks,
         registry=registry,
     )
+    workspace_sync = WorkspaceSync(
+        store=store, repo=files_repo, registry=registry, workspaces=workspaces,
+    )
+    recovery = StartupRecoveryScan(
+        db=db, store=store, repo=files_repo, registry=registry,
+        workspaces=workspaces,
+        config=settings.storage.recovery_scan,
+    )
+    try:
+        # recovery.run() short-circuits when config.enabled=False and returns
+        # a zero-everything report. Recovery must precede reconcile() so
+        # reconcile's FS-wins archival doesn't fight mid-write crash state.
+        recovery_report = await recovery.run()
+        if any((
+            recovery_report.fs_only_registered,
+            recovery_report.db_mismatch_corrected,
+            recovery_report.oss_authoritative_pulled,
+            recovery_report.errors,
+        )):
+            logging.getLogger(__name__).warning(
+                "recovery scan: %r", recovery_report,
+            )
+        else:
+            logging.getLogger(__name__).info(
+                "recovery scan: clean (scanned=%d)",
+                recovery_report.workspaces_scanned,
+            )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "startup recovery scan failed; continuing"
+        )
     try:
         report = await workspaces.reconcile()
         if report["fs_only"] or report["db_only"]:
@@ -77,6 +116,7 @@ async def lifespan(app: FastAPI):
         config=settings,
         registry=registry,
         webhooks=webhooks,
+        workspace_sync=workspace_sync,
     )
     iteration_notes = DevIterationNoteManager(db)
     dev_work_sm = DevWorkStateMachine(
@@ -88,6 +128,7 @@ async def lifespan(app: FastAPI):
         config=settings,
         registry=registry,
         webhooks=webhooks,
+        workspace_sync=workspace_sync,
     )
 
     app.state.db = db
@@ -99,12 +140,20 @@ async def lifespan(app: FastAPI):
     app.state.executor = executor
     app.state.webhooks = webhooks
     app.state.registry = registry
+    app.state.workspace_sync = workspace_sync
     app.state.settings = settings
     app.state.start_time = time.time()
 
     yield
 
     await webhooks.close()
+    if hasattr(store, "close"):
+        try:
+            await store.close()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "FileStore close failed on shutdown",
+            )
     await db.close()
 
 
@@ -174,6 +223,35 @@ async def conflict_handler(request, exc):
 @app.exception_handler(BadRequestError)
 async def bad_request_handler(request, exc):
     return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(exc)})
+
+
+@app.exception_handler(EtagMismatch)
+async def etag_mismatch_handler(request, exc):
+    # Reached only if a registry/sync path escapes the retry loop. Surface
+    # as 409 Conflict so clients know to re-read and retry.
+    return JSONResponse(
+        status_code=409,
+        content={"error": "etag_mismatch", "message": str(exc)},
+    )
+
+
+@app.exception_handler(IndexConvergenceError)
+async def index_convergence_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "workspace_index_convergence",
+            "message": str(exc),
+        },
+    )
+
+
+@app.exception_handler(RecoveryScanError)
+async def recovery_scan_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={"error": "recovery_scan", "message": str(exc)},
+    )
 
 
 @app.exception_handler(NotImplementedError)

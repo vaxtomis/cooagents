@@ -243,6 +243,22 @@ class WorkspaceSyncReport(BaseModel):
     in_sync: list[str] = Field(default_factory=list)
 
 
+class MaterializeReportResponse(BaseModel):
+    """Response envelope for POST /workspaces/{id}/materialize (Phase 5)."""
+    workspace_id: str
+    pulled: int
+    skipped: int
+    missing_oss: int
+    errors: list[str] = Field(default_factory=list)
+
+
+class RegenerateIndexResponse(BaseModel):
+    """Response envelope for POST /workspaces/{id}/regenerate-index (Phase 5)."""
+    retries: int
+    etag: str | None = None
+    skipped: str | None = None
+
+
 class WorkspaceMetrics(BaseModel):
     """PRD Phase 8 Success Metrics — lifetime by default; windowed via ?since=&until=.
 

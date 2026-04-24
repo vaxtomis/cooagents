@@ -523,10 +523,10 @@ class DevWorkStepHandlersMixin:
                 ),
             )
             try:
-                await self.workspaces.refresh_workspace_md(dw["workspace_id"])
+                await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
             except Exception:
                 logger.exception(
-                    "refresh_workspace_md failed for %s", dw["workspace_id"]
+                    "regenerate_workspace_md failed for %s", dw["workspace_id"]
                 )
             await emit_and_deliver(
                 self.db,

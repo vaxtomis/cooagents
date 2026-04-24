@@ -28,6 +28,7 @@ from src.mockup_renderer import MockupSpec, PathMockupRenderer
 from src.models import DesignWorkMode, DesignWorkState
 from src.semver import next_version
 from src.storage.registry import WorkspaceFileRegistry
+from src.sync.workspace_sync import WorkspaceSync
 from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class DesignWorkStateMachine:
         registry: WorkspaceFileRegistry,
         mockup_renderer=None,  # MockupRenderer; defaults to PathMockupRenderer (U6)
         webhooks=None,     # WebhookNotifier (optional)
+        workspace_sync: "WorkspaceSync | None" = None,
     ):
         self.db = db
         self.workspaces = workspaces
@@ -53,6 +55,7 @@ class DesignWorkStateMachine:
         self.registry = registry
         self.mockup_renderer = mockup_renderer or PathMockupRenderer()
         self.webhooks = webhooks
+        self.workspace_sync = workspace_sync
         # Kept per-instance so tests starting multiple SMs don't share state.
         # Single-writer invariant: only one driver task per DesignWork id is
         # ever scheduled; the read-modify-write gates/loop updates rely on it.
@@ -109,10 +112,10 @@ class DesignWorkStateMachine:
             )
         # Keep workspace.md in sync with every state change.
         try:
-            await self.workspaces.refresh_workspace_md(dw["workspace_id"])
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
         except Exception:
             logger.exception(
-                "refresh_workspace_md failed for %s", dw["workspace_id"]
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
             )
 
     async def _update_gates_field(self, dw_id: str, key: str, value) -> None:
@@ -148,6 +151,22 @@ class DesignWorkStateMachine:
             raise BadRequestError(
                 f"workspace {workspace_id!r} is archived; cannot create DesignWork"
             )
+
+        # Phase 5: hydrate cold local FS from DB+OSS before writing new files.
+        # Non-fatal: a failed materialize logs and degrades to Phase-3 behavior.
+        if self.workspace_sync is not None:
+            try:
+                report = await self.workspace_sync.materialize(workspace_id)
+                logger.debug(
+                    "design_work create: materialize report=%r", report,
+                )
+            except NotFoundError:
+                raise
+            except Exception:
+                logger.exception(
+                    "materialize failed for workspace %s; proceeding",
+                    workspace_id,
+                )
 
         wid = self._new_id()
         now = self._now()
@@ -208,9 +227,9 @@ class DesignWorkStateMachine:
             payload={"mode": mode.value, "title": title, "sub_slug": sub_slug},
         )
         try:
-            await self.workspaces.refresh_workspace_md(workspace_id)
+            await self.workspaces.regenerate_workspace_md(workspace_id)
         except Exception:
-            logger.exception("initial refresh_workspace_md failed for %s", workspace_id)
+            logger.exception("initial regenerate_workspace_md failed for %s", workspace_id)
         return await self._get(wid)
 
     async def tick(self, dw_id: str) -> dict:
@@ -565,10 +584,10 @@ class DesignWorkStateMachine:
             (DesignWorkState.COMPLETED.value, now, dw["id"]),
         )
         try:
-            await self.workspaces.refresh_workspace_md(dw["workspace_id"])
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
         except Exception:
             logger.exception(
-                "refresh_workspace_md failed for %s", dw["workspace_id"]
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
             )
         await emit_and_deliver(
             self.db,

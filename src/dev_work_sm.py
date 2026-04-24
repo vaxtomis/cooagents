@@ -78,6 +78,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         config: Any,          # Settings
         registry: Any,        # WorkspaceFileRegistry (Phase 3)
         webhooks: Any = None,  # WebhookNotifier (optional; None disables deliver side-channel)
+        workspace_sync: Any = None,  # WorkspaceSync (Phase 5); None = no-op
     ) -> None:
         self.db = db
         self.workspaces = workspaces
@@ -87,6 +88,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         self.config = config
         self.registry = registry
         self.webhooks = webhooks
+        self.workspace_sync = workspace_sync
         # Phase 2 manager owns workspaces_root; mirror it for quick path math
         # (absolute paths embedded in LLM prompts).
         self.workspaces_root = Path(workspaces.workspaces_root).resolve()
@@ -148,10 +150,10 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 "dev_work %s already past %s", dw["id"], frm.value
             )
         try:
-            await self.workspaces.refresh_workspace_md(dw["workspace_id"])
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
         except Exception:
             logger.exception(
-                "refresh_workspace_md failed for %s", dw["workspace_id"]
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
             )
 
     async def _update_gates_field(
@@ -189,6 +191,21 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             raise BadRequestError(
                 f"workspace {workspace_id!r} is archived; cannot create DevWork"
             )
+
+        # Phase 5: cold-hydrate local FS before writing new files. Non-fatal.
+        if self.workspace_sync is not None:
+            try:
+                report = await self.workspace_sync.materialize(workspace_id)
+                logger.debug(
+                    "dev_work create: materialize report=%r", report,
+                )
+            except NotFoundError:
+                raise
+            except Exception:
+                logger.exception(
+                    "materialize failed for workspace %s; proceeding",
+                    workspace_id,
+                )
 
         dd = await self.db.fetchone(
             "SELECT * FROM design_docs WHERE id=?", (design_doc_id,)
@@ -246,10 +263,10 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             payload={"design_doc_id": design_doc_id, "repo_path": repo_path},
         )
         try:
-            await self.workspaces.refresh_workspace_md(workspace_id)
+            await self.workspaces.regenerate_workspace_md(workspace_id)
         except Exception:
             logger.exception(
-                "initial refresh_workspace_md failed for %s", workspace_id
+                "initial regenerate_workspace_md failed for %s", workspace_id
             )
         return await self._get(dev_id)
 
@@ -599,10 +616,10 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             },
         )
         try:
-            await self.workspaces.refresh_workspace_md(dw["workspace_id"])
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
         except Exception:
             logger.exception(
-                "refresh_workspace_md failed for %s", dw["workspace_id"]
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
             )
 
     async def _escalate(
@@ -652,8 +669,8 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             },
         )
         try:
-            await self.workspaces.refresh_workspace_md(dw["workspace_id"])
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
         except Exception:
             logger.exception(
-                "refresh_workspace_md failed for %s", dw["workspace_id"]
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
             )

@@ -264,10 +264,10 @@ async def test_reconcile_in_sync(wm_fs):
     assert report["db_only"] == []
 
 
-# ---- Phase 3 additions: refresh_workspace_md ----
+# ---- Phase 3 additions: regenerate_workspace_md ----
 
 
-async def test_refresh_workspace_md_shows_active_design_work(wm_fs):
+async def test_regenerate_workspace_md_shows_active_design_work(wm_fs):
     ws = await wm_fs.create_with_scaffold(title="R", slug="r")
     await wm_fs.db.execute(
         "INSERT INTO design_works(id, workspace_id, mode, current_state, loop, "
@@ -279,13 +279,13 @@ async def test_refresh_workspace_md_shows_active_design_work(wm_fs):
             "2026-01-01T00:00:00+00:00",
         ),
     )
-    await wm_fs.refresh_workspace_md(ws["id"])
+    await wm_fs.regenerate_workspace_md(ws["id"])
     md = (Path(ws["root_path"]) / "workspace.md").read_text(encoding="utf-8")
     assert "design_work desw-1" in md
     assert "state=PROMPT_COMPOSE" in md
 
 
-async def test_refresh_workspace_md_lists_published_design_doc(wm_fs):
+async def test_regenerate_workspace_md_lists_published_design_doc(wm_fs):
     ws = await wm_fs.create_with_scaffold(title="R2", slug="r2")
     await wm_fs.db.execute(
         "INSERT INTO design_docs(id, workspace_id, slug, version, path, "
@@ -295,16 +295,16 @@ async def test_refresh_workspace_md_lists_published_design_doc(wm_fs):
             "published", "2026-01-01T00:00:00+00:00",
         ),
     )
-    await wm_fs.refresh_workspace_md(ws["id"])
+    await wm_fs.regenerate_workspace_md(ws["id"])
     md = (Path(ws["root_path"]) / "workspace.md").read_text(encoding="utf-8")
     assert "DES-login-1.0.0.md" in md
     assert "published" in md
 
 
-async def test_refresh_workspace_md_idempotent(wm_fs):
+async def test_regenerate_workspace_md_idempotent(wm_fs):
     ws = await wm_fs.create_with_scaffold(title="R3", slug="r3")
-    await wm_fs.refresh_workspace_md(ws["id"])
+    await wm_fs.regenerate_workspace_md(ws["id"])
     first = (Path(ws["root_path"]) / "workspace.md").read_text(encoding="utf-8")
-    await wm_fs.refresh_workspace_md(ws["id"])
+    await wm_fs.regenerate_workspace_md(ws["id"])
     second = (Path(ws["root_path"]) / "workspace.md").read_text(encoding="utf-8")
     assert first == second

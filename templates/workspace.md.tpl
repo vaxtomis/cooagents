@@ -10,11 +10,11 @@ status: $status
 
 ## 设计工作
 
-_暂无 DesignWork。在此 Workspace 下创建后此处自动刷新。_
+$design_section
 
 ## 开发工作
 
-_暂无 DevWork。在此 Workspace 下创建后此处自动刷新。_
+$dev_section
 
 ## 合并记录
 

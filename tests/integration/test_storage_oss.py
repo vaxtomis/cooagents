@@ -182,12 +182,11 @@ async def test_put_bytes_rejects_absolute_key(store: OSSFileStore) -> None:
         await store.put_bytes("/x", b"x")
 
 
-# Phase 5's register() will call _put_bytes_conditional directly (and promote
-# it to put_bytes_conditional). These tests lock the contract in Phase 4.
+# Phase 5's register() calls put_bytes_conditional directly.
 async def test_put_with_if_none_match_first_create_succeeds(
     store: OSSFileStore,
 ) -> None:
-    ref = await store._put_bytes_conditional(  # noqa: SLF001
+    ref = await store.put_bytes_conditional(
         "cond/new.txt", b"one", if_none_match="*"
     )
     assert ref.etag is not None
@@ -198,7 +197,7 @@ async def test_put_with_if_none_match_existing_key_raises_etag_mismatch(
 ) -> None:
     await store.put_bytes("cond/exists.txt", b"one")
     with pytest.raises(EtagMismatch):
-        await store._put_bytes_conditional(  # noqa: SLF001
+        await store.put_bytes_conditional(
             "cond/exists.txt", b"two", if_none_match="*"
         )
 
@@ -208,7 +207,7 @@ async def test_put_with_if_match_succeeds_on_etag_match(
 ) -> None:
     first = await store.put_bytes("cond/cas.txt", b"v1")
     assert first.etag is not None
-    second = await store._put_bytes_conditional(  # noqa: SLF001
+    second = await store.put_bytes_conditional(
         "cond/cas.txt", b"v2", if_match=first.etag
     )
     assert second.etag is not None
@@ -220,7 +219,7 @@ async def test_put_with_if_match_fails_on_etag_mismatch(
 ) -> None:
     await store.put_bytes("cond/nope.txt", b"v1")
     with pytest.raises(EtagMismatch):
-        await store._put_bytes_conditional(  # noqa: SLF001
+        await store.put_bytes_conditional(
             "cond/nope.txt", b"v2", if_match="deadbeef" * 4
         )
 

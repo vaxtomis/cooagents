@@ -1,13 +1,16 @@
 """Workspace lifecycle — DB records + filesystem scaffolding + reconcile.
 
-Phase 2 extends the Phase 1 skeleton with:
-  * ``create_with_scaffold(title, slug)`` — writes disk + DB atomically
-  * ``archive_with_scaffold(workspace_id)`` — DB status + workspace.md front-matter
-  * ``reconcile()`` — FS-as-source-of-truth recovery on startup
-  * ``render_workspace_md(row)`` — pure template fill, used by scaffold + reconcile
+Phase 5 changes:
+  * ``regenerate_workspace_md`` replaces ``refresh_workspace_md`` (no alias).
+  * Full re-render from DB rather than read-modify-write. Any hand-edits to
+    ``workspace.md`` are overwritten — DB is the single source of truth.
+  * CAS retry loop wraps the registry write (up to 5 attempts, raises
+    ``IndexConvergenceError`` on budget exhaustion).
 
-File system is the source of truth (PRD L253). If DB and FS disagree, the
-FS-backed workspace wins; DB is patched to match.
+File system remains the source of truth for the *existence* of a workspace
+(PRD L253). If DB and FS disagree on which workspaces exist, ``reconcile``
+takes FS-wins. The *contents* of individual workspace_files are governed
+by the Phase 5 CAS protocol via ``WorkspaceFileRegistry.register``.
 """
 from __future__ import annotations
 
@@ -20,7 +23,13 @@ from pathlib import Path
 from string import Template
 from typing import TYPE_CHECKING
 
-from src.exceptions import BadRequestError, ConflictError, NotFoundError
+from src.exceptions import (
+    BadRequestError,
+    ConflictError,
+    IndexConvergenceError,
+    NotFoundError,
+)
+from src.storage.base import EtagMismatch
 from src.workspace_events import emit_and_deliver
 
 if TYPE_CHECKING:
@@ -32,46 +41,23 @@ logger = logging.getLogger(__name__)
 #   workspace.md  — index file (system-maintained; do NOT hand-edit)
 #   designs/      — DesignDoc artifacts (populated Phase 3)
 #   devworks/     — DevWork iteration notes (populated Phase 4)
-# Subdirs under $WORKSPACES_ROOT/<slug>/ that the scaffold creates.
 _SUBDIRS = ("designs", "devworks")
 
 # Kebab-case slug: 1-63 chars, must start and end alphanumeric, no double dashes.
-# Mirrors Docker/k8s name rules, which reject trailing dashes and `--`.
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?!-)){0,61}[a-z0-9]$|^[a-z0-9]$")
+
+_DEFAULT_DESIGN_SECTION = (
+    "_暂无 DesignWork。在此 Workspace 下创建后此处自动刷新。_"
+)
+_DEFAULT_DEV_SECTION = "_暂无 DevWork。在此 Workspace 下创建后此处自动刷新。_"
+
+_MAX_REGENERATE_RETRIES = 5
 
 
 def _load_template() -> Template:
     root = Path(__file__).resolve().parents[1]
     text = (root / "templates" / "workspace.md.tpl").read_text(encoding="utf-8")
     return Template(text)
-
-
-def _replace_section(md: str, heading: str, new_body: str) -> str:
-    """Replace the body between ``heading`` line and the next ``## `` heading.
-
-    The heading line itself is kept; the previous body (including the
-    italicised placeholder) is swapped for ``new_body``. Idempotent: if
-    called twice with the same args, the output matches exactly.
-    """
-    lines = md.splitlines(keepends=False)
-    out: list[str] = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        out.append(line)
-        if line.strip() == heading:
-            # Skip existing body until the next H2.
-            j = i + 1
-            while j < len(lines) and not lines[j].startswith("## "):
-                j += 1
-            out.append("")
-            out.append(new_body)
-            out.append("")
-            i = j
-            continue
-        i += 1
-    result = "\n".join(out)
-    return result + "\n" if md.endswith("\n") else result
 
 
 class WorkspaceManager:
@@ -88,8 +74,6 @@ class WorkspaceManager:
             Path(project_root) if project_root else Path(__file__).resolve().parents[1]
         )
         if workspaces_root is None:
-            # Safe local default: $PROJECT/.coop/workspaces. Callers in production
-            # should pass `settings.security.resolved_workspace_root()`.
             workspaces_root = self.project_root / ".coop" / "workspaces"
         self.workspaces_root = Path(workspaces_root).expanduser().resolve()
         self._template = _load_template()
@@ -134,14 +118,17 @@ class WorkspaceManager:
         slug: str,
         created_at: str,
         status: str,
+        design_section: str = _DEFAULT_DESIGN_SECTION,
+        dev_section: str = _DEFAULT_DEV_SECTION,
     ) -> str:
-        # string.Template.safe_substitute handles stray braces in title naturally.
         return self._template.safe_substitute(
             id=workspace_id,
             title=title,
             slug=slug,
             created_at=created_at,
             status=status,
+            design_section=design_section,
+            dev_section=dev_section,
         )
 
     # ---- Phase 1 DB-only APIs (kept for internal callers/tests) ----
@@ -186,11 +173,7 @@ class WorkspaceManager:
     # ---- Phase 2: scaffold APIs ----
 
     async def create_with_scaffold(self, title: str, slug: str) -> dict:
-        """Create DB record AND filesystem scaffold atomically.
-
-        Order: FS first (mkdir, write md) then DB (INSERT). If FS fails,
-        no orphan DB row. If DB fails, rollback FS (rmtree the new dir).
-        """
+        """Create DB record AND filesystem scaffold atomically."""
         if not _SLUG_RE.match(slug):
             raise BadRequestError(
                 f"invalid slug {slug!r} (expected kebab-case, 1-63 chars)"
@@ -218,7 +201,7 @@ class WorkspaceManager:
         registry = self._require_registry()
 
         # 1) FS scaffold — mkdir subdirs, then write workspace.md via the
-        #    underlying store. We bypass the registry's 2-step put_bytes here
+        #    underlying store. We bypass the registry's CAS put_bytes here
         #    because the `workspaces` row doesn't exist yet, so `repo.upsert`
         #    would fail the workspace_id FK. See Phase 3 plan Task 9 GOTCHA 1.
         try:
@@ -246,8 +229,6 @@ class WorkspaceManager:
             raise
 
         # 3) Register the freshly-written workspace.md in workspace_files.
-        #    Failure at this stage must compensate the DB INSERT + FS scaffold
-        #    so the aggregate operation stays atomic.
         ws_row = {"id": wid, "slug": slug}
         try:
             await registry.index_existing(
@@ -287,11 +268,7 @@ class WorkspaceManager:
         }
 
     async def archive_with_scaffold(self, workspace_id: str) -> bool:
-        """Archive: DB status -> archived, rewrite workspace.md front-matter.
-
-        Idempotent: returns True if state changed, False if already archived.
-        Physical directory is NOT removed (human may want artifacts).
-        """
+        """Archive: DB status -> archived, rewrite workspace.md front-matter."""
         row = await self.get(workspace_id)
         if row is None:
             raise NotFoundError(f"workspace {workspace_id!r} not found")
@@ -311,24 +288,14 @@ class WorkspaceManager:
             payload={"workspace_id": workspace_id},
         )
 
-        # Use the canonical slug dir under workspaces_root rather than the
-        # stored root_path. Phase 1 legacy rows (created via the DB-only
-        # `create()` API) may have arbitrary root_paths that predate the
-        # workspaces_root invariant; refusing to archive them would be a
-        # regression. Phase 2 rows always store `workspaces_root/<slug>`
-        # here, so the two paths match.
         registry = self._require_registry()
         ref = await registry.stat(
             workspace_slug=row["slug"], relative_path="workspace.md",
         )
         if ref is not None:
-            refreshed = self.render_workspace_md(
-                workspace_id=row["id"],
-                title=row["title"],
-                slug=row["slug"],
-                created_at=row["created_at"],
-                status="archived",
-            )
+            refreshed = await self._render_workspace_md_from_db({
+                **row, "status": "archived",
+            })
             await registry.put_markdown(
                 workspace_row=row, relative_path="workspace.md",
                 text=refreshed, kind="workspace_md",
@@ -342,13 +309,7 @@ class WorkspaceManager:
     # ---- Phase 2: reconcile ----
 
     async def reconcile(self) -> dict:
-        """Scan FS vs DB and patch differences (FS wins).
-
-        Report shape matches ``WorkspaceSyncReport``:
-          * ``fs_only``: slugs present on disk but absent in DB -> INSERT to DB
-          * ``db_only``: DB rows whose root_path does not exist -> mark archived
-          * ``in_sync``: present in both
-        """
+        """Scan FS vs DB and patch differences (FS wins)."""
         fs_only: list[str] = []
         db_only: list[str] = []
         in_sync: list[str] = []
@@ -369,7 +330,6 @@ class WorkspaceManager:
                 continue
             fs_slugs.add(entry.name)
 
-        # FS-only: INSERT minimal DB row
         for slug in sorted(fs_slugs):
             if slug not in db_by_slug:
                 md_path = self.workspaces_root / slug / "workspace.md"
@@ -398,7 +358,6 @@ class WorkspaceManager:
                         "reconcile: failed to INSERT slug=%s: %s", slug, exc
                     )
 
-        # DB rows: either in-sync or drifted
         for slug, row in db_by_slug.items():
             if slug in fs_slugs:
                 in_sync.append(row["id"])
@@ -424,28 +383,16 @@ class WorkspaceManager:
         except OSError:
             logger.exception("failed to cleanup partial workspace dir %s", p)
 
-    # ---- Phase 3: workspace.md section refresh ----
+    # ---- Phase 5: DB-derived workspace.md regeneration with CAS retry ----
 
-    async def refresh_workspace_md(self, workspace_id: str) -> None:
-        """Rewrite workspace.md to reflect current DesignWork / DesignDoc state.
+    async def _render_workspace_md_from_db(self, ws: dict) -> str:
+        """Render the full workspace.md from DB state.
 
-        Invoked by DesignWorkStateMachine after each state transition and by
-        DesignDocManager after D6 PERSIST. Safe no-op if the workspace row is
-        missing (another subsystem may have archived it concurrently).
+        Pure function of (workspace row, design_docs, design_works, dev_works).
+        Called inside the CAS retry loop; DO NOT cache the output across
+        attempts.
         """
-        ws = await self.get(workspace_id)
-        if ws is None:
-            logger.warning("refresh_workspace_md: workspace %s missing", workspace_id)
-            return
-        registry = self._require_registry()
-        ref = await registry.stat(
-            workspace_slug=ws["slug"], relative_path="workspace.md",
-        )
-        if ref is None:
-            logger.warning(
-                "refresh_workspace_md: workspace.md missing for %s", workspace_id,
-            )
-            return
+        workspace_id = ws["id"]
 
         design_docs = await self.db.fetchall(
             "SELECT slug, version, status FROM design_docs "
@@ -465,7 +412,6 @@ class WorkspaceManager:
                 f" — 状态：{dd['status']}"
             )
         for dw in design_works:
-            # Skip already-represented DesignWorks (their design_doc is in the list).
             if dw["output_design_doc_id"]:
                 continue
             slug_part = dw["sub_slug"] or dw["id"]
@@ -473,12 +419,9 @@ class WorkspaceManager:
                 f"- design_work {dw['id']} "
                 f"(slug={slug_part}) · state={dw['current_state']} · loop={dw['loop']}"
             )
-        if lines:
-            designs_section = "\n".join(lines)
-        else:
-            designs_section = (
-                "_暂无 DesignWork。在此 Workspace 下创建后此处自动刷新。_"
-            )
+        design_section = (
+            "\n".join(lines) if lines else _DEFAULT_DESIGN_SECTION
+        )
 
         dev_works = await self.db.fetchall(
             "SELECT id, design_doc_id, current_step, iteration_rounds, last_score "
@@ -496,29 +439,71 @@ class WorkspaceManager:
                 f"score={last_score}"
             )
         dev_section = (
-            "\n".join(dev_lines) if dev_lines else "_暂无 DevWork。_"
+            "\n".join(dev_lines) if dev_lines else _DEFAULT_DEV_SECTION
         )
 
-        text = await registry.read_text(
-            workspace_slug=ws["slug"], relative_path="workspace.md",
+        return self.render_workspace_md(
+            workspace_id=ws["id"],
+            title=ws["title"],
+            slug=ws["slug"],
+            created_at=ws["created_at"],
+            status=ws["status"],
+            design_section=design_section,
+            dev_section=dev_section,
         )
-        new_text = _replace_section(text, "## 设计工作", designs_section)
-        new_text = _replace_section(new_text, "## 开发工作", dev_section)
-        await registry.put_markdown(
-            workspace_row=ws, relative_path="workspace.md",
-            text=new_text, kind="workspace_md",
+
+    async def regenerate_workspace_md(
+        self, workspace_id: str, *, max_retries: int = _MAX_REGENERATE_RETRIES,
+    ) -> dict:
+        """Re-render workspace.md from DB and write via CAS with retry.
+
+        Returns a dict with ``retries`` (int, 0 on first-try success) and
+        ``etag`` (str | None, the final oss_etag). When the workspace row
+        is missing, returns ``{'retries': 0, 'etag': None, 'skipped':
+        'missing_workspace'}`` instead of raising — another subsystem may
+        have archived the workspace concurrently.
+
+        Raises :class:`IndexConvergenceError` if the CAS retry budget is
+        exhausted.
+        """
+        ws = await self.get(workspace_id)
+        if ws is None:
+            logger.warning(
+                "regenerate_workspace_md: workspace %s missing", workspace_id,
+            )
+            return {
+                "retries": 0, "etag": None,
+                "skipped": "missing_workspace",
+            }
+        registry = self._require_registry()
+
+        for attempt in range(max_retries):
+            existing = await registry.repo.get(workspace_id, "workspace.md")
+            expected_etag = existing["oss_etag"] if existing else None
+            text = await self._render_workspace_md_from_db(ws)
+            try:
+                row = await registry.register(
+                    workspace_row=ws,
+                    relative_path="workspace.md",
+                    data=text.encode("utf-8"),
+                    kind="workspace_md",
+                    expected_etag=expected_etag,
+                )
+                return {"retries": attempt, "etag": row.get("oss_etag")}
+            except EtagMismatch:
+                logger.info(
+                    "regenerate_workspace_md CAS retry %d/%d for %s",
+                    attempt + 1, max_retries, workspace_id,
+                )
+                continue
+        raise IndexConvergenceError(
+            f"regenerate_workspace_md failed to converge for "
+            f"{workspace_id!r} after {max_retries} retries"
         )
 
     @staticmethod
     def _parse_front_matter(md: Path) -> dict[str, str]:
-        """Minimal YAML front-matter parser for reconcile recovery.
-
-        Intentionally simple: only extracts ``key: value`` pairs between the
-        opening and closing ``---`` lines. Sufficient for the fields our
-        template writes. Values are length-capped and stripped of control
-        characters — a crafted ``workspace.md`` on disk should not be able
-        to push unbounded content into the DB.
-        """
+        """Minimal YAML front-matter parser for reconcile recovery."""
         try:
             text = md.read_text(encoding="utf-8")
         except OSError:

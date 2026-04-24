@@ -108,7 +108,10 @@ async def test_delete_removes_file_and_row(env):
     assert await env["repo"].get("ws-a", "d.md") is None
 
 
-async def test_db_failure_rolls_back_fs_write(env, monkeypatch):
+async def test_db_failure_leaves_fs_for_recovery_scan(env, monkeypatch):
+    # Phase 5 intentional regression (PRD §Write Path): register() does NOT
+    # roll back the local write on a DB failure — the three-step protocol
+    # trusts the boot-time recovery scan to heal orphan FS writes.
     reg = env["registry"]
     ws = env["ws"]
 
@@ -122,7 +125,7 @@ async def test_db_failure_rolls_back_fs_write(env, monkeypatch):
             text="data", kind="other",
         )
     f = env["root"] / "alpha" / "fail.md"
-    assert not f.exists(), "FS rollback should have removed the file"
+    assert f.exists(), "local write remains; recovery scan will re-register it"
 
 
 async def test_rejects_absolute_relative_path(env):
