@@ -5,6 +5,9 @@ __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
 web/node_modules/
 web/dist/
 .worktrees/

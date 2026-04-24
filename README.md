@@ -184,6 +184,19 @@ COOAGENTS_CONFIG_DIR=config
 COOAGENTS_COOP_DIR=.coop
 ```
 
+### 开发环境升级（Phase 2 及以后）
+
+Phase 2 引入 `workspace_files` 表并将若干 `*_path` 字段语义改为
+工作区相对路径，**不提供历史数据迁移脚本**。开发者升级时：
+
+```bash
+rm -rf .coop/state.db
+rm -rf "$WORKSPACES_ROOT"/*
+```
+
+然后重启服务即可。首次生产部署前再补历史回填脚本（见 PRD
+`oss-file-storage-upgrade.prd.md` §Historical Data Migration）。
+
 ## 宿主集成
 
 cooagents 同时支持两种宿主；可单启、也可并存（`{runtime}=both`）。启动时 `src/skill_deployer.py` 把 `skills/cooagents-{setup,upgrade}/` 同步到宿主的 `skills/` 目录。
@@ -383,9 +396,10 @@ React 18 + Vite + Tailwind，SWR 15 秒轮询。
 ```text
 cooagents/
 ├── config/                  settings.yaml · agents.yaml
-├── db/schema.sql            8 表：workspaces / design_docs / design_works /
+├── db/schema.sql            9 表：workspaces / design_docs / design_works /
 │                             dev_works / dev_iteration_notes / reviews /
-│                             workspace_events / webhook_subscriptions
+│                             workspace_events / workspace_files /
+│                             webhook_subscriptions
 ├── docs/                    design / dev / internals / openclaw-tools.json
 ├── scripts/                 bootstrap.sh · generate_password_hash.py
 ├── skills/                  cooagents-{setup,upgrade}/ —— 启动时部署到宿主

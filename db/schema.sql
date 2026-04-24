@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS design_docs (
   workspace_id            TEXT NOT NULL REFERENCES workspaces(id),
   slug                    TEXT NOT NULL,
   version                 TEXT NOT NULL,     -- SemVer string '1.0.0'
+  -- Workspace-relative POSIX path, e.g. "designs/DES-login-1.0.0.md".
+  -- Phase 2 flips the semantic; Phase 3 flips the writers.
   path                    TEXT NOT NULL,
   parent_version          TEXT,
   needs_frontend_mockup   INTEGER NOT NULL DEFAULT 0 CHECK(needs_frontend_mockup IN (0,1)),
@@ -48,6 +50,7 @@ CREATE TABLE IF NOT EXISTS design_works (
   missing_sections_json   TEXT,
   agent                   TEXT NOT NULL DEFAULT 'claude' CHECK(agent IN ('claude','codex')),
   escalated_at            TEXT,
+  -- Workspace-relative POSIX (e.g. "designs/.drafts/desw-<id>-input.md").
   user_input_path         TEXT,
   output_design_doc_id    TEXT,              -- soft reference (no FK, U12)
   -- Phase 3 additions (U7): runtime-required but nullable so compat migrations
@@ -56,6 +59,7 @@ CREATE TABLE IF NOT EXISTS design_works (
   title                   TEXT,
   sub_slug                TEXT,
   version                 TEXT,
+  -- Workspace-relative POSIX (mirrors design_docs.path on publish).
   output_path             TEXT,
   gates_json              TEXT,
   created_at              TEXT NOT NULL,
@@ -89,6 +93,7 @@ CREATE TABLE IF NOT EXISTS dev_iteration_notes (
   id                  TEXT PRIMARY KEY,      -- 'note-<hex12>'
   dev_work_id         TEXT NOT NULL REFERENCES dev_works(id),
   round               INTEGER NOT NULL,
+  -- Workspace-relative POSIX, e.g. "devworks/<dev_work_id>/iteration-round-<n>.md".
   markdown_path       TEXT NOT NULL,
   score_history_json  TEXT,
   created_at          TEXT NOT NULL,
@@ -122,6 +127,31 @@ CREATE TABLE IF NOT EXISTS workspace_events (
   ts              TEXT NOT NULL
 );
 
+-- 8. workspace_files — authoritative per-workspace file inventory.
+--    Rows are created by Phase 5 WorkspaceFileRegistry.register() (Phase 2
+--    ships the shape only). `relative_path` is workspace-relative POSIX
+--    (no leading '/', no backslash, no drive letter); the workspace slug
+--    is implicit via workspace_id. `oss_key` includes the deployment
+--    prefix + workspace slug (e.g. "workspaces/<slug>/designs/DES-x-1.md")
+--    and is NULL when OSS is disabled. `oss_etag` CAS-guards writes.
+CREATE TABLE IF NOT EXISTS workspace_files (
+  id                TEXT PRIMARY KEY,              -- 'wf-<hex12>'
+  workspace_id      TEXT NOT NULL REFERENCES workspaces(id),
+  relative_path     TEXT NOT NULL,                 -- POSIX, no leading '/'
+  kind              TEXT NOT NULL CHECK(kind IN (
+                        'design_doc','design_input','iteration_note',
+                        'prompt','image','workspace_md','other')),
+  content_hash      TEXT,                          -- sha256 of local bytes; NULL before first write
+  byte_size         INTEGER,
+  oss_key           TEXT,                          -- NULL when oss.enabled=false or never flushed
+  oss_etag          TEXT,                          -- NULL when never flushed
+  local_mtime_ns    INTEGER,
+  last_synced_at    TEXT,                          -- ISO-8601, NULL until first successful flush
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,
+  UNIQUE(workspace_id, relative_path)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_workspaces_status           ON workspaces(status);
 CREATE INDEX IF NOT EXISTS idx_design_works_workspace      ON design_works(workspace_id);
@@ -144,8 +174,12 @@ CREATE INDEX IF NOT EXISTS idx_reviews_note                ON reviews(dev_iterat
 CREATE INDEX IF NOT EXISTS idx_workspace_events_name       ON workspace_events(event_name);
 CREATE INDEX IF NOT EXISTS idx_workspace_events_workspace  ON workspace_events(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_events_ts         ON workspace_events(ts);
+CREATE INDEX IF NOT EXISTS idx_workspace_files_workspace   ON workspace_files(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_files_kind        ON workspace_files(kind);
+CREATE INDEX IF NOT EXISTS idx_workspace_files_oss_key     ON workspace_files(oss_key)
+  WHERE oss_key IS NOT NULL;
 
--- 8. webhook_subscriptions — outbound webhook delivery targets
+-- 9. webhook_subscriptions — outbound webhook delivery targets
 --    Replaces the legacy `webhooks` table dropped in Phase 1.
 --    slug: 'openclaw' / 'hermes' for builtin; NULL for user-registered.
 --    secret: HMAC secret for generic path; Bearer token for OpenClaw path.
