@@ -1,0 +1,21 @@
+# Repo Registry baseline (Phase 1 — DB schema only; fetcher lands in Phase 2).
+# Each entry below becomes a row in the `repos` table on startup. Runtime
+# state (fetch_status, last_fetched_at, bare_clone_path) is preserved across
+# restarts; only declarative fields here are reconciled.
+repos: []
+# Example shape (Phase 2 will start fetching these):
+# repos:
+#   - name: frontend
+#     url: git@github.com:org/frontend.git
+#     default_branch: main
+#     ssh_key_path: ~/.ssh/id_rsa
+#     labels: [web, react]
+#   - name: backend
+#     url: git@github.com:org/backend.git
+#     default_branch: main
+#     labels: [api, python]
+fetch:
+  interval_s: 300
+  parallel: 4
+# SSH strict host-key checking. Default ON. Mirrors agents.yaml symmetry.
+ssh_strict_host_key: true

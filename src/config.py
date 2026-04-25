@@ -17,6 +17,13 @@ ROOT = Path(__file__).resolve().parents[1]
 _LOCAL_HOST_ID = "local"
 _SSH_HOST_PATTERN = re.compile(r"^[\w.\-]+@[\w.\-]+(?::\d+)?$")
 
+# Repo Registry handle: alphanumeric + _ . -, leading [A-Za-z0-9], 1-63 chars.
+# Intentionally looser than ``_WORKSPACE_SLUG_RE`` (which lives in src/models)
+# because operator-facing repo names commonly carry casing, dots, and
+# underscores (e.g. "Frontend.web", "api_v2"). src.config keeps src.models
+# out of its import graph, so the regex is duplicated here on purpose.
+_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,62}$")
+
 
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
@@ -363,6 +370,65 @@ class AgentsConfig(BaseModel):
         return False
 
 
+class RepoConfig(BaseModel):
+    """One entry in ``config/repos.yaml`` ``repos`` list (Phase 1, repo-registry).
+
+    ``name`` is the operator-facing handle (stable across restarts; the DB
+    primary key ``id`` is allocated lazily by the registry on first sync).
+    ``ssh_key_path`` is expanded with ``Path(p).expanduser()`` at load time
+    and propagates into ``repos.credential_ref`` via ``RepoRegistryRepo``.
+    """
+    name: str = Field(..., min_length=1, max_length=63)
+    url: str = Field(..., min_length=1)
+    default_branch: str = Field("main", min_length=1, max_length=200)
+    vendor: str | None = None
+    ssh_key_path: str | None = None
+    labels: list[str] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, v: str) -> str:
+        if not _REPO_NAME_RE.match(v):
+            raise ValueError(
+                "repo name must match [A-Za-z0-9][A-Za-z0-9_.\\-]{0,62}"
+            )
+        return v
+
+    @field_validator("ssh_key_path")
+    @classmethod
+    def _expand_ssh_key(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return str(Path(v).expanduser())
+
+
+class ReposFetchConfig(BaseModel):
+    """Phase 2 fetcher knobs. Declared here so ``repos.yaml`` shape is stable
+    across phases; Phase 1 readers ignore the values."""
+    interval_s: int = Field(300, ge=10, le=86400)
+    parallel: int = Field(4, ge=1, le=64)
+
+
+class ReposConfig(BaseModel):
+    """Top-level shape of ``config/repos.yaml`` (Phase 1, repo-registry)."""
+    repos: list[RepoConfig] = Field(default_factory=list)
+    fetch: ReposFetchConfig = ReposFetchConfig()
+    # Mirrors the agents.yaml flag for symmetry. Phase 2's fetcher reads it.
+    ssh_strict_host_key: bool = True
+
+    @field_validator("repos")
+    @classmethod
+    def _no_duplicate_names(cls, v: list[RepoConfig]) -> list[RepoConfig]:
+        seen: set[str] = set()
+        for r in v:
+            if r.name in seen:
+                raise ValueError(
+                    f"duplicate repo name in repos.yaml: {r.name!r}"
+                )
+            seen.add(r.name)
+        return v
+
+
 class SecurityConfig(BaseModel):
     """Security boundaries enforced at API layer.
 
@@ -400,6 +466,9 @@ class Settings(BaseModel):
     # Settings (not constructed eagerly) so tests can inject AgentsConfig
     # instances directly without touching the on-disk file.
     agents: AgentsConfig = AgentsConfig()
+    # Phase 1 (repo-registry): populated by load_settings() from
+    # config/repos.yaml. Empty list when the file is absent.
+    repos: ReposConfig = ReposConfig()
     design: DesignConfig = DesignConfig()
     scoring: ScoringConfig = ScoringConfig()
     devwork: DevWorkConfig = DevWorkConfig()
@@ -461,6 +530,9 @@ def load_settings(path: Path | str | None = None) -> Settings:
     # Phase 8a: load agents.yaml siblings to settings.yaml. The file is
     # optional — missing or empty file becomes AgentsConfig(hosts=[]).
     settings.agents = load_agents(path.parent / "agents.yaml")
+    # Phase 1 (repo-registry): load repos.yaml side-by-side. Missing file
+    # is fine — empty registry is a valid first-run state.
+    settings.repos = load_repos(path.parent / "repos.yaml")
 
     if settings.storage.oss.enabled:
         missing = [
@@ -513,3 +585,35 @@ def load_agents(path: Path | str | None = None) -> AgentsConfig:
         return AgentsConfig.model_validate(data)
     except Exception as exc:  # pydantic ValidationError or our own ValueError
         raise BadRequestError(f"invalid agents.yaml: {exc}") from exc
+
+
+def load_repos(path: Path | str | None = None) -> ReposConfig:
+    """Load ``config/repos.yaml`` into a :class:`ReposConfig`.
+
+    Missing file → empty repos list. Top-level YAML must be a mapping with
+    optional ``repos``, ``fetch``, and ``ssh_strict_host_key`` keys, or the
+    legacy list shape ``[{name: ..., url: ...}, ...]``. Duplicate ``name``
+    values raise :class:`BadRequestError`.
+    """
+    if path is None:
+        path = ROOT / "config" / "repos.yaml"
+    path = Path(path)
+
+    if not path.exists():
+        return ReposConfig()
+
+    with path.open("r", encoding="utf-8") as fh:
+        data: Any = yaml.safe_load(fh) or {}
+
+    # Allow legacy shape `[ {name, url}, ... ]` at the top level.
+    if isinstance(data, list):
+        data = {"repos": data}
+    if not isinstance(data, dict):
+        raise BadRequestError(
+            f"repos.yaml must be a mapping or list of repos, got {type(data).__name__}"
+        )
+
+    try:
+        return ReposConfig.model_validate(data)
+    except Exception as exc:  # pydantic ValidationError or our own ValueError
+        raise BadRequestError(f"invalid repos.yaml: {exc}") from exc

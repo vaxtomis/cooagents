@@ -1,5 +1,6 @@
 import pytest
-from src.config import load_settings, Settings
+from src.config import load_repos, load_settings, Settings
+from src.exceptions import BadRequestError
 
 def test_load_settings_defaults():
     settings = load_settings()
@@ -73,3 +74,71 @@ def test_agent_preference_config_from_dict():
     })
     assert s.preferred_design_agent == "codex"
     assert s.preferred_dev_agent == "codex"
+
+
+# ---- load_repos (repo-registry Phase 1) -----------------------------------
+
+def test_load_repos_missing_file(tmp_path):
+    cfg = load_repos(tmp_path / "nope.yaml")
+    assert cfg.repos == []
+    # Defaults are wired even when the file is absent.
+    assert cfg.fetch.interval_s == 300
+    assert cfg.ssh_strict_host_key is True
+
+
+def test_load_repos_valid(tmp_path):
+    p = tmp_path / "repos.yaml"
+    p.write_text(
+        "repos:\n"
+        "  - name: frontend\n"
+        "    url: git@github.com:org/frontend.git\n"
+        "  - name: backend\n"
+        "    url: git@github.com:org/backend.git\n"
+        "    default_branch: develop\n"
+        "    labels: [api, python]\n",
+        encoding="utf-8",
+    )
+    cfg = load_repos(p)
+    assert {r.name for r in cfg.repos} == {"frontend", "backend"}
+    backend = next(r for r in cfg.repos if r.name == "backend")
+    assert backend.default_branch == "develop"
+    assert backend.labels == ["api", "python"]
+
+
+def test_load_repos_rejects_duplicate_names(tmp_path):
+    p = tmp_path / "repos.yaml"
+    p.write_text(
+        "repos:\n"
+        "  - {name: dup, url: 'git@x:o/r.git'}\n"
+        "  - {name: dup, url: 'git@x:o/r2.git'}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(BadRequestError):
+        load_repos(p)
+
+
+def test_load_repos_rejects_invalid_name(tmp_path):
+    p = tmp_path / "repos.yaml"
+    p.write_text(
+        "repos:\n  - {name: '-bad', url: 'git@x:o/r.git'}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(BadRequestError):
+        load_repos(p)
+
+
+def test_load_repos_legacy_list_shape(tmp_path):
+    p = tmp_path / "repos.yaml"
+    p.write_text(
+        "- {name: frontend, url: 'git@x:o/r.git'}\n",
+        encoding="utf-8",
+    )
+    cfg = load_repos(p)
+    assert [r.name for r in cfg.repos] == ["frontend"]
+
+
+def test_load_repos_rejects_scalar(tmp_path):
+    p = tmp_path / "repos.yaml"
+    p.write_text("just-a-string\n", encoding="utf-8")
+    with pytest.raises(BadRequestError):
+        load_repos(p)

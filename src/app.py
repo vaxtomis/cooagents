@@ -88,6 +88,27 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).exception(
             "agent_hosts sync_from_config failed; continuing startup"
         )
+
+    # Phase 1 (repo-registry): registry repo + sync from config/repos.yaml.
+    # Lazy import keeps src.repos out of module-load chains (mirrors
+    # the agent_hosts pattern above). Defensive try/except: a malformed
+    # repos.yaml must not block startup.
+    from src.repos import RepoRegistryRepo
+
+    repo_registry_repo = RepoRegistryRepo(db)
+    try:
+        repo_sync_report = await repo_registry_repo.sync_from_config(
+            settings.repos
+        )
+        logging.getLogger(__name__).info(
+            "repos sync: upserted=%s marked_unknown=%s",
+            repo_sync_report["upserted"],
+            repo_sync_report["marked_unknown"],
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "repos sync_from_config failed; continuing startup"
+        )
     ssh_dispatcher = SshDispatcher(
         agent_host_repo,
         ssh_timeout_s=settings.health_check.ssh_timeout,
@@ -146,6 +167,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.agent_host_repo = agent_host_repo
     app.state.agent_dispatch_repo = agent_dispatch_repo
+    app.state.repo_registry_repo = repo_registry_repo
     app.state.ssh_dispatcher = ssh_dispatcher
     app.state.health_probe_loop = health_probe_loop
     app.state.start_time = time.time()

@@ -72,6 +72,60 @@ CREATE TABLE IF NOT EXISTS agent_dispatches (
   updated_at       TEXT NOT NULL
 );
 
+-- 2d. repos — Repo Registry (Phase 1, repo-registry feature).
+--     One row per registered git repository. ``credential_ref`` is the
+--     credential abstraction seam: v1 holds a filesystem path to an SSH key,
+--     a future Vault implementation can store an opaque ``vault://`` ref in
+--     the same column without a schema bump. ``bare_clone_path`` is filled
+--     by Phase 2's fetcher; nullable in this phase.
+CREATE TABLE IF NOT EXISTS repos (
+  id                TEXT PRIMARY KEY,                  -- 'repo-<hex12>'
+  name              TEXT NOT NULL UNIQUE,              -- operator-facing handle
+  url               TEXT NOT NULL,
+  vendor            TEXT,
+  default_branch    TEXT NOT NULL DEFAULT 'main',
+  credential_ref    TEXT,                              -- v1: SSH key path; abstraction seam
+  bare_clone_path   TEXT,                              -- Phase 2 writer; NULL until then
+  labels_json       TEXT NOT NULL DEFAULT '[]',
+  fetch_status      TEXT NOT NULL DEFAULT 'unknown'
+                    CHECK(fetch_status IN ('unknown','healthy','stale','error')),
+  last_fetched_at   TEXT,
+  last_fetch_err    TEXT,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL
+);
+
+-- 2e. design_work_repos — link DesignWork → Repo (Phase 1; rows written in
+--     Phase 4+). ON DELETE RESTRICT prevents removing a repo that any
+--     DesignWork still binds to.
+CREATE TABLE IF NOT EXISTS design_work_repos (
+  design_work_id   TEXT NOT NULL REFERENCES design_works(id),
+  repo_id          TEXT NOT NULL REFERENCES repos(id) ON DELETE RESTRICT,
+  branch           TEXT NOT NULL,
+  rev              TEXT,
+  created_at       TEXT NOT NULL,
+  PRIMARY KEY (design_work_id, repo_id)
+);
+
+-- 2f. dev_work_repos — link DevWork → Repo (Phase 1; rows written in
+--     Phase 4+). UNIQUE(dev_work_id, mount_name) enforces the per-DevWork
+--     mount-point invariant from the PRD.
+CREATE TABLE IF NOT EXISTS dev_work_repos (
+  dev_work_id      TEXT NOT NULL REFERENCES dev_works(id),
+  repo_id          TEXT NOT NULL REFERENCES repos(id) ON DELETE RESTRICT,
+  mount_name       TEXT NOT NULL,
+  base_branch      TEXT NOT NULL,
+  base_rev         TEXT,
+  devwork_branch   TEXT NOT NULL,
+  push_state       TEXT NOT NULL DEFAULT 'pending'
+                   CHECK(push_state IN ('pending','pushed','failed')),
+  push_err         TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL,
+  PRIMARY KEY (dev_work_id, repo_id),
+  UNIQUE(dev_work_id, mount_name)
+);
+
 -- 3. design_works — DesignWork state machine instance (process table)
 CREATE TABLE IF NOT EXISTS design_works (
   id                      TEXT PRIMARY KEY,  -- 'desw-<hex12>'
@@ -216,6 +270,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_dispatches_correlation
   ON agent_dispatches(correlation_kind, correlation_id);
 CREATE INDEX IF NOT EXISTS idx_agent_dispatches_host       ON agent_dispatches(host_id);
 CREATE INDEX IF NOT EXISTS idx_agent_dispatches_state      ON agent_dispatches(state);
+CREATE INDEX IF NOT EXISTS idx_repos_fetch_status          ON repos(fetch_status);
+CREATE INDEX IF NOT EXISTS idx_design_work_repos_repo      ON design_work_repos(repo_id);
+CREATE INDEX IF NOT EXISTS idx_dev_work_repos_repo         ON dev_work_repos(repo_id);
 
 -- Phase 8a invariant: the reserved 'local' host always exists so the
 -- design_works.agent_host_id / dev_works.agent_host_id FK ('local' default)

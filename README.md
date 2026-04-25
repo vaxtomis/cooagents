@@ -57,14 +57,15 @@ v1 是**破坏性重构**后的 Workspace 模型。旧的 15 阶段线性 Run、
 ## 核心特性
 
 - **Workspace 驱动** — 磁盘 + DB 双向投影，启动时 `reconcile()` 校验；单 DevWork/DesignDoc 通过 partial UNIQUE index 强制串行。
-- **OSS 文件备份** — 可选启用阿里云 OSS 作为工作区制品的只写备份目标；`workspace_files` 表在 cooagents DB 里记 `relative_path + sha256 + byte_size`，每次 `register()` 把本地原子写入同步 PUT 到 OSS。Phase 1–7b 不提供 cooagents 内置的反向拉取；DR 由操作员通过 OSS 控制台 + 一次性脚本完成。Phase 8 在 Agent 执行节点引入双向 materialize / CAS。关闭时零行为变更。
+- **OSS 同步备份 + 跨主机文件平面** — 可选启用阿里云 OSS 作为工作区制品的权威备份；`workspace_files` 表记 `relative_path + sha256 + byte_size`，每次 `register()` 走"本地原子写 → PUT OSS → DB upsert"。Agent 执行节点上的 `cooagents-worker` 通过 `GET /workspaces/{id}/files` 拉清单、`HEAD/GET` OSS 反向 materialize、`POST /workspaces/{id}/files` 携 `X-Expected-Prior-Hash` 做 CAS 写回。关闭 OSS 时仅本地落盘，行为零变更。
+- **远程 Agent 调度** — `agent_hosts` 注册表 + `agent_dispatches` 生命周期行 + `SshDispatcher` + `HealthProbeLoop`；DesignWork / DevWork 行带 `agent_host_id`，可把单次 LLM 调用派发到指定 SSH 主机执行 `cooagents-worker run`。
 - **双状态机** — DesignWork（D0–D7，11 态）+ DevWork（STEP1–STEP5，8 态），单写入者，幂等 `tick`。
 - **打分驱动迭代** — Step5 reviewer 输出 `score + problem_category`，SM 自行决定回跳到 Step2/3/4 或收敛。
 - **版本化设计产物** — SemVer `1.0.0` + `content_hash` (SHA-256) + `byte_size`；`published` 后不可修改。
 - **Exit Gate** — `config.devwork.require_human_exit_confirm=true` 时挂起等待人工审批；`POST /api/v1/gates/.../approve` 释放。
 - **Webhook 契约** — `StrEnum` 冻结事件名（21 个）；`X-Cooagents-Signature: sha256=…` HMAC；`event_id` 消费者去重。
 - **Metrics 投影** — `GET /api/v1/metrics/workspaces?since=&until=` 返回 PRD 四指标（active / HI per ws / FPS / avg rounds），纯只读聚合。
-- **多主机 Agent 池** — 本地 + SSH 远程（asyncssh），`acpx` 适配 Claude/Codex；`allowed_tools_{design,dev}` 可做工具白名单。
+- **多主机 Agent 池** — 本地 + SSH 远程（asyncssh）；`SshDispatcher` 远程执行 `cooagents-worker run`，`HealthProbeLoop` 周期性探活；`acpx` 适配 Claude/Codex；`allowed_tools_{design,dev}` 可做工具白名单。
 - **双宿主适配** — OpenClaw（私有 `/hooks/agent` + Bearer）与 Hermes（通用 webhook + HMAC）同端共存，启动时自动部署 Skill。
 - **Dashboard** — React 18 + Vite + Tailwind + SWR 15s 轮询；WorkspaceDashboard / WorkspaceDetail / DesignWork / DevWork / CrossWorkspaceDevWork。
 - **E2E 烟测** — `tests/test_smoke_e2e.py` 驱动真实 SM 走三条路径（happy / design-escalated / devwork-escalated）并回查 `/metrics/workspaces`。
@@ -172,7 +173,7 @@ storage:
 
 ```yaml
 hosts:
-  - id: local-pc
+  - id: local
     host: local
     agent_type: both            # claude + codex
     max_concurrent: 2
@@ -181,7 +182,19 @@ hosts:
     agent_type: codex
     max_concurrent: 4
     ssh_key: ~/.ssh/id_rsa
+    labels: [fast]
+
+# SSH hardening (Phase 8a)。生产强烈建议保持 strict_host_key=true。
+ssh_strict_host_key: true
+ssh_known_hosts_path: ~/.ssh/known_hosts
+ssh_key_allowed_roots:          # ssh_key 必须落在这些根之下
+  - ~/.ssh
 ```
+
+启动时 `agent_host_repo.sync_from_config()` 会把 `hosts:` 投射进 `agent_hosts` 表；
+`HealthProbeLoop` 按 `health_check.interval` 周期性 SSH 探活（`acpx --version` +
+`$WORKSPACES_ROOT` 可写检查）。每台远端主机需安装 `pip install
+'cooagents[worker]'`，详见 [docs/agent-worker.md](docs/agent-worker.md)。
 
 ### `.env`（权限 600）
 
@@ -298,13 +311,19 @@ curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
 
 ## 存储与多 Agent 文件共享
 
-cooagents 的架构是：**一台控制服务器（cooagents：单 SQLite DB + HTTP API + 文件 IO）+ 一个 Agent 执行节点池**。Phase 1–7b 实现的是控制平面侧的文件抽象、相对路径化、`workspace_files` 元数据清单，以及（可选）把每次写入的字节同步备份到 OSS。**真正让 Agent 跨主机看到对方产物的"双向 materialize / CAS / recovery"原语属于 Phase 8**，会在 Agent 执行节点的生命周期里按 Agent 模型重新设计。
+cooagents 的架构是：**一台控制服务器（cooagents：单 SQLite DB + HTTP API + 文件 IO）+ 一个通过 SSH 派发的 Agent 执行节点池**。Phase 1–7b 完成控制平面侧的文件抽象、相对路径化、`workspace_files` 元数据清单，以及把写入的字节同步备份到 OSS；Phase 8 在 Agent 执行节点上引入 `cooagents-worker`，加上 CAS 写回路由，让"跨主机 Agent 看到对方产物"成立。
 
-Phase 1–7b OSS 启用后的行为：
+控制平面（cooagents）侧：
 
-- `WorkspaceFileRegistry.register()` 走"本地原子写 → PUT OSS → DB upsert"两步序，无 CAS、无重试
-- cooagents 是 DB 与 OSS 对象的**唯一写者**（FastAPI 单事件循环 + SQLite per-connection 序列化）
-- 没有 cooagents 内置的"从 OSS 反向拉文件"接口；磁盘灾难恢复时操作员通过 OSS 控制台 + 一次性脚本把对象拉回 `workspace_root`，再让 cooagents 启动 `reconcile()` 收尾
+- `WorkspaceFileRegistry.register()` 走"本地原子写 → PUT OSS → DB upsert"两步序，OSS 失败即抛出（不会留下"DB upsert 但 OSS 缺对象"的状态）
+- cooagents 是 DB 与 OSS 对象的**唯一写者**（FastAPI 单事件循环 + SQLite per-connection 序列化），CAS 在 `POST /workspaces/{id}/files` 边界由 `X-Expected-Prior-Hash` 强制
+- 启动期 `reconcile()` 修正 FS↔DB 漂移；`agent_host_repo.sync_from_config()` 把 `agents.yaml` 投射进 DB
+
+Agent 节点（`cooagents-worker`）侧：
+
+- 一次 SSH 调用 = 一个 DevWork 或 DesignWork 单元：recovery scan → materialize（OSS 反向拉缺失字节，SHA-256 验真）→ spawn `acpx` → diff + `POST /workspaces/{id}/files` 写回
+- `hash_mismatch` 失败闭合：本地手改的文件不会被覆盖，worker 退出 2 让操作员先 reconcile
+- 详尽 runbook 见 [docs/agent-worker.md](docs/agent-worker.md)
 
 路由细节见 [API 参考](#api-参考)；协议与不变量见 PRD `oss-file-storage-upgrade.prd.md`。
 
@@ -314,8 +333,8 @@ Phase 1–7b OSS 启用后的行为：
 |------|----------------------------------|-----------------------------|
 | 文件落地 | 本地磁盘 | 本地磁盘 + OSS 同步备份 |
 | `/workspaces/sync` 语义 | FS-wins：目录存在→INSERT；DB 有、目录无→archived | 同左（Phase 7b 后单态） |
-| 跨主机 Agent 派发 | 未支持（Phase 8） | 未支持（Phase 8） |
-| 灾难恢复 | 无（本地丢即丢） | 操作员从 OSS 控制台拉回字节 + cooagents `reconcile()` |
+| 跨主机 Agent 派发 | 单机本地（`agent_host_id='local'`） | SSH 派发 `cooagents-worker`，OSS 反向 materialize + CAS 写回 |
+| 灾难恢复 | 无（本地丢即丢） | 操作员从 OSS 控制台/脚本拉回字节 + cooagents `reconcile()`；或新机器指向同一桶让 worker 自动 materialize |
 | 启动时 SDK 开销 | 零（`alibabacloud_oss_v2` 不导入） | OSS SDK 懒加载一次 |
 
 ### 启用 OSS
@@ -333,23 +352,24 @@ Phase 1–7b OSS 启用后的行为：
 走 `/api/v1` 前缀，需要 `X-Agent-Token`。
 
 - **`POST /api/v1/workspaces/sync`** — 单态 FS-wins reconcile：本地有目录而 DB 无行 → INSERT active；DB active 而本地无目录 → 归档。限流 5/min。
-
-> Phase 1–7b 不再提供 `/workspaces/{id}/materialize` 与 `/workspaces/{id}/regenerate-index` 路由。前者属于 Phase 8 的 Agent 端文件平面；后者由内部状态机调用，不需要操作员触发。两个路径目前都返回 404。
+- **`GET /api/v1/workspaces/{id}/files`** — 返回该工作区的 `workspace_files` 索引（worker 的 materialize 入口）。
+- **`POST /api/v1/workspaces/{id}/files`** — multipart 上传 + `X-Expected-Prior-Hash`（CAS）。`"none"`/空/`"*"` 表示首写；hex 表示要求当前 `content_hash` 完全匹配。冲突返回 412 + `{current_hash, expected_hash}`。
+- **`/api/v1/agent-hosts/*`** — 注册 / 列表 / 健康探测 / `sync` from `agents.yaml`。
 
 ### 本期能做 / 不能做
 
 **能做**：
 
 - OSS 启用态下，每次工作区写入都同步备份到 OSS（PUT 失败即抛错，不会留下"DB 行已 upsert 但 OSS 缺对象"的状态）
-- cooagents 服务器搬家：备份 DB + 指向同一 OSS 桶，操作员从 OSS 控制台把对象拉回新机器的 `workspace_root`，再起服务
+- cooagents 服务器搬家：备份 DB + 指向同一 OSS 桶，新机器起 cooagents 后下次 worker 派发会按 materialize 协议把对象拉回 `workspace_root`
 - 单机故障重启：启动期 `reconcile()` 把 FS↔DB 漂移修正
+- 跨主机 Agent 派发：`agents.yaml` 注册 SSH 主机 + `cooagents-worker` 安装到该主机，DesignWork/DevWork 的 `agent_host_id` 即可指向远端
 
-**不能做**（PRD §What We're NOT Building）：
+**不能做**：
 
-- cooagents 内置的"从 OSS 反向拉文件"接口（Phase 8）
-- 跨主机 Agent 派发（Phase 8）
-- CAS 预条件 / 三方 recovery scan / 操作员 materialize HTTP 路由（Phase 8 在 Agent 边界重新设计）
-- cooagents 控制服务器多实例化（DB 仍是单副本）
+- cooagents 控制服务器多实例化（DB 仍是单副本，单写者）
+- 操作员手动 materialize HTTP 路由（仍由内部 worker 协议触发，不开放给人类）
+- 跨工作区文件去重（每次 PUT 即一次 OSS 对象，无 CAS dedupe）
 
 ### 故障排查
 
@@ -375,6 +395,8 @@ Phase 1–7b OSS 启用后的行为：
 | DELETE | `/api/v1/workspaces/{id}` | 归档（status=archived） |
 | POST | `/api/v1/workspaces/sync` | DB ↔ FS reconcile（单态 FS-wins，见「存储与多 Agent 文件共享」） |
 | GET | `/api/v1/workspaces/{id}/events` | 只读事件流 |
+| GET | `/api/v1/workspaces/{id}/files` | `workspace_files` 索引（worker materialize 入口） |
+| POST | `/api/v1/workspaces/{id}/files` | multipart 写回；必带 `X-Expected-Prior-Hash` CAS；120/min |
 
 ### DesignWork / DesignDoc
 
@@ -412,6 +434,17 @@ Phase 1–7b OSS 启用后的行为：
 | POST/GET/DELETE | `/api/v1/webhooks[/{id}]` | 订阅管理（新契约） |
 | GET | `/api/v1/webhooks/{id}/deliveries` | 投递历史 |
 | POST | `/api/v1/repos/ensure` | 克隆/拉取代码仓到指定路径 |
+
+### Agent Hosts
+
+| Method | Path | 说明 |
+|--------|------|------|
+| GET | `/api/v1/agent-hosts` | 列表（含 `health_status` / `last_health_at`） |
+| GET | `/api/v1/agent-hosts/{id}` | 详情 |
+| POST | `/api/v1/agent-hosts` | 注册（local / SSH 远端） |
+| DELETE | `/api/v1/agent-hosts/{id}` | 注销 |
+| POST | `/api/v1/agent-hosts/{id}/healthcheck` | 立即探活（SSH + `acpx --version` + `WORKSPACES_ROOT` 可写检查） |
+| POST | `/api/v1/agent-hosts/sync` | 从 `config/agents.yaml` 重新投影 |
 
 ## 事件与 Webhook
 
@@ -487,15 +520,19 @@ React 18 + Vite + Tailwind，SWR 15 秒轮询。
 ```text
 cooagents/
 ├── config/                  settings.yaml · agents.yaml
-├── db/schema.sql            9 表：workspaces / design_docs / design_works /
-│                             dev_works / dev_iteration_notes / reviews /
-│                             workspace_events / workspace_files /
-│                             webhook_subscriptions
-├── docs/                    design / dev / internals / openclaw-tools.json
+├── db/schema.sql            11 表：workspaces / agent_hosts / agent_dispatches /
+│                             design_docs / design_works / dev_works /
+│                             dev_iteration_notes / reviews / workspace_events /
+│                             workspace_files / webhook_subscriptions
+├── docs/                    design / dev / internals / agent-worker.md ·
+│                             openclaw-tools.json
 ├── scripts/                 bootstrap.sh · generate_password_hash.py
 ├── skills/                  cooagents-{setup,upgrade}/ —— 启动时部署到宿主
 ├── src/                     FastAPI app + 两个 SM + manager + webhook notifier
-├── routes/                  HTTP 路由（每类实体一文件）
+│   ├── agent_hosts/         AgentHostRepo / SshDispatcher / HealthProbeLoop
+│   ├── agent_worker/        cooagents-worker CLI（装在 Agent 节点）
+│   └── storage/             FileStore (Local / OSS) + WorkspaceFileRegistry
+├── routes/                  HTTP 路由（每类实体一文件，含 agent_hosts）
 ├── templates/               Jinja2 任务指令模板（STEP* / TURN* / GATE* / 信封）
 ├── tests/                   pytest（含 test_smoke_e2e.py 三条端到端路径）
 └── web/                     React + TS + Tailwind Dashboard

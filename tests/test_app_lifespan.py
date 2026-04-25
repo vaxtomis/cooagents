@@ -34,9 +34,13 @@ async def test_local_host_always_present(configured_env, monkeypatch, tmp_path):
     real.health_check.interval = 36000
 
     from src.app import app
+    from src.repos import RepoRegistryRepo
 
     # Manually drive the lifespan since ASGITransport doesn't run it.
     async with app.router.lifespan_context(app):
+        # repo-registry Phase 1: registry repo must be wired on app.state.
+        assert isinstance(app.state.repo_registry_repo, RepoRegistryRepo)
+
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as ac:
