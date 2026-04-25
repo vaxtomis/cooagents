@@ -31,7 +31,7 @@ import alibabacloud_oss_v2 as oss
 import alibabacloud_oss_v2.aio as oss_aio
 from alibabacloud_oss_v2 import exceptions as oss_exceptions
 
-from src.exceptions import BadRequestError, NotFoundError
+from src.exceptions import BadRequestError, EtagMismatch, NotFoundError
 from src.storage.base import FileRef, normalize_key
 
 logger = logging.getLogger(__name__)
@@ -86,6 +86,19 @@ def _unwrap_service_error(
 
 def _is_not_found(err: oss_exceptions.ServiceError) -> bool:
     return err.status_code == 404 or err.code == "NoSuchKey"
+
+
+def _is_precondition_failed(err: oss_exceptions.ServiceError) -> bool:
+    """OSS surfaces ``forbid_overwrite=True`` collisions as 409
+    FileAlreadyExists; the standard HTTP If-None-Match path is 412
+    PreconditionFailed. Treat both as our CAS miss.
+    """
+    if err.status_code == 412:
+        return True
+    return err.status_code == 409 and err.code in (
+        "FileAlreadyExists",
+        "ObjectAlreadyExists",
+    )
 
 
 class OSSFileStore:
@@ -178,6 +191,60 @@ class OSSFileStore:
         etag = _normalize_etag(result.etag)
         logger.debug(
             "oss put_bytes: %s (%d bytes) -> etag=%s", norm_str, len(data), etag
+        )
+        return FileRef(
+            key=norm_str,
+            size=len(data),
+            mtime_ns=time_ns(),
+            etag=etag,
+        )
+
+    async def put_bytes_conditional(
+        self,
+        key: str,
+        data: bytes,
+        *,
+        if_none_match: str | None = None,
+    ) -> FileRef:
+        """PUT with a precondition. Phase 8b CAS path.
+
+        ``if_none_match='*'`` rejects the write if the object already
+        exists (raises :class:`EtagMismatch`). Other ``if_none_match``
+        values are not supported because the DB-side ``content_hash``
+        predicate already covers overwrite CAS — see plan §8b key
+        design points.
+        """
+        if if_none_match not in (None, "*"):
+            raise BadRequestError(
+                "OSSFileStore.put_bytes_conditional only supports "
+                f"if_none_match='*' or None; got {if_none_match!r}"
+            )
+        norm_str, oss_key = self._build_object_key(key)
+        client = await self._get_client()
+        request_kwargs: dict[str, Any] = {
+            "bucket": self._bucket,
+            "key": oss_key,
+            "body": data,
+        }
+        if if_none_match == "*":
+            request_kwargs["forbid_overwrite"] = True
+        try:
+            result = await client.put_object(
+                oss.PutObjectRequest(**request_kwargs)
+            )
+        except Exception as exc:
+            svc = _unwrap_service_error(exc)
+            if svc is not None and _is_precondition_failed(svc):
+                raise EtagMismatch(
+                    f"oss put precondition failed for {norm_str!r}",
+                    current_hash=None,
+                    expected_hash=None,
+                ) from exc
+            raise
+        etag = _normalize_etag(result.etag)
+        logger.debug(
+            "oss put_bytes_conditional: %s (%d bytes, if_none_match=%r) -> etag=%s",
+            norm_str, len(data), if_none_match, etag,
         )
         return FileRef(
             key=norm_str,

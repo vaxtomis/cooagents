@@ -18,7 +18,12 @@ from src.design_doc_manager import DesignDocManager
 from src.design_work_sm import DesignWorkStateMachine
 from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
-from src.exceptions import BadRequestError, ConflictError, NotFoundError
+from src.exceptions import (
+    BadRequestError,
+    ConflictError,
+    EtagMismatch,
+    NotFoundError,
+)
 from src.skill_deployer import deploy_skills
 from src.storage import (
     WorkspaceFileRegistry,
@@ -222,6 +227,21 @@ async def not_found_handler(request, exc):
 @app.exception_handler(ConflictError)
 async def conflict_handler(request, exc):
     return JSONResponse(status_code=409, content={"error": "conflict", "message": str(exc), "current_stage": exc.current_stage})
+
+
+@app.exception_handler(EtagMismatch)
+async def etag_mismatch_handler(request, exc):
+    # Must be registered before BadRequestError (EtagMismatch subclasses it),
+    # otherwise FastAPI's MRO resolves to the 400 handler first.
+    return JSONResponse(
+        status_code=412,
+        content={
+            "error": "etag_mismatch",
+            "message": str(exc),
+            "current_hash": exc.current_hash,
+            "expected_hash": exc.expected_hash,
+        },
+    )
 
 
 @app.exception_handler(BadRequestError)

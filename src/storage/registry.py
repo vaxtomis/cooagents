@@ -25,10 +25,22 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from src.exceptions import BadRequestError, NotFoundError
+from src.exceptions import BadRequestError, EtagMismatch, NotFoundError
 from src.storage.base import FileRef, FileStore, normalize_key
 
 logger = logging.getLogger(__name__)
+
+
+# Sentinel for "no CAS predicate". Distinct from ``None``, which means
+# "expect the row to not exist yet" (first write).
+class _NotSet:
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "NOT_SET"
+
+
+NOT_SET: Any = _NotSet()
 
 
 # Must stay in lockstep with db/schema.sql `workspace_files.kind` CHECK clause.
@@ -70,6 +82,42 @@ class WorkspaceFilesRepo:
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    @staticmethod
+    def _enforce_cas(
+        *,
+        existing: dict[str, Any] | None,
+        expected_prior_hash: str | None,
+        relative_path: str,
+    ) -> None:
+        """Raise :class:`EtagMismatch` if the DB state contradicts the caller's
+        ``expected_prior_hash`` assertion. Internal helper for ``upsert``.
+        """
+        current_hash = existing["content_hash"] if existing else None
+        if expected_prior_hash is None:
+            if existing is not None:
+                raise EtagMismatch(
+                    f"path {relative_path!r} already exists (expected new)",
+                    current_hash=current_hash,
+                    expected_hash=None,
+                )
+            return
+        # expected_prior_hash is a hex string — caller asserts an existing row
+        # with that hash.
+        if existing is None:
+            raise EtagMismatch(
+                f"path {relative_path!r} does not exist; "
+                f"cannot match expected_prior_hash",
+                current_hash=None,
+                expected_hash=expected_prior_hash,
+            )
+        if current_hash != expected_prior_hash:
+            raise EtagMismatch(
+                f"content_hash mismatch for {relative_path!r}: "
+                f"current={current_hash!r} expected={expected_prior_hash!r}",
+                current_hash=current_hash,
+                expected_hash=expected_prior_hash,
+            )
+
     async def upsert(
         self,
         *,
@@ -79,12 +127,29 @@ class WorkspaceFilesRepo:
         content_hash: str,
         byte_size: int,
         local_mtime_ns: int,
+        expected_prior_hash: Any = NOT_SET,
     ) -> dict[str, Any]:
         """Insert-or-update the workspace_files row for a given (ws, path).
 
         Validates ``kind`` and ``relative_path`` at the boundary so callers get
         targeted ``BadRequestError`` messages instead of opaque IntegrityError
         surfaces.
+
+        ``expected_prior_hash`` controls the optional Phase 8b CAS predicate:
+
+        ``NOT_SET`` (default)
+            cooagents-internal path. Behaves identically to Phase 7b: insert
+            or unconditional update.
+
+        ``None``
+            Caller asserts the row does not exist yet (first write). Raises
+            :class:`EtagMismatch` if any row already exists for
+            ``(workspace_id, relative_path)``.
+
+        ``"<hex>"``
+            Caller asserts the existing row's ``content_hash`` matches.
+            Raises :class:`EtagMismatch` if the row is missing or its hash
+            differs.
         """
         if kind not in _VALID_KINDS:
             raise BadRequestError(
@@ -98,10 +163,16 @@ class WorkspaceFilesRepo:
         now = self._now()
         async with self.db.transaction():
             existing = await self.db.fetchone(
-                "SELECT id, created_at FROM workspace_files "
+                "SELECT id, created_at, content_hash FROM workspace_files "
                 "WHERE workspace_id=? AND relative_path=?",
                 (workspace_id, rel_norm),
             )
+            if expected_prior_hash is not NOT_SET:
+                self._enforce_cas(
+                    existing=existing,
+                    expected_prior_hash=expected_prior_hash,
+                    relative_path=rel_norm,
+                )
             if existing:
                 await self.db.execute(
                     "UPDATE workspace_files SET kind=?, content_hash=?, "
@@ -206,8 +277,20 @@ class WorkspaceFileRegistry:
         relative_path: str,
         data: bytes,
         kind: str,
+        expected_prior_hash: Any = NOT_SET,
     ) -> dict[str, Any]:
-        """Local atomic write → DB upsert. No preconditions."""
+        """Local atomic write → DB upsert.
+
+        ``expected_prior_hash`` (Phase 8b) gates the write on the caller's
+        view of the prior ``content_hash``:
+
+        * ``NOT_SET`` (default) — cooagents-internal path; no precondition.
+        * ``None`` — first write; OSS PUT is conditional (``if_none_match='*'``)
+          when the store supports it, and the DB upsert asserts no prior row.
+        * ``"<hex>"`` — overwrite of a known version; the DB upsert asserts
+          the prior row's hash. The OSS PUT itself is unconditional — DB is
+          the source of truth for "which version did the caller see".
+        """
         if kind not in _VALID_KINDS:
             raise BadRequestError(
                 f"invalid workspace_files.kind={kind!r}; "
@@ -216,7 +299,17 @@ class WorkspaceFileRegistry:
         rel_norm = normalize_key(relative_path).as_posix()
         store_key = self.compose_key(workspace_row["slug"], relative_path)
 
-        ref = await self.store.put_bytes(store_key, data)
+        # OSS conditional PUT is reserved for the "first write" path.
+        # For overwrite (expected_prior_hash="<hex>"), the DB-side
+        # content_hash predicate is the authoritative guard — see plan §8b.
+        if expected_prior_hash is None and hasattr(
+            self.store, "put_bytes_conditional"
+        ):
+            ref = await self.store.put_bytes_conditional(
+                store_key, data, if_none_match="*"
+            )
+        else:
+            ref = await self.store.put_bytes(store_key, data)
         content_hash = hashlib.sha256(data).hexdigest()
 
         return await self.repo.upsert(
@@ -226,6 +319,7 @@ class WorkspaceFileRegistry:
             content_hash=content_hash,
             byte_size=ref.size,
             local_mtime_ns=ref.mtime_ns,
+            expected_prior_hash=expected_prior_hash,
         )
 
     async def put_bytes(

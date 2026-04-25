@@ -7,12 +7,13 @@ from __future__ import annotations
 from src.storage.base import FileRef, FileStore, normalize_key
 from src.storage.factory import build_file_store
 from src.storage.local import LocalFileStore
-from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
+from src.storage.registry import NOT_SET, WorkspaceFileRegistry, WorkspaceFilesRepo
 
 __all__ = [
     "FileRef",
     "FileStore",
     "LocalFileStore",
+    "NOT_SET",
     "WorkspaceFileRegistry",
     "WorkspaceFilesRepo",
     "build_file_store",

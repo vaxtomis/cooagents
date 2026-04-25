@@ -121,6 +121,9 @@ class AcpxExecutor:
                 f"AcpxExecutor has no ssh_dispatcher; cannot dispatch to "
                 f"host_id={host_id!r}"
             )
+        # The remote worker recomputes WORKSPACES_ROOT itself, so it needs a
+        # workspace-relative task_file rather than the local absolute path.
+        remote_task_file = self._derive_remote_task_file(worktree, task_file)
         return await self.ssh_dispatcher.run_remote(
             host_id,
             cmd=cmd,
@@ -128,9 +131,25 @@ class AcpxExecutor:
             timeout=timeout_sec,
             workspace_id=workspace_id,
             correlation_id=correlation_id,
-            task_file=task_file,
+            task_file=remote_task_file,
             agent=self._resolve_agent(agent_type),
         )
+
+    @staticmethod
+    def _derive_remote_task_file(
+        worktree: str, task_file: str | None
+    ) -> str | None:
+        """Convert a possibly-absolute ``task_file`` to a path relative to
+        ``worktree`` (workspace root). The remote worker treats it as a
+        workspace-relative POSIX path.
+        """
+        if not task_file:
+            return None
+        try:
+            rel = os.path.relpath(task_file, start=worktree)
+        except ValueError:
+            return task_file
+        return rel.replace(os.sep, "/")
 
     async def _run_local(
         self, cmd: list[str], worktree: str

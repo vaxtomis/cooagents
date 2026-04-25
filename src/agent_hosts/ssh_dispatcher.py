@@ -198,10 +198,88 @@ class SshDispatcher:
         cmd: list[str],
         cwd: str,
         timeout: int,
-        # Phase 8b adds workspace_id / correlation_id / task_file kwargs;
-        # accept **kwargs here so the executor can forward them now.
+        workspace_id: str | None = None,
+        correlation_id: str | None = None,
+        task_file: str | None = None,
+        agent: str | None = None,
         **_extra: Any,
     ) -> tuple[str, int]:
-        raise NotImplementedError(
-            "Phase 8b: cooagents-worker run dispatch not yet implemented"
+        """SSH into ``host_id`` and run ``cooagents-worker run ...``.
+
+        ``cmd`` is the legacy local-acpx command line that
+        :class:`AcpxExecutor` would have run on the cooagents host. We
+        ignore it here in favour of the structured ``workspace_id /
+        task_file / agent / timeout`` kwargs because the worker takes
+        responsibility for assembling its own acpx invocation in the
+        agent-host environment (different ``WORKSPACES_ROOT``, different
+        env vars, etc.).
+        """
+        if workspace_id is None or task_file is None or agent is None:
+            raise ValueError(
+                "run_remote requires workspace_id, task_file, agent kwargs"
+            )
+
+        host = await self.repo.get(host_id)
+        if host is None:
+            raise NotFoundError(f"agent host not found: {host_id!r}")
+        if host["host"] == LOCAL_HOST_ID:
+            raise ValueError(
+                "run_remote called for local host; should not happen"
+            )
+
+        try:
+            import asyncssh  # type: ignore[import-not-found]
+        except ImportError as exc:  # pragma: no cover — declared in requirements.txt
+            raise RuntimeError("asyncssh is not installed") from exc
+
+        try:
+            user, hostname, port = _parse_ssh_target(host["host"])
+        except ValueError as exc:
+            raise RuntimeError(f"bad ssh target for {host_id!r}: {exc}") from exc
+
+        if self.strict_host_key and not self._known_hosts_path:
+            raise RuntimeError(
+                f"strict_host_key=True but ssh_known_hosts_path is unset; "
+                f"refusing to connect to {host_id!r}"
+            )
+
+        connect_kwargs: dict[str, Any] = {
+            "host": hostname,
+            "port": port,
+            "username": user,
+            "known_hosts": (
+                self._known_hosts_path if self.strict_host_key else None
+            ),
+        }
+        if host.get("ssh_key"):
+            connect_kwargs["client_keys"] = [host["ssh_key"]]
+
+        # Build the worker command. asyncssh.run takes a single string and
+        # passes it to the remote shell; quote every user-supplied value.
+        worker_cmd = " ".join([
+            "cooagents-worker", "run",
+            "--workspace-id", shlex.quote(workspace_id),
+            "--task-file", shlex.quote(task_file),
+            "--agent", shlex.quote(agent),
+            "--timeout", str(int(timeout)),
+            "--correlation-id", shlex.quote(correlation_id or ""),
+        ])
+        logger.info(
+            "ssh run_remote host=%s workspace=%s correlation=%s agent=%s",
+            host_id, workspace_id, correlation_id, agent,
         )
+
+        # Outer timeout = the per-step timeout plus a small grace window so
+        # the worker has a chance to report acpx exceeding its own budget.
+        outer_timeout = max(timeout + 30, timeout)
+        try:
+            async with asyncssh.connect(**connect_kwargs) as conn:
+                result = await asyncio.wait_for(
+                    conn.run(worker_cmd, check=False),
+                    timeout=outer_timeout,
+                )
+        except asyncio.TimeoutError:
+            return ("", 124)
+        stdout = (result.stdout or "")
+        rc = int(result.exit_status or 0)
+        return stdout.strip(), rc
