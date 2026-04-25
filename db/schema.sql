@@ -38,6 +38,40 @@ CREATE TABLE IF NOT EXISTS design_docs (
   UNIQUE(workspace_id, slug, version)
 );
 
+-- 2b. agent_hosts — Phase 8a: registered agent execution hosts.
+--     'local' (always present) plus operator-registered remote SSH targets.
+--     Referenced by design_works.agent_host_id and dev_works.agent_host_id.
+CREATE TABLE IF NOT EXISTS agent_hosts (
+  id              TEXT PRIMARY KEY,                  -- 'local' or 'ah-<hex12>'
+  host            TEXT NOT NULL,                     -- 'local' or 'user@ip[:port]'
+  agent_type      TEXT NOT NULL CHECK(agent_type IN ('claude','codex','both')),
+  max_concurrent  INTEGER NOT NULL DEFAULT 1,
+  ssh_key         TEXT,                              -- absolute path or NULL (local)
+  labels_json     TEXT NOT NULL DEFAULT '[]',
+  health_status   TEXT NOT NULL DEFAULT 'unknown'
+                  CHECK(health_status IN ('unknown','healthy','unhealthy')),
+  last_health_at  TEXT,
+  last_health_err TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+
+-- 2c. agent_dispatches — per-LLM-call dispatch lifecycle row (Phase 8a).
+--     Inserted in queued state, transitions to running, then succeeded/failed/timeout.
+CREATE TABLE IF NOT EXISTS agent_dispatches (
+  id               TEXT PRIMARY KEY,                 -- 'ad-<hex12>'
+  host_id          TEXT NOT NULL REFERENCES agent_hosts(id),
+  workspace_id     TEXT NOT NULL REFERENCES workspaces(id),
+  correlation_id   TEXT NOT NULL,                    -- design_work_id or dev_work_id
+  correlation_kind TEXT NOT NULL CHECK(correlation_kind IN ('design_work','dev_work')),
+  state            TEXT NOT NULL CHECK(state IN ('queued','running','succeeded','failed','timeout')),
+  started_at       TEXT,
+  finished_at      TEXT,
+  exit_code        INTEGER,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
+);
+
 -- 3. design_works — DesignWork state machine instance (process table)
 CREATE TABLE IF NOT EXISTS design_works (
   id                      TEXT PRIMARY KEY,  -- 'desw-<hex12>'
@@ -49,6 +83,9 @@ CREATE TABLE IF NOT EXISTS design_works (
   loop                    INTEGER NOT NULL DEFAULT 0,
   missing_sections_json   TEXT,
   agent                   TEXT NOT NULL DEFAULT 'claude' CHECK(agent IN ('claude','codex')),
+  -- Phase 8a: which agent host runs this DesignWork's LLM calls.
+  -- Default 'local' keeps old DBs working; FK enforced after agent_hosts table.
+  agent_host_id           TEXT NOT NULL DEFAULT 'local' REFERENCES agent_hosts(id),
   escalated_at            TEXT,
   -- Workspace-relative POSIX (e.g. "designs/.drafts/desw-<id>-input.md").
   user_input_path         TEXT,
@@ -81,6 +118,8 @@ CREATE TABLE IF NOT EXISTS dev_works (
   last_score                  INTEGER,
   last_problem_category       TEXT CHECK(last_problem_category IN ('req_gap','impl_gap','design_hollow') OR last_problem_category IS NULL),
   agent                       TEXT NOT NULL DEFAULT 'claude' CHECK(agent IN ('claude','codex')),
+  -- Phase 8a: which agent host runs this DevWork's LLM calls.
+  agent_host_id               TEXT NOT NULL DEFAULT 'local' REFERENCES agent_hosts(id),
   gates_json                  TEXT,
   escalated_at                TEXT,
   completed_at                TEXT,
@@ -128,12 +167,10 @@ CREATE TABLE IF NOT EXISTS workspace_events (
 );
 
 -- 8. workspace_files — authoritative per-workspace file inventory.
---    Rows are created by Phase 5 WorkspaceFileRegistry.register() (Phase 2
---    ships the shape only). `relative_path` is workspace-relative POSIX
---    (no leading '/', no backslash, no drive letter); the workspace slug
---    is implicit via workspace_id. `oss_key` includes the deployment
---    prefix + workspace slug (e.g. "workspaces/<slug>/designs/DES-x-1.md")
---    and is NULL when OSS is disabled. `oss_etag` CAS-guards writes.
+--    Rows are created by WorkspaceFileRegistry.register() = local atomic
+--    write → PUT OSS (when enabled) → DB upsert. `relative_path` is
+--    workspace-relative POSIX (no leading '/', no backslash, no drive
+--    letter); the workspace slug is implicit via workspace_id.
 CREATE TABLE IF NOT EXISTS workspace_files (
   id                TEXT PRIMARY KEY,              -- 'wf-<hex12>'
   workspace_id      TEXT NOT NULL REFERENCES workspaces(id),
@@ -144,10 +181,7 @@ CREATE TABLE IF NOT EXISTS workspace_files (
                         'context','artifact','other')),
   content_hash      TEXT,                          -- sha256 of local bytes; NULL before first write
   byte_size         INTEGER,
-  oss_key           TEXT,                          -- NULL when oss.enabled=false or never flushed
-  oss_etag          TEXT,                          -- NULL when never flushed
   local_mtime_ns    INTEGER,
-  last_synced_at    TEXT,                          -- ISO-8601, NULL until first successful flush
   created_at        TEXT NOT NULL,
   updated_at        TEXT NOT NULL,
   UNIQUE(workspace_id, relative_path)
@@ -177,8 +211,23 @@ CREATE INDEX IF NOT EXISTS idx_workspace_events_workspace  ON workspace_events(w
 CREATE INDEX IF NOT EXISTS idx_workspace_events_ts         ON workspace_events(ts);
 CREATE INDEX IF NOT EXISTS idx_workspace_files_workspace   ON workspace_files(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_files_kind        ON workspace_files(kind);
-CREATE INDEX IF NOT EXISTS idx_workspace_files_oss_key     ON workspace_files(oss_key)
-  WHERE oss_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_hosts_health          ON agent_hosts(health_status);
+CREATE INDEX IF NOT EXISTS idx_agent_dispatches_correlation
+  ON agent_dispatches(correlation_kind, correlation_id);
+CREATE INDEX IF NOT EXISTS idx_agent_dispatches_host       ON agent_dispatches(host_id);
+CREATE INDEX IF NOT EXISTS idx_agent_dispatches_state      ON agent_dispatches(state);
+
+-- Phase 8a invariant: the reserved 'local' host always exists so the
+-- design_works.agent_host_id / dev_works.agent_host_id FK ('local' default)
+-- always resolves. sync_from_config(agents.yaml) may overwrite the row,
+-- but never deletes it. Idempotent via INSERT OR IGNORE.
+INSERT OR IGNORE INTO agent_hosts(
+  id, host, agent_type, max_concurrent, ssh_key, labels_json,
+  health_status, created_at, updated_at
+) VALUES (
+  'local', 'local', 'both', 2, NULL, '[]',
+  'unknown', '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z'
+);
 
 -- 9. webhook_subscriptions — outbound webhook delivery targets
 --    Replaces the legacy `webhooks` table dropped in Phase 1.

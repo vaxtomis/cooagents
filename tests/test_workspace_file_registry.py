@@ -108,10 +108,10 @@ async def test_delete_removes_file_and_row(env):
     assert await env["repo"].get("ws-a", "d.md") is None
 
 
-async def test_db_failure_leaves_fs_for_recovery_scan(env, monkeypatch):
-    # Phase 5 intentional regression (PRD §Write Path): register() does NOT
-    # roll back the local write on a DB failure — the three-step protocol
-    # trusts the boot-time recovery scan to heal orphan FS writes.
+async def test_db_failure_leaves_fs_write(env, monkeypatch):
+    # register() = local atomic write → DB upsert. A DB failure after the
+    # local write leaves the on-disk file behind; the next successful
+    # register() of the same path overwrites it.
     reg = env["registry"]
     ws = env["ws"]
 
@@ -125,7 +125,7 @@ async def test_db_failure_leaves_fs_for_recovery_scan(env, monkeypatch):
             text="data", kind="other",
         )
     f = env["root"] / "alpha" / "fail.md"
-    assert f.exists(), "local write remains; recovery scan will re-register it"
+    assert f.exists()
 
 
 async def test_rejects_absolute_relative_path(env):
@@ -154,7 +154,7 @@ async def test_kind_enum_enforced(env):
             workspace_row=ws, relative_path="k.md",
             text="x", kind="bogus",
         )
-    # Verify the rollback deleted the FS write (put_bytes calls store first).
+    # kind validation precedes the FS write, so nothing is on disk.
     f = env["root"] / "alpha" / "k.md"
     assert not f.exists()
 

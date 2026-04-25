@@ -79,9 +79,13 @@ async def test_retry_locked_operation_retries_until_success(db):
 
 
 async def test_no_legacy_tables(db):
-    """Phase 1 dropped runs/jobs/events/agent_hosts wholesale; fresh schema must not
-    resurrect them."""
-    for tbl in ("runs", "jobs", "events", "agent_hosts", "merge_queue", "approvals",
+    """Phase 1 dropped runs/jobs/events wholesale; fresh schema must not
+    resurrect them.
+
+    ``agent_hosts`` was reintroduced in Phase 8a with a different shape and
+    is no longer considered a 'legacy' name.
+    """
+    for tbl in ("runs", "jobs", "events", "merge_queue", "approvals",
                 "steps", "artifacts", "turns"):
         row = await db.fetchone(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (tbl,)

@@ -24,8 +24,8 @@ async def test_workspace_files_column_set(db):
     by_name = {c["name"]: c for c in cols}
     expected = {
         "id", "workspace_id", "relative_path", "kind",
-        "content_hash", "byte_size", "oss_key", "oss_etag",
-        "local_mtime_ns", "last_synced_at", "created_at", "updated_at",
+        "content_hash", "byte_size",
+        "local_mtime_ns", "created_at", "updated_at",
     }
     assert set(by_name) == expected
     # NOT NULL invariants from PRD
@@ -33,8 +33,7 @@ async def test_workspace_files_column_set(db):
     for nn in ("workspace_id", "relative_path", "kind", "created_at", "updated_at"):
         assert by_name[nn]["notnull"] == 1, f"{nn} must be NOT NULL"
     # Nullable metadata
-    for nullable in ("content_hash", "byte_size", "oss_key", "oss_etag",
-                     "local_mtime_ns", "last_synced_at"):
+    for nullable in ("content_hash", "byte_size", "local_mtime_ns"):
         assert by_name[nullable]["notnull"] == 0
 
 
@@ -114,7 +113,6 @@ async def test_workspace_files_indexes_present(db):
     for expected in (
         "idx_workspace_files_workspace",
         "idx_workspace_files_kind",
-        "idx_workspace_files_oss_key",
     ):
         assert expected in names, f"missing index {expected}"
 

@@ -30,7 +30,8 @@ class StubExecutor:
         self.call_count = 0
 
     async def run_once(
-        self, agent_type, worktree, timeout_sec, task_file=None, prompt=None
+        self, agent_type, worktree, timeout_sec, task_file=None, prompt=None,
+        **_kwargs,
     ):
         self.call_count += 1
         prompt_text = Path(task_file).read_text(encoding="utf-8")

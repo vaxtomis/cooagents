@@ -1,30 +1,20 @@
 """Workspace file registry — DB-layer repo + FileStore composite writer.
 
-Phase 5 upgrades the Phase 3 2-step helper into a three-step CAS protocol:
+cooagents is the sole writer of every ``workspace_files`` row and every
+underlying FileStore object in Phase 1–7b. ``register()`` is a 2-step
+composite:
 
-    registry.register(workspace_row=ws, relative_path="designs/foo.md",
-                      data=body, kind="design_doc", expected_etag=None)
+    1. Local atomic write through ``store.put_bytes`` (LocalFileStore writes
+       atomically via temp+rename; OSSFileStore PUTs unconditionally).
+    2. ``WorkspaceFilesRepo.upsert`` records hash/size/mtime in the DB.
 
-Steps:
-  1. Local atomic write via ``store.put_bytes`` (LocalFileStore.put_bytes is
-     already atomic via temp-then-rename).
-  2. OSS conditional PUT via ``store.put_bytes_conditional`` (only when the
-     backend supports CAS; detected by duck-typing on the method).
-  3. DB CAS UPDATE matching the caller's ``expected_etag`` (or INSERT for
-     a brand-new row).
-
-On step-2 EtagMismatch the exception propagates to the caller (typically
-``regenerate_workspace_md``'s retry loop). Local FS is now ahead of OSS —
-the boot-time recovery scan heals that on next startup.
-
-Phase 3 callers (``put_bytes`` / ``put_markdown`` / ``put_json``) keep
-their signatures: they delegate to ``register`` with a sentinel
-``expected_etag=_SENTINEL`` which means "read the current etag from the DB
-row (if any) and use that as the CAS token".
+Concurrency safety comes from FastAPI's single event loop + SQLite's
+per-connection serialisation, not from CAS preconditions. Phase 8 will
+reintroduce CAS at Agent boundaries against the Agent execution model.
 
 Design references:
-  * PRD §Write Path & Concurrency Model
-  * .claude/PRPs/plans/phase-5-registry-sync-protocol.plan.md
+  * PRD §Technical Approach (Phase 7b)
+  * .claude/PRPs/plans/completed/phase-7b-architecture-rectification.plan.md
 """
 from __future__ import annotations
 
@@ -36,14 +26,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.exceptions import BadRequestError, NotFoundError
-from src.storage.base import EtagMismatch, FileRef, FileStore, normalize_key
+from src.storage.base import FileRef, FileStore, normalize_key
 
 logger = logging.getLogger(__name__)
-
-
-# Sentinel "no explicit value passed" for the tri-valued expected_etag arg.
-# Using a module-level object keeps it identity-comparable across callers.
-_SENTINEL: Any = object()
 
 
 # Must stay in lockstep with db/schema.sql `workspace_files.kind` CHECK clause.
@@ -60,30 +45,6 @@ _VALID_KINDS: frozenset[str] = frozenset({
     "artifact",
     "other",
 })
-
-
-def _is_integrity_error(exc: BaseException) -> bool:
-    """Duck-type detection of UNIQUE-constraint violations across DB drivers.
-
-    Avoids importing sqlite3 / aiosqlite here; any exception class whose
-    qualified name contains 'IntegrityError' counts. Matches sqlite3,
-    aiosqlite, and most DB-API 2.0 backends.
-    """
-    for cls in type(exc).__mro__:
-        if cls.__name__ == "IntegrityError":
-            return True
-    return False
-
-
-def _supports_conditional(store: FileStore) -> bool:
-    """True iff the backend can CAS via put_bytes_conditional.
-
-    LocalFileStore deliberately does NOT implement it — the local backend has
-    no ETag concept. OSSFileStore does. Avoids importing OSSFileStore here so
-    the registry module stays pure-Python with no SDK dependency when OSS is
-    off.
-    """
-    return hasattr(store, "put_bytes_conditional")
 
 
 class WorkspaceFilesRepo:
@@ -118,16 +79,12 @@ class WorkspaceFilesRepo:
         content_hash: str,
         byte_size: int,
         local_mtime_ns: int,
-        oss_key: str | None = None,
-        oss_etag: str | None = None,
-        last_synced_at: str | None = None,
     ) -> dict[str, Any]:
         """Insert-or-update the workspace_files row for a given (ws, path).
 
         Validates ``kind`` and ``relative_path`` at the boundary so callers get
         targeted ``BadRequestError`` messages instead of opaque IntegrityError
-        surfaces. ``oss_key`` / ``oss_etag`` / ``last_synced_at`` are Phase-5
-        additions; Phase 3 callers that omit them keep NULL semantics.
+        surfaces.
         """
         if kind not in _VALID_KINDS:
             raise BadRequestError(
@@ -148,11 +105,10 @@ class WorkspaceFilesRepo:
             if existing:
                 await self.db.execute(
                     "UPDATE workspace_files SET kind=?, content_hash=?, "
-                    "byte_size=?, oss_key=?, oss_etag=?, local_mtime_ns=?, "
-                    "last_synced_at=?, updated_at=? WHERE id=?",
+                    "byte_size=?, local_mtime_ns=?, updated_at=? WHERE id=?",
                     (
-                        kind, content_hash, byte_size, oss_key, oss_etag,
-                        local_mtime_ns, last_synced_at, now, existing["id"],
+                        kind, content_hash, byte_size, local_mtime_ns,
+                        now, existing["id"],
                     ),
                 )
                 created_at = existing["created_at"]
@@ -162,12 +118,11 @@ class WorkspaceFilesRepo:
                 created_at = now
                 await self.db.execute(
                     "INSERT INTO workspace_files(id, workspace_id, "
-                    "relative_path, kind, content_hash, byte_size, oss_key, "
-                    "oss_etag, local_mtime_ns, last_synced_at, created_at, "
-                    "updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "relative_path, kind, content_hash, byte_size, "
+                    "local_mtime_ns, created_at, updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?)",
                     (wf_id, workspace_id, rel_norm, kind, content_hash,
-                     byte_size, oss_key, oss_etag, local_mtime_ns,
-                     last_synced_at, created_at, now),
+                     byte_size, local_mtime_ns, created_at, now),
                 )
         logger.debug(
             "workspace_files upsert: ws=%s path=%s kind=%s size=%d",
@@ -180,10 +135,7 @@ class WorkspaceFilesRepo:
             "kind": kind,
             "content_hash": content_hash,
             "byte_size": byte_size,
-            "oss_key": oss_key,
-            "oss_etag": oss_etag,
             "local_mtime_ns": local_mtime_ns,
-            "last_synced_at": last_synced_at,
             "created_at": created_at,
             "updated_at": now,
         }
@@ -218,16 +170,9 @@ class WorkspaceFilesRepo:
 class WorkspaceFileRegistry:
     """FileStore + WorkspaceFilesRepo composite writer/reader.
 
-    Every workspace-internal write site routes through this service. Phase 5
-    upgrades the 2-step composite into a three-step CAS protocol via
-    ``register()``. Phase 3 callers keep working via the ``put_bytes`` /
-    ``put_markdown`` / ``put_json`` delegates.
-
-    Atomicity note: ``register()`` does NOT roll back the local write on a
-    subsequent DB CAS failure. The protocol trusts the boot-time recovery
-    scan to heal such inconsistencies. The legacy ``put_bytes`` rollback
-    semantics are removed (mid-write crash now leaves a local file that the
-    recovery scan re-registers on next boot).
+    ``register()`` = local atomic write → DB upsert. cooagents is the single
+    writer; no preconditions are required. Phase 8 will reintroduce CAS at
+    Agent boundaries.
     """
 
     def __init__(
@@ -261,149 +206,27 @@ class WorkspaceFileRegistry:
         relative_path: str,
         data: bytes,
         kind: str,
-        expected_etag: Any = _SENTINEL,
     ) -> dict[str, Any]:
-        """Three-step CAS write: local atomic → OSS conditional → DB CAS.
-
-        ``expected_etag`` is tri-valued:
-          * ``_SENTINEL`` (the default): read current etag from DB and use
-            it. Phase 3 callers (``put_bytes``, ``put_markdown``,
-            ``put_json``) rely on this — they don't know about CAS.
-          * ``None``: first-create contract — use ``If-None-Match: *`` on
-            OSS; DB CAS ``WHERE oss_etag IS NULL``.
-          * any string: conditional overwrite — use ``If-Match=<etag>`` on
-            OSS; DB CAS ``WHERE oss_etag=<etag>``.
-
-        Raises :class:`EtagMismatch` if either the OSS conditional PUT or
-        the DB CAS UPDATE fails its precondition.
-        """
+        """Local atomic write → DB upsert. No preconditions."""
         if kind not in _VALID_KINDS:
             raise BadRequestError(
                 f"invalid workspace_files.kind={kind!r}; "
                 f"expected one of {sorted(_VALID_KINDS)}"
             )
-        content_hash = hashlib.sha256(data).hexdigest()
         rel_norm = normalize_key(relative_path).as_posix()
-        store_key = self._compose_key(workspace_row["slug"], relative_path)
+        store_key = self.compose_key(workspace_row["slug"], relative_path)
 
-        # Resolve expected_etag from DB when caller did not pass one
-        # explicitly. Phase 3 semantics: whatever etag is currently on the
-        # row (may be None if never flushed) becomes the precondition.
-        if expected_etag is _SENTINEL:
-            existing = await self.repo.get(workspace_row["id"], rel_norm)
-            expected_etag = existing["oss_etag"] if existing else None
+        ref = await self.store.put_bytes(store_key, data)
+        content_hash = hashlib.sha256(data).hexdigest()
 
-        # Step 1 + 2: write bytes. With CAS-capable backends, a single
-        # conditional PUT covers both the atomic-write invariant AND the
-        # ETag precondition. With LocalFileStore, ``put_bytes`` is itself
-        # atomic (temp-then-rename) and there is no ETag concept, so the
-        # conditional branch is skipped.
-        oss_etag_new: str | None = None
-        oss_key: str | None = None
-        last_synced_at: str | None = None
-        if _supports_conditional(self.store):
-            if expected_etag is None:
-                oss_ref = await self.store.put_bytes_conditional(
-                    store_key, data, if_none_match="*",
-                )
-            else:
-                oss_ref = await self.store.put_bytes_conditional(
-                    store_key, data, if_match=expected_etag,
-                )
-            ref = oss_ref
-            oss_etag_new = oss_ref.etag
-            oss_key = store_key
-            last_synced_at = datetime.now(timezone.utc).isoformat()
-        else:
-            ref = await self.store.put_bytes(store_key, data)
-
-        # Step 3: DB CAS UPDATE (or INSERT if row doesn't yet exist).
-        updated = await self._cas_upsert(
-            workspace_row=workspace_row,
+        return await self.repo.upsert(
+            workspace_id=workspace_row["id"],
             relative_path=rel_norm,
             kind=kind,
             content_hash=content_hash,
             byte_size=ref.size,
             local_mtime_ns=ref.mtime_ns,
-            oss_key=oss_key,
-            oss_etag_new=oss_etag_new,
-            oss_etag_expected=expected_etag,
-            last_synced_at=last_synced_at,
         )
-        if updated is None:
-            raise EtagMismatch(
-                f"DB etag changed under us for {rel_norm!r} "
-                f"(expected={expected_etag!r})"
-            )
-        return updated
-
-    async def _cas_upsert(
-        self,
-        *,
-        workspace_row: dict[str, Any],
-        relative_path: str,
-        kind: str,
-        content_hash: str,
-        byte_size: int,
-        local_mtime_ns: int,
-        oss_key: str | None,
-        oss_etag_new: str | None,
-        oss_etag_expected: Any,
-        last_synced_at: str | None,
-    ) -> dict[str, Any] | None:
-        now = datetime.now(timezone.utc).isoformat()
-        existing = await self.repo.get(workspace_row["id"], relative_path)
-        if existing is None:
-            # INSERT path — no CAS needed; UNIQUE(workspace_id, relative_path)
-            # surfaces the rare concurrent-insert race. Translate to
-            # EtagMismatch so the retry loop in regenerate_workspace_md
-            # covers it instead of escaping as a raw IntegrityError.
-            try:
-                return await self.repo.upsert(
-                    workspace_id=workspace_row["id"],
-                    relative_path=relative_path,
-                    kind=kind,
-                    content_hash=content_hash,
-                    byte_size=byte_size,
-                    local_mtime_ns=local_mtime_ns,
-                    oss_key=oss_key,
-                    oss_etag=oss_etag_new,
-                    last_synced_at=last_synced_at,
-                )
-            except Exception as exc:
-                if _is_integrity_error(exc):
-                    return None  # signals EtagMismatch to caller
-                raise
-
-        # UPDATE path — CAS on (workspace_id, relative_path, oss_etag).
-        # NULL is never equal to NULL in SQL, so branch the WHERE clause.
-        if oss_etag_expected is None:
-            where_clause = (
-                "WHERE workspace_id=? AND relative_path=? AND oss_etag IS NULL"
-            )
-            params_tail: tuple[Any, ...] = (
-                workspace_row["id"], relative_path,
-            )
-        else:
-            where_clause = (
-                "WHERE workspace_id=? AND relative_path=? AND oss_etag=?"
-            )
-            params_tail = (
-                workspace_row["id"], relative_path, oss_etag_expected,
-            )
-
-        rc = await self.repo.db.execute_rowcount(
-            "UPDATE workspace_files SET kind=?, content_hash=?, byte_size=?, "
-            "oss_key=?, oss_etag=?, local_mtime_ns=?, last_synced_at=?, "
-            f"updated_at=? {where_clause}",
-            (
-                kind, content_hash, byte_size, oss_key, oss_etag_new,
-                local_mtime_ns, last_synced_at, now, *params_tail,
-            ),
-        )
-        if rc == 0:
-            return None  # signals EtagMismatch to caller
-        return await self.repo.get(workspace_row["id"], relative_path)
 
     async def put_bytes(
         self,
@@ -413,18 +236,12 @@ class WorkspaceFileRegistry:
         data: bytes,
         kind: str,
     ) -> dict[str, Any]:
-        """Write bytes and register metadata. Returns the workspace_files row.
-
-        Phase 3 signature preserved: delegates to ``register`` with the
-        sentinel ``expected_etag`` meaning "use the current DB etag (or
-        None) as the CAS precondition".
-        """
+        """Write bytes and register metadata. Returns the workspace_files row."""
         return await self.register(
             workspace_row=workspace_row,
             relative_path=relative_path,
             data=data,
             kind=kind,
-            expected_etag=_SENTINEL,
         )
 
     async def put_markdown(
@@ -490,7 +307,7 @@ class WorkspaceFileRegistry:
     async def delete(
         self, *, workspace_row: dict[str, Any], relative_path: str
     ) -> None:
-        """Delete FS then DB. On crash between, DB orphan is Phase-5 sweepable."""
+        """Delete FS then DB."""
         store_key = self._compose_key(workspace_row["slug"], relative_path)
         await self.store.delete(store_key)
         await self.repo.delete(
@@ -506,11 +323,11 @@ class WorkspaceFileRegistry:
     ) -> dict[str, Any]:
         """Register an already-on-disk file: read, hash, stat, then upsert.
 
-        Used by (a) ``WorkspaceManager.create_with_scaffold`` where the FS write
-        must precede the ``workspaces`` row (FK constraint), (b) LLM-produced
-        outputs that the LLM writes directly to an absolute path under
-        ``<workspaces_root>/<slug>/`` (Step3 context, Step4/5 artifacts), and
-        (c) Phase 5's ``startup_recovery_scan``.
+        Used by (a) ``WorkspaceManager.create_with_scaffold`` where the FS
+        write must precede the ``workspaces`` row (FK constraint), and
+        (b) LLM-produced outputs that the LLM writes directly to an absolute
+        path under ``<workspaces_root>/<slug>/`` (Step3 context, Step4/5
+        artifacts).
         """
         store_key = self._compose_key(workspace_row["slug"], relative_path)
         ref = await self.store.stat(store_key)

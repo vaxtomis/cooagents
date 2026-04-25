@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from src.exceptions import BadRequestError
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Mirrors src.models.LOCAL_HOST_ID; duplicated here to keep src.config free
+# of the heavier src.models import chain (FastAPI / pydantic enums).
+_LOCAL_HOST_ID = "local"
+_SSH_HOST_PATTERN = re.compile(r"^[\w.\-]+@[\w.\-]+(?::\d+)?$")
 
 
 class ServerConfig(BaseModel):
@@ -135,7 +143,12 @@ class OpenclawHooksConfig(BaseModel):
     url: str = "http://127.0.0.1:18789/hooks/agent"
     # Why: committed YAML must never hold secrets. Prefer env var OPENCLAW_HOOK_TOKEN;
     # fall back to YAML only if the env var is absent. A YAML value of "" means "read env".
-    token: str = Field(default_factory=lambda: os.environ.get("OPENCLAW_HOOK_TOKEN", ""))
+    # repr=False keeps the token out of repr()/str() so accidental logging of the
+    # settings tree does not leak it.
+    token: str = Field(
+        default_factory=lambda: os.environ.get("OPENCLAW_HOOK_TOKEN", ""),
+        repr=False,
+    )
     default_channel: str = "last"
     default_to: str = ""
 
@@ -168,7 +181,11 @@ class HermesWebhookConfig(BaseModel):
     # Default route matches the suggestion in references/hermes-integration.md
     url: str = "http://127.0.0.1:8644/webhook/cooagents"
     # ``$ENV:VARNAME`` is resolved by webhook_notifier._resolve_secret.
-    secret: str = Field(default_factory=lambda: os.environ.get("HERMES_WEBHOOK_SECRET", ""))
+    # repr=False keeps the secret out of repr()/str().
+    secret: str = Field(
+        default_factory=lambda: os.environ.get("HERMES_WEBHOOK_SECRET", ""),
+        repr=False,
+    )
     # Event types pushed to Hermes; empty list means "all events the notifier
     # normally sends to OpenClaw". The Hermes side decides which to act on.
     events: list[str] = []
@@ -189,32 +206,161 @@ class HermesConfig(BaseModel):
     webhook: HermesWebhookConfig = HermesWebhookConfig()
 
 
-class RecoveryScanConfig(BaseModel):
-    """Boot-time recovery-scan behavior (Phase 5).
+class OSSConfig(BaseModel):
+    """Aliyun OSS backend config (Phase 6).
 
-    The scan reconciles local FS ↔ DB ↔ OSS HEAD on app startup and self-heals
-    inconsistencies left by mid-write crashes (see src/sync/recovery.py).
+    Resolution rule (mirrors OpenclawHooksConfig.token / HermesWebhookConfig.secret):
+      * YAML writes non-empty value → YAML overrides env
+      * YAML omits the field → ``default_factory`` reads env at construction
+      * YAML writes ``""`` → field becomes empty → ``load_settings`` block
+        re-reads env (so operators can commit the YAML structure with
+        placeholders and still populate from env at runtime)
 
-    ``enabled=false`` disables the pass entirely — appropriate for tests, CI
-    smoke environments, or deployments where operators manually trigger
-    reconciliation via the materialize/regenerate routes.
+    Five fields are env-backed: ``bucket``, ``region``, ``endpoint``,
+    ``access_key_id``, ``access_key_secret``. Two fields are YAML-only:
+    ``enabled`` (bool toggle; no env var per PRD L376) and ``prefix``
+    (not a secret; YAML keeps the deploy-time structure obvious).
 
-    ``trust_window_hours`` bounds per-boot OSS HEAD cost: DB rows whose
-    ``last_synced_at`` is within the window are trusted and skip the HEAD
-    round-trip. ``0`` disables the trust window (always HEAD — strictest
-    consistency, slowest boot). ``24`` (default) is the rule of thumb.
+    When ``enabled=True`` the lifespan factory constructs ``OSSFileStore``
+    instead of ``LocalFileStore``. ``load_settings`` enforces that every
+    required value is non-empty and raises ``BadRequestError`` otherwise.
     """
-    enabled: bool = True
-    trust_window_hours: int = Field(default=24, ge=0)
+    enabled: bool = False
+    bucket: str = Field(
+        default_factory=lambda: os.environ.get("OSS_BUCKET", "")
+    )
+    region: str = Field(
+        default_factory=lambda: os.environ.get("OSS_REGION", "")
+    )
+    endpoint: str = Field(
+        default_factory=lambda: os.environ.get("OSS_ENDPOINT", "")
+    )
+    # Optional key prefix applied to every object key. Empty = no prefix.
+    # When set, must end with "/". Validation lives in OSSFileStore.__init__.
+    prefix: str = ""
+    # repr=False on both keys: the secret obviously, the id by convention so
+    # the credential pair never lands in a log line together.
+    access_key_id: str = Field(
+        default_factory=lambda: os.environ.get("OSS_ACCESS_KEY_ID", ""),
+        repr=False,
+    )
+    access_key_secret: str = Field(
+        default_factory=lambda: os.environ.get("OSS_ACCESS_KEY_SECRET", ""),
+        repr=False,
+    )
 
 
 class StorageConfig(BaseModel):
-    """Storage subsystem config (Phase 5 + Phase 6).
+    """Storage subsystem config.
 
-    Phase 5 adds ``recovery_scan``. Phase 6 will add ``oss: OSSConfig``
-    alongside it when the OSS backend becomes user-switchable.
+    OSS is a write-only backup target in Phase 1–7b: every workspace
+    artifact write propagates through ``register()`` → local + PUT OSS +
+    DB upsert. Phase 8 will introduce Agent-side hydration / CAS primitives.
     """
-    recovery_scan: RecoveryScanConfig = RecoveryScanConfig()
+    oss: OSSConfig = OSSConfig()
+
+
+class AgentHostConfig(BaseModel):
+    """One entry in ``config/agents.yaml`` ``hosts`` list (Phase 8a).
+
+    ``host`` accepts either the literal ``"local"`` or an SSH spec
+    ``"user@host[:port]"``. ``ssh_key`` paths are expanded with
+    ``Path(p).expanduser()`` at load time so ``~/.ssh/...`` works.
+    """
+    id: str = Field(..., min_length=1, max_length=64)
+    host: str = Field(..., min_length=1)
+    agent_type: Literal["claude", "codex", "both"] = "both"
+    max_concurrent: int = Field(1, ge=1, le=64)
+    ssh_key: str | None = None
+    labels: list[str] = Field(default_factory=list)
+
+    @field_validator("host")
+    @classmethod
+    def _validate_host(cls, v: str) -> str:
+        if v == _LOCAL_HOST_ID:
+            return v
+        if not _SSH_HOST_PATTERN.match(v):
+            raise ValueError(
+                f"host must be 'local' or 'user@host[:port]', got {v!r}"
+            )
+        return v
+
+    @field_validator("ssh_key")
+    @classmethod
+    def _expand_ssh_key(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return str(Path(v).expanduser())
+
+
+class AgentsConfig(BaseModel):
+    """Top-level shape of ``config/agents.yaml`` (Phase 8a)."""
+    hosts: list[AgentHostConfig] = Field(default_factory=list)
+    # Default ON: every SSH connection must verify the host key against
+    # ``ssh_known_hosts_path``. Flip to False only for throwaway dev hosts;
+    # in any deployment that crosses an untrusted network this is MITM bait.
+    ssh_strict_host_key: bool = True
+    # Path to the known_hosts file consulted when ``ssh_strict_host_key`` is
+    # True. Defaults to the operator's user file. ``~`` is expanded at load.
+    ssh_known_hosts_path: str = "~/.ssh/known_hosts"
+    # Paths under which an ``ssh_key`` value is accepted. Anything outside
+    # these roots is rejected at upsert/load time so an attacker who can
+    # write a host row cannot point ``client_keys`` at, e.g., /etc/shadow.
+    ssh_key_allowed_roots: list[str] = Field(
+        default_factory=lambda: ["~/.ssh"]
+    )
+
+    @field_validator("hosts")
+    @classmethod
+    def _no_duplicate_ids(cls, v: list[AgentHostConfig]) -> list[AgentHostConfig]:
+        seen: set[str] = set()
+        for h in v:
+            if h.id in seen:
+                raise ValueError(f"duplicate agent host id in agents.yaml: {h.id!r}")
+            seen.add(h.id)
+        return v
+
+    @field_validator("ssh_known_hosts_path")
+    @classmethod
+    def _expand_known_hosts(cls, v: str) -> str:
+        return str(Path(v).expanduser())
+
+    @model_validator(mode="after")
+    def _validate_host_ssh_keys(self) -> "AgentsConfig":
+        # Catch malformed YAML at load time rather than at first dispatch.
+        for h in self.hosts:
+            if h.ssh_key and not self.is_ssh_key_path_allowed(h.ssh_key):
+                raise ValueError(
+                    f"agents.yaml host {h.id!r}: ssh_key {h.ssh_key!r} "
+                    f"is outside ssh_key_allowed_roots="
+                    f"{self.ssh_key_allowed_roots}"
+                )
+        return self
+
+    def _resolved_allowed_roots(self) -> list[Path]:
+        # Resolve at call time — Pydantic v2 does not run field validators on
+        # defaults, and this list rarely runs in a hot loop.
+        out: list[Path] = []
+        for p in self.ssh_key_allowed_roots:
+            try:
+                out.append(Path(p).expanduser().resolve())
+            except (OSError, RuntimeError):
+                continue
+        return out
+
+    def is_ssh_key_path_allowed(self, path: str) -> bool:
+        """Return True iff ``path`` resolves under one of the allowed roots."""
+        try:
+            resolved = Path(path).expanduser().resolve()
+        except (OSError, RuntimeError):
+            return False
+        for root in self._resolved_allowed_roots():
+            try:
+                resolved.relative_to(root)
+            except ValueError:
+                continue
+            return True
+        return False
 
 
 class SecurityConfig(BaseModel):
@@ -250,6 +396,10 @@ class Settings(BaseModel):
     tracing: TracingConfig = TracingConfig()
     security: SecurityConfig = SecurityConfig()
     storage: StorageConfig = StorageConfig()
+    # Phase 8a: populated by load_settings() from config/agents.yaml. Kept on
+    # Settings (not constructed eagerly) so tests can inject AgentsConfig
+    # instances directly without touching the on-disk file.
+    agents: AgentsConfig = AgentsConfig()
     design: DesignConfig = DesignConfig()
     scoring: ScoringConfig = ScoringConfig()
     devwork: DevWorkConfig = DevWorkConfig()
@@ -294,4 +444,72 @@ def load_settings(path: Path | str | None = None) -> Settings:
         if env_secret:
             settings.hermes.webhook.secret = env_secret
 
+    # Empty YAML value → re-read env (symmetric with openclaw.hooks.token and
+    # hermes.webhook.secret pattern above). Non-empty YAML takes precedence.
+    for attr, env_name in (
+        ("bucket", "OSS_BUCKET"),
+        ("region", "OSS_REGION"),
+        ("endpoint", "OSS_ENDPOINT"),
+        ("access_key_id", "OSS_ACCESS_KEY_ID"),
+        ("access_key_secret", "OSS_ACCESS_KEY_SECRET"),
+    ):
+        if not getattr(settings.storage.oss, attr):
+            env_val = os.environ.get(env_name, "")
+            if env_val:
+                setattr(settings.storage.oss, attr, env_val)
+
+    # Phase 8a: load agents.yaml siblings to settings.yaml. The file is
+    # optional — missing or empty file becomes AgentsConfig(hosts=[]).
+    settings.agents = load_agents(path.parent / "agents.yaml")
+
+    if settings.storage.oss.enabled:
+        missing = [
+            name for name, val in (
+                ("bucket", settings.storage.oss.bucket),
+                ("region", settings.storage.oss.region),
+                ("endpoint", settings.storage.oss.endpoint),
+                ("access_key_id", settings.storage.oss.access_key_id),
+                ("access_key_secret", settings.storage.oss.access_key_secret),
+            )
+            if not val
+        ]
+        if missing:
+            raise BadRequestError(
+                "settings.storage.oss.enabled=true requires: "
+                f"{missing}. Set them in config/settings.yaml under "
+                "'storage.oss' or via env vars OSS_BUCKET / OSS_REGION / "
+                "OSS_ENDPOINT / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET."
+            )
+
     return settings
+
+
+def load_agents(path: Path | str | None = None) -> AgentsConfig:
+    """Load ``config/agents.yaml`` into an :class:`AgentsConfig`.
+
+    Missing file → empty hosts list (no error). Top-level YAML must be a
+    mapping with optional ``hosts`` and ``ssh_strict_host_key`` keys.
+    Duplicate ``id`` values across ``hosts`` raise :class:`BadRequestError`.
+    """
+    if path is None:
+        path = ROOT / "config" / "agents.yaml"
+    path = Path(path)
+
+    if not path.exists():
+        return AgentsConfig()
+
+    with path.open("r", encoding="utf-8") as fh:
+        data: Any = yaml.safe_load(fh) or {}
+
+    # Allow legacy shape `hosts: [...]` at the top level (no wrapper key).
+    if isinstance(data, list):
+        data = {"hosts": data}
+    if not isinstance(data, dict):
+        raise BadRequestError(
+            f"agents.yaml must be a mapping or list of hosts, got {type(data).__name__}"
+        )
+
+    try:
+        return AgentsConfig.model_validate(data)
+    except Exception as exc:  # pydantic ValidationError or our own ValueError
+        raise BadRequestError(f"invalid agents.yaml: {exc}") from exc

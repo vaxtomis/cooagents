@@ -13,12 +13,7 @@ from fastapi import APIRouter, Request, Response
 from slowapi import Limiter
 
 from src.exceptions import BadRequestError, NotFoundError
-from src.models import (
-    CreateWorkspaceRequest,
-    MaterializeReportResponse,
-    RegenerateIndexResponse,
-    WorkspaceSyncReport,
-)
+from src.models import CreateWorkspaceRequest, WorkspaceSyncReport
 from src.request_utils import client_ip
 
 limiter = Limiter(key_func=client_ip)
@@ -51,37 +46,14 @@ async def list_workspaces(request: Request, status: str | None = None):
 @router.post("/workspaces/sync")
 @limiter.limit("5/minute")
 async def sync_all(request: Request) -> WorkspaceSyncReport:
+    """Reconcile FS vs DB (single-mode FS-wins).
+
+    Inserts DB rows for FS-only dirs, archives DB rows whose local dir is
+    missing.
+    """
     wm = request.app.state.workspaces
     report = await wm.reconcile()
     return WorkspaceSyncReport(**report)
-
-
-@router.post("/workspaces/{workspace_id}/materialize")
-@limiter.limit("10/minute")
-async def materialize_workspace(
-    workspace_id: str, request: Request,
-) -> MaterializeReportResponse:
-    """Hydrate local FS from DB+OSS for a workspace (Phase 5)."""
-    ws_sync = request.app.state.workspace_sync
-    report = await ws_sync.materialize(workspace_id)
-    return MaterializeReportResponse(
-        workspace_id=report.workspace_id,
-        pulled=report.pulled,
-        skipped=report.skipped,
-        missing_oss=report.missing_oss,
-        errors=list(report.errors),
-    )
-
-
-@router.post("/workspaces/{workspace_id}/regenerate-index")
-@limiter.limit("20/minute")
-async def regenerate_index(
-    workspace_id: str, request: Request,
-) -> RegenerateIndexResponse:
-    """Re-render workspace.md from DB state via CAS (Phase 5)."""
-    wm = request.app.state.workspaces
-    result = await wm.regenerate_workspace_md(workspace_id)
-    return RegenerateIndexResponse(**result)
 
 
 @router.get("/workspaces/{workspace_id}")

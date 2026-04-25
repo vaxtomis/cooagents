@@ -26,6 +26,7 @@ flowchart LR
 - [快速启动](#快速启动)
 - [配置](#配置)
 - [宿主集成](#宿主集成)
+- [存储与多 Agent 文件共享](#存储与多-agent-文件共享)
 - [API 参考](#api-参考)
 - [事件与 Webhook](#事件与-webhook)
 - [Success Metrics](#success-metrics)
@@ -56,6 +57,7 @@ v1 是**破坏性重构**后的 Workspace 模型。旧的 15 阶段线性 Run、
 ## 核心特性
 
 - **Workspace 驱动** — 磁盘 + DB 双向投影，启动时 `reconcile()` 校验；单 DevWork/DesignDoc 通过 partial UNIQUE index 强制串行。
+- **OSS 文件备份** — 可选启用阿里云 OSS 作为工作区制品的只写备份目标；`workspace_files` 表在 cooagents DB 里记 `relative_path + sha256 + byte_size`，每次 `register()` 把本地原子写入同步 PUT 到 OSS。Phase 1–7b 不提供 cooagents 内置的反向拉取；DR 由操作员通过 OSS 控制台 + 一次性脚本完成。Phase 8 在 Agent 执行节点引入双向 materialize / CAS。关闭时零行为变更。
 - **双状态机** — DesignWork（D0–D7，11 态）+ DevWork（STEP1–STEP5，8 态），单写入者，幂等 `tick`。
 - **打分驱动迭代** — Step5 reviewer 输出 `score + problem_category`，SM 自行决定回跳到 Step2/3/4 或收敛。
 - **版本化设计产物** — SemVer `1.0.0` + `content_hash` (SHA-256) + `byte_size`；`published` 后不可修改。
@@ -152,6 +154,18 @@ hermes:
     url: "http://127.0.0.1:8644/webhook/cooagents"
     secret: ""                      # 建议 "$ENV:HERMES_WEBHOOK_SECRET"
     events: []
+
+storage:
+  oss:
+    enabled: false                  # true = 用 OSS 做工作区制品权威源
+    bucket: "cooagents-prod"
+    region: "cn-hangzhou"
+    endpoint: "https://oss-cn-hangzhou.aliyuncs.com"
+    prefix: "workspaces/"           # 对象键前缀，可留空
+    # access_key_id / access_key_secret：读 OSS_ACCESS_KEY_ID /
+    # OSS_ACCESS_KEY_SECRET 环境变量；切勿提交明文到仓库
+    access_key_id: ""
+    access_key_secret: ""
 ```
 
 ### `config/agents.yaml`
@@ -182,7 +196,17 @@ OPENCLAW_HOOK_TOKEN=...
 FEISHU_WEBHOOK_URL=...
 COOAGENTS_CONFIG_DIR=config
 COOAGENTS_COOP_DIR=.coop
+# OSS 启用时必需（storage.oss.enabled=true）：
+OSS_BUCKET=cooagents-prod
+OSS_REGION=cn-hangzhou
+OSS_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
+OSS_ACCESS_KEY_ID=LTAI...
+OSS_ACCESS_KEY_SECRET=...
 ```
+
+> `load_settings` 同时支持把这些值写在 `config/settings.yaml` 的
+> `storage.oss.*` 槽里；环境变量**只在 YAML 槽为空时**回填，不会反向覆盖
+> 已显式配置的 YAML 值。
 
 ### 开发环境升级（Phase 2 及以后）
 
@@ -196,6 +220,8 @@ rm -rf "$WORKSPACES_ROOT"/*
 
 然后重启服务即可。首次生产部署前再补历史回填脚本（见 PRD
 `oss-file-storage-upgrade.prd.md` §Historical Data Migration）。
+
+> OSS 启用后的持久化与恢复细节：见 [存储与多 Agent 文件共享](#存储与多-agent-文件共享)。
 
 ## 宿主集成
 
@@ -270,6 +296,71 @@ curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
        \"secret\":\"$HERMES_SECRET\"}"
 ```
 
+## 存储与多 Agent 文件共享
+
+cooagents 的架构是：**一台控制服务器（cooagents：单 SQLite DB + HTTP API + 文件 IO）+ 一个 Agent 执行节点池**。Phase 1–7b 实现的是控制平面侧的文件抽象、相对路径化、`workspace_files` 元数据清单，以及（可选）把每次写入的字节同步备份到 OSS。**真正让 Agent 跨主机看到对方产物的"双向 materialize / CAS / recovery"原语属于 Phase 8**，会在 Agent 执行节点的生命周期里按 Agent 模型重新设计。
+
+Phase 1–7b OSS 启用后的行为：
+
+- `WorkspaceFileRegistry.register()` 走"本地原子写 → PUT OSS → DB upsert"两步序，无 CAS、无重试
+- cooagents 是 DB 与 OSS 对象的**唯一写者**（FastAPI 单事件循环 + SQLite per-connection 序列化）
+- 没有 cooagents 内置的"从 OSS 反向拉文件"接口；磁盘灾难恢复时操作员通过 OSS 控制台 + 一次性脚本把对象拉回 `workspace_root`，再让 cooagents 启动 `reconcile()` 收尾
+
+路由细节见 [API 参考](#api-参考)；协议与不变量见 PRD `oss-file-storage-upgrade.prd.md`。
+
+### 本地 vs OSS
+
+| 维度 | `storage.oss.enabled=false`（默认） | `storage.oss.enabled=true` |
+|------|----------------------------------|-----------------------------|
+| 文件落地 | 本地磁盘 | 本地磁盘 + OSS 同步备份 |
+| `/workspaces/sync` 语义 | FS-wins：目录存在→INSERT；DB 有、目录无→archived | 同左（Phase 7b 后单态） |
+| 跨主机 Agent 派发 | 未支持（Phase 8） | 未支持（Phase 8） |
+| 灾难恢复 | 无（本地丢即丢） | 操作员从 OSS 控制台拉回字节 + cooagents `reconcile()` |
+| 启动时 SDK 开销 | 零（`alibabacloud_oss_v2` 不导入） | OSS SDK 懒加载一次 |
+
+### 启用 OSS
+
+1. 准备一个阿里云 OSS 桶（专用于 cooagents；不要混用生产桶）。
+2. 给 RAM 用户授权：`oss:PutObject / GetObject / HeadObject / DeleteObject / ListObjects`（无需桶级删除/配置权限）。
+3. 在 `config/settings.yaml` 设置 `storage.oss.enabled: true` 并填 `bucket / region / endpoint / prefix`（见 [配置](#配置)）。
+4. 在 `.env` 里写入 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET`（可选：其他 OSS 变量，如果你希望不写进 YAML）。
+5. 重启服务。任一 OSS 必需字段缺失时启动**立即失败**，错误信息会列出缺失键名。
+
+> 关闭时什么都不用做 —— `workspace_files` 表仍在记账（hash / size / mtime），既有 DesignWork/DevWork 行为零变更。
+
+### 运维端点
+
+走 `/api/v1` 前缀，需要 `X-Agent-Token`。
+
+- **`POST /api/v1/workspaces/sync`** — 单态 FS-wins reconcile：本地有目录而 DB 无行 → INSERT active；DB active 而本地无目录 → 归档。限流 5/min。
+
+> Phase 1–7b 不再提供 `/workspaces/{id}/materialize` 与 `/workspaces/{id}/regenerate-index` 路由。前者属于 Phase 8 的 Agent 端文件平面；后者由内部状态机调用，不需要操作员触发。两个路径目前都返回 404。
+
+### 本期能做 / 不能做
+
+**能做**：
+
+- OSS 启用态下，每次工作区写入都同步备份到 OSS（PUT 失败即抛错，不会留下"DB 行已 upsert 但 OSS 缺对象"的状态）
+- cooagents 服务器搬家：备份 DB + 指向同一 OSS 桶，操作员从 OSS 控制台把对象拉回新机器的 `workspace_root`，再起服务
+- 单机故障重启：启动期 `reconcile()` 把 FS↔DB 漂移修正
+
+**不能做**（PRD §What We're NOT Building）：
+
+- cooagents 内置的"从 OSS 反向拉文件"接口（Phase 8）
+- 跨主机 Agent 派发（Phase 8）
+- CAS 预条件 / 三方 recovery scan / 操作员 materialize HTTP 路由（Phase 8 在 Agent 边界重新设计）
+- cooagents 控制服务器多实例化（DB 仍是单副本）
+
+### 故障排查
+
+| 症状 | 原因 | 处理 |
+|------|------|------|
+| 启动报 `settings.storage.oss.enabled=true requires: [...]` | YAML/env 里缺 OSS 必需字段 | 按报错列表补齐；`load_settings` 在 `src/config.py` 实现，缺失即拒绝启动 |
+| `register()` 抛 OSS 错（`OperationError` 等） | OSS PUT 失败（凭证 / 网络 / 桶策略） | 检查桶访问权限；OSS 错抛出后 DB 不会留下"无对应 OSS 对象"的行；下次相同 path 写入会重新 PUT |
+| 本地 FS 与 DB 不一致 | cooagents 进程崩溃在 put_bytes 与 DB upsert 之间 | 重启服务触发 `WorkspaceManager.reconcile()`；本地存在但 DB 无 active 行 → INSERT |
+
+> 协议与不变量：见 [`oss-file-storage-upgrade.prd.md`](.claude/PRPs/prds/oss-file-storage-upgrade.prd.md) §Technical Approach。
+
 ## API 参考
 
 所有 `/api/v1/*`（`/auth/*` 除外）需 Session Cookie 或 `X-Agent-Token`（等于 `AGENT_API_TOKEN`）。完整 Swagger 见 `/docs`。
@@ -282,7 +373,7 @@ curl -X POST http://127.0.0.1:8321/api/v1/webhooks \
 | GET | `/api/v1/workspaces?status=active` | 列表 |
 | GET | `/api/v1/workspaces/{id}` | 详情 |
 | DELETE | `/api/v1/workspaces/{id}` | 归档（status=archived） |
-| POST | `/api/v1/workspaces/sync` | DB ↔ FS 一致性报告 |
+| POST | `/api/v1/workspaces/sync` | DB ↔ FS reconcile（单态 FS-wins，见「存储与多 Agent 文件共享」） |
 | GET | `/api/v1/workspaces/{id}/events` | 只读事件流 |
 
 ### DesignWork / DesignDoc

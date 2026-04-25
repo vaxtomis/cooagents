@@ -10,10 +10,25 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from src.models import LOCAL_HOST_ID
+
+if TYPE_CHECKING:
+    from src.agent_hosts.ssh_dispatcher import SshDispatcher
 
 
 class AcpxExecutor:
-    def __init__(self, db, webhook_notifier, config=None, coop_dir=".coop", project_root=None):
+    def __init__(
+        self,
+        db,
+        webhook_notifier,
+        config=None,
+        coop_dir=".coop",
+        project_root=None,
+        *,
+        ssh_dispatcher: "SshDispatcher | None" = None,
+    ):
         self.db = db
         self.webhooks = webhook_notifier
         self.config = config
@@ -22,6 +37,9 @@ class AcpxExecutor:
         if not coop_path.is_absolute():
             coop_path = self.project_root / coop_path
         self.coop_dir = str(coop_path)
+        # Phase 8a: optional remote dispatcher. When None, every host_id !=
+        # 'local' raises RuntimeError instead of attempting SSH.
+        self.ssh_dispatcher = ssh_dispatcher
 
     # ------------------------------------------------------------------
     # Helpers (preserved from the original command builder)
@@ -80,13 +98,43 @@ class AcpxExecutor:
         timeout_sec: int,
         task_file: str | None = None,
         prompt: str | None = None,
+        *,
+        host_id: str = LOCAL_HOST_ID,
+        workspace_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> tuple[str, int]:
         """Run ``acpx <agent> exec`` once against ``worktree``.
 
-        Returns ``(stdout_text, exit_code)``. No persistent session, no job
-        row, no callbacks. Callers own retry / status interpretation.
+        Returns ``(stdout_text, exit_code)``. ``host_id="local"`` keeps the
+        Phase 7b behaviour byte-for-byte. Any other host id is delegated to
+        the injected :class:`SshDispatcher`, which in Phase 8a only knows
+        how to raise ``NotImplementedError`` — actual remote execution
+        lands in Phase 8b.
         """
-        cmd = self._build_acpx_exec_cmd(agent_type, worktree, timeout_sec, task_file, prompt)
+        cmd = self._build_acpx_exec_cmd(
+            agent_type, worktree, timeout_sec, task_file, prompt
+        )
+        if host_id == LOCAL_HOST_ID:
+            return await self._run_local(cmd, worktree)
+        if self.ssh_dispatcher is None:
+            raise RuntimeError(
+                f"AcpxExecutor has no ssh_dispatcher; cannot dispatch to "
+                f"host_id={host_id!r}"
+            )
+        return await self.ssh_dispatcher.run_remote(
+            host_id,
+            cmd=cmd,
+            cwd=worktree,
+            timeout=timeout_sec,
+            workspace_id=workspace_id,
+            correlation_id=correlation_id,
+            task_file=task_file,
+            agent=self._resolve_agent(agent_type),
+        )
+
+    async def _run_local(
+        self, cmd: list[str], worktree: str
+    ) -> tuple[str, int]:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=worktree,

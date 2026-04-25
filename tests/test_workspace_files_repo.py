@@ -45,14 +45,10 @@ async def test_upsert_inserts_new_row(env):
     assert row["content_hash"] == "h1"
     assert row["byte_size"] == 3
     assert row["local_mtime_ns"] == 1
-    assert row["oss_key"] is None
-    assert row["oss_etag"] is None
-    assert row["last_synced_at"] is None
     # DB row mirrors return value
     db_row = await repo.get("ws-a", "designs/a.md")
     assert db_row is not None
     assert db_row["content_hash"] == "h1"
-    assert db_row["oss_key"] is None
 
 
 async def test_upsert_updates_existing_row(env):

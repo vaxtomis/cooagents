@@ -28,7 +28,6 @@ from src.mockup_renderer import MockupSpec, PathMockupRenderer
 from src.models import DesignWorkMode, DesignWorkState
 from src.semver import next_version
 from src.storage.registry import WorkspaceFileRegistry
-from src.sync.workspace_sync import WorkspaceSync
 from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,8 @@ class DesignWorkStateMachine:
         registry: WorkspaceFileRegistry,
         mockup_renderer=None,  # MockupRenderer; defaults to PathMockupRenderer (U6)
         webhooks=None,     # WebhookNotifier (optional)
-        workspace_sync: "WorkspaceSync | None" = None,
+        agent_host_repo=None,      # Phase 8a: AgentHostRepo (None ⇒ host_id="local")
+        agent_dispatch_repo=None,  # Phase 8a: AgentDispatchRepo (None ⇒ no lifecycle row)
     ):
         self.db = db
         self.workspaces = workspaces
@@ -55,7 +55,8 @@ class DesignWorkStateMachine:
         self.registry = registry
         self.mockup_renderer = mockup_renderer or PathMockupRenderer()
         self.webhooks = webhooks
-        self.workspace_sync = workspace_sync
+        self.agent_host_repo = agent_host_repo
+        self.agent_dispatch_repo = agent_dispatch_repo
         # Kept per-instance so tests starting multiple SMs don't share state.
         # Single-writer invariant: only one driver task per DesignWork id is
         # ever scheduled; the read-modify-write gates/loop updates rely on it.
@@ -98,6 +99,58 @@ class DesignWorkStateMachine:
         return await self.db.fetchone(
             "SELECT * FROM design_works WHERE id=?", (dw_id,)
         )
+
+    async def _open_dispatch(
+        self, *, host_id: str, workspace_id: str,
+        correlation_id: str, correlation_kind: str,
+    ) -> str | None:
+        """Insert + mark_running on agent_dispatches (Phase 8a). Returns id or None.
+
+        Failures must NOT block execution: dispatch is observability, not
+        the source of truth.
+        """
+        if self.agent_dispatch_repo is None:
+            return None
+        try:
+            ad = await self.agent_dispatch_repo.start(
+                host_id=host_id, workspace_id=workspace_id,
+                correlation_id=correlation_id, correlation_kind=correlation_kind,
+            )
+            await self.agent_dispatch_repo.mark_running(ad["id"])
+            return ad["id"]
+        except Exception:
+            logger.exception("agent_dispatches start failed")
+            return None
+
+    async def _close_dispatch(
+        self, ad_id: str | None, *, state: str, exit_code: int,
+    ) -> None:
+        if ad_id is None or self.agent_dispatch_repo is None:
+            return
+        try:
+            await self.agent_dispatch_repo.mark_finished(
+                ad_id, state=state, exit_code=exit_code,
+            )
+        except Exception:
+            logger.exception("agent_dispatches mark_finished failed")
+
+    async def _pick_host(self, agent: str) -> str:
+        """Phase 8a: choose an agent host id for this DesignWork.
+
+        Defaults to ``"local"`` when no host repo is configured (preserves
+        Phase 7b call sites that don't construct one). Errors from the
+        decider must not block creation — falls back to ``"local"``.
+        """
+        from src.agent_hosts.dispatch_decider import choose_host
+        from src.models import LOCAL_HOST_ID
+
+        if self.agent_host_repo is None:
+            return LOCAL_HOST_ID
+        try:
+            return await choose_host(self.agent_host_repo, agent)
+        except Exception:
+            logger.exception("choose_host failed; falling back to local")
+            return LOCAL_HOST_ID
 
     async def _transition(self, dw: dict, frm: DesignWorkState, to: DesignWorkState) -> None:
         now = self._now()
@@ -152,22 +205,6 @@ class DesignWorkStateMachine:
                 f"workspace {workspace_id!r} is archived; cannot create DesignWork"
             )
 
-        # Phase 5: hydrate cold local FS from DB+OSS before writing new files.
-        # Non-fatal: a failed materialize logs and degrades to Phase-3 behavior.
-        if self.workspace_sync is not None:
-            try:
-                report = await self.workspace_sync.materialize(workspace_id)
-                logger.debug(
-                    "design_work create: materialize report=%r", report,
-                )
-            except NotFoundError:
-                raise
-            except Exception:
-                logger.exception(
-                    "materialize failed for workspace %s; proceeding",
-                    workspace_id,
-                )
-
         wid = self._new_id()
         now = self._now()
         input_rel = f"designs/.drafts/{wid}-input.md"
@@ -191,13 +228,14 @@ class DesignWorkStateMachine:
             else None
         )
 
+        host_id = await self._pick_host(agent)
         await self.db.execute(
             """INSERT INTO design_works
                (id, workspace_id, mode, parent_version, needs_frontend_mockup,
                 current_state, loop, missing_sections_json, agent,
-                user_input_path, title, sub_slug, version, output_path,
-                gates_json, created_at, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                agent_host_id, user_input_path, title, sub_slug, version,
+                output_path, gates_json, created_at, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 wid,
                 workspace_id,
@@ -208,6 +246,7 @@ class DesignWorkStateMachine:
                 0,
                 None,
                 agent,
+                host_id,
                 input_rel,
                 title,
                 sub_slug,
@@ -414,14 +453,26 @@ class DesignWorkStateMachine:
         timeout = self.config.design.execution_timeout  # U5
         worktree = self._abs_for(ws, "designs")
         prompt_abs = self._abs_for(ws, prompt_rel)
+        host_id = dw.get("agent_host_id") or "local"
+        ad_id = await self._open_dispatch(
+            host_id=host_id, workspace_id=dw["workspace_id"],
+            correlation_id=dw["id"], correlation_kind="design_work",
+        )
         try:
             stdout, rc = await self.executor.run_once(
                 dw["agent"], worktree, timeout, task_file=prompt_abs,
+                host_id=host_id,
+                workspace_id=dw["workspace_id"],
+                correlation_id=dw["id"],
             )
+            dispatch_state = "succeeded" if rc == 0 else "failed"
+        except asyncio.TimeoutError:
+            logger.warning("design_work %s LLM call timed out", dw["id"])
+            rc, stdout, dispatch_state = 124, "", "timeout"
         except Exception as exc:
             logger.exception("design_work %s LLM call failed: %s", dw["id"], exc)
-            rc = 1
-            stdout = ""
+            rc, stdout, dispatch_state = 1, "", "failed"
+        await self._close_dispatch(ad_id, state=dispatch_state, exit_code=rc)
         await emit_and_deliver(
             self.db,
             self.webhooks,

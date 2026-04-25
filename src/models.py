@@ -1,5 +1,6 @@
 import re
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -243,22 +244,6 @@ class WorkspaceSyncReport(BaseModel):
     in_sync: list[str] = Field(default_factory=list)
 
 
-class MaterializeReportResponse(BaseModel):
-    """Response envelope for POST /workspaces/{id}/materialize (Phase 5)."""
-    workspace_id: str
-    pulled: int
-    skipped: int
-    missing_oss: int
-    errors: list[str] = Field(default_factory=list)
-
-
-class RegenerateIndexResponse(BaseModel):
-    """Response envelope for POST /workspaces/{id}/regenerate-index (Phase 5)."""
-    retries: int
-    etag: str | None = None
-    skipped: str | None = None
-
-
 class WorkspaceMetrics(BaseModel):
     """PRD Phase 8 Success Metrics — lifetime by default; windowed via ?since=&until=.
 
@@ -353,6 +338,98 @@ class DevWorkProgress(BaseModel):
     # F1: expose worktree paths so operators / UI can inspect the sandbox.
     worktree_path: str | None = None
     worktree_branch: str | None = None
+    created_at: str
+    updated_at: str
+
+
+# ---------------------------------------------------------------------------
+# Phase 8a — Agent host dispatch DTOs
+# ---------------------------------------------------------------------------
+
+AgentHostType = Literal["claude", "codex", "both"]
+HealthStatus = Literal["unknown", "healthy", "unhealthy"]
+DispatchState = Literal["queued", "running", "succeeded", "failed", "timeout"]
+CorrelationKind = Literal["design_work", "dev_work"]
+
+# Reserved id for the always-present in-process host. Hard-coded so the same
+# string can be used in schema defaults, dispatch_decider fallback, and
+# sync_from_config without import cycles.
+LOCAL_HOST_ID = "local"
+
+# Mirrors src.config._SSH_HOST_PATTERN. Duplicated so HTTP-layer validation
+# does not pull in the YAML config module.
+_API_SSH_HOST_PATTERN = re.compile(r"^[\w.\-]+@[\w.\-]+(?::\d+)?$")
+
+
+def _validate_agent_host_field(v: str) -> str:
+    if v == LOCAL_HOST_ID:
+        return v
+    if not _API_SSH_HOST_PATTERN.match(v):
+        raise ValueError(
+            f"host must be 'local' or 'user@host[:port]', got {v!r}"
+        )
+    return v
+
+
+class AgentHost(BaseModel):
+    id: str
+    host: str
+    agent_type: AgentHostType
+    max_concurrent: int = 1
+    ssh_key: str | None = None
+    labels: list[str] = Field(default_factory=list)
+    health_status: HealthStatus = "unknown"
+    last_health_at: str | None = None
+    last_health_err: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class CreateAgentHostRequest(BaseModel):
+    """Operator-facing create payload.
+
+    The ``id`` field is optional; when omitted the repo allocates ``ah-<hex12>``.
+    The reserved id ``"local"`` is rejected at the route layer.
+    """
+    id: str | None = None
+    host: str = Field(..., min_length=1, max_length=200)
+    agent_type: AgentHostType = "both"
+    max_concurrent: int = Field(1, ge=1, le=64)
+    ssh_key: str | None = None
+    labels: list[str] = Field(default_factory=list)
+
+    @field_validator("host")
+    @classmethod
+    def _check_host(cls, v: str) -> str:
+        return _validate_agent_host_field(v)
+
+
+class UpdateAgentHostRequest(BaseModel):
+    """Partial update — every field is optional."""
+    host: str | None = Field(None, min_length=1, max_length=200)
+    agent_type: AgentHostType | None = None
+    max_concurrent: int | None = Field(None, ge=1, le=64)
+    ssh_key: str | None = None
+    labels: list[str] | None = None
+
+    @field_validator("host")
+    @classmethod
+    def _check_host(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validate_agent_host_field(v)
+
+
+class AgentDispatch(BaseModel):
+    id: str
+    host_id: str
+    workspace_id: str
+    correlation_id: str
+    correlation_kind: CorrelationKind
+    state: DispatchState
+    started_at: str | None = None
+    finished_at: str | None = None
+    exit_code: int | None = None
     created_at: str
     updated_at: str
 

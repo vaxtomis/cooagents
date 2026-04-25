@@ -18,17 +18,13 @@ from src.design_doc_manager import DesignDocManager
 from src.design_work_sm import DesignWorkStateMachine
 from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
-from src.exceptions import (
-    BadRequestError,
-    ConflictError,
-    IndexConvergenceError,
-    NotFoundError,
-    RecoveryScanError,
-)
+from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.skill_deployer import deploy_skills
-from src.storage import EtagMismatch, LocalFileStore, WorkspaceFileRegistry, WorkspaceFilesRepo
-from src.sync.recovery import StartupRecoveryScan
-from src.sync.workspace_sync import WorkspaceSync
+from src.storage import (
+    WorkspaceFileRegistry,
+    WorkspaceFilesRepo,
+    build_file_store,
+)
 from src.webhook_notifier import WebhookNotifier
 from src.workspace_manager import WorkspaceManager
 
@@ -48,7 +44,7 @@ async def lifespan(app: FastAPI):
     await webhooks.bootstrap_builtin_subscriptions(settings)
 
     workspaces_root = settings.security.resolved_workspace_root()
-    store = LocalFileStore(workspaces_root=workspaces_root)
+    store = build_file_store(settings, workspaces_root)
     files_repo = WorkspaceFilesRepo(db)
     registry = WorkspaceFileRegistry(store=store, repo=files_repo)
     workspaces = WorkspaceManager(
@@ -58,37 +54,6 @@ async def lifespan(app: FastAPI):
         webhooks=webhooks,
         registry=registry,
     )
-    workspace_sync = WorkspaceSync(
-        store=store, repo=files_repo, registry=registry, workspaces=workspaces,
-    )
-    recovery = StartupRecoveryScan(
-        db=db, store=store, repo=files_repo, registry=registry,
-        workspaces=workspaces,
-        config=settings.storage.recovery_scan,
-    )
-    try:
-        # recovery.run() short-circuits when config.enabled=False and returns
-        # a zero-everything report. Recovery must precede reconcile() so
-        # reconcile's FS-wins archival doesn't fight mid-write crash state.
-        recovery_report = await recovery.run()
-        if any((
-            recovery_report.fs_only_registered,
-            recovery_report.db_mismatch_corrected,
-            recovery_report.oss_authoritative_pulled,
-            recovery_report.errors,
-        )):
-            logging.getLogger(__name__).warning(
-                "recovery scan: %r", recovery_report,
-            )
-        else:
-            logging.getLogger(__name__).info(
-                "recovery scan: clean (scanned=%d)",
-                recovery_report.workspaces_scanned,
-            )
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "startup recovery scan failed; continuing"
-        )
     try:
         report = await workspaces.reconcile()
         if report["fs_only"] or report["db_only"]:
@@ -100,12 +65,43 @@ async def lifespan(app: FastAPI):
     except Exception:
         logging.getLogger(__name__).exception("workspace reconcile failed; continuing startup")
 
+    # Phase 8a: agent host registry, dispatcher, and probe loop. Construct
+    # before the executor / SMs so they can be injected.
+    from src.agent_hosts import (
+        AgentDispatchRepo, AgentHostRepo, HealthProbeLoop, SshDispatcher,
+    )
+
+    agent_host_repo = AgentHostRepo(db)
+    agent_dispatch_repo = AgentDispatchRepo(db)
+    try:
+        sync_report = await agent_host_repo.sync_from_config(settings.agents)
+        logging.getLogger(__name__).info(
+            "agent_hosts sync: upserted=%s marked_unknown=%s",
+            sync_report["upserted"], sync_report["marked_unknown"],
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "agent_hosts sync_from_config failed; continuing startup"
+        )
+    ssh_dispatcher = SshDispatcher(
+        agent_host_repo,
+        ssh_timeout_s=settings.health_check.ssh_timeout,
+        strict_host_key=settings.agents.ssh_strict_host_key,
+        known_hosts_path=settings.agents.ssh_known_hosts_path,
+        workspaces_root=str(workspaces_root),
+    )
+    health_probe_loop = HealthProbeLoop(
+        ssh_dispatcher, agent_host_repo,
+        interval_s=settings.health_check.interval,
+    )
+
     executor = AcpxExecutor(
         db,
         webhooks,
         config=settings,
         coop_dir=coop_dir,
         project_root=project_root,
+        ssh_dispatcher=ssh_dispatcher,
     )
     design_docs = DesignDocManager(db, registry=registry)
     design_work_sm = DesignWorkStateMachine(
@@ -116,7 +112,8 @@ async def lifespan(app: FastAPI):
         config=settings,
         registry=registry,
         webhooks=webhooks,
-        workspace_sync=workspace_sync,
+        agent_host_repo=agent_host_repo,
+        agent_dispatch_repo=agent_dispatch_repo,
     )
     iteration_notes = DevIterationNoteManager(db)
     dev_work_sm = DevWorkStateMachine(
@@ -128,7 +125,8 @@ async def lifespan(app: FastAPI):
         config=settings,
         registry=registry,
         webhooks=webhooks,
-        workspace_sync=workspace_sync,
+        agent_host_repo=agent_host_repo,
+        agent_dispatch_repo=agent_dispatch_repo,
     )
 
     app.state.db = db
@@ -140,12 +138,18 @@ async def lifespan(app: FastAPI):
     app.state.executor = executor
     app.state.webhooks = webhooks
     app.state.registry = registry
-    app.state.workspace_sync = workspace_sync
     app.state.settings = settings
+    app.state.agent_host_repo = agent_host_repo
+    app.state.agent_dispatch_repo = agent_dispatch_repo
+    app.state.ssh_dispatcher = ssh_dispatcher
+    app.state.health_probe_loop = health_probe_loop
     app.state.start_time = time.time()
+
+    health_probe_loop.start()
 
     yield
 
+    await health_probe_loop.stop()
     await webhooks.close()
     if hasattr(store, "close"):
         try:
@@ -225,35 +229,6 @@ async def bad_request_handler(request, exc):
     return JSONResponse(status_code=400, content={"error": "bad_request", "message": str(exc)})
 
 
-@app.exception_handler(EtagMismatch)
-async def etag_mismatch_handler(request, exc):
-    # Reached only if a registry/sync path escapes the retry loop. Surface
-    # as 409 Conflict so clients know to re-read and retry.
-    return JSONResponse(
-        status_code=409,
-        content={"error": "etag_mismatch", "message": str(exc)},
-    )
-
-
-@app.exception_handler(IndexConvergenceError)
-async def index_convergence_handler(request, exc):
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "workspace_index_convergence",
-            "message": str(exc),
-        },
-    )
-
-
-@app.exception_handler(RecoveryScanError)
-async def recovery_scan_handler(request, exc):
-    return JSONResponse(
-        status_code=500,
-        content={"error": "recovery_scan", "message": str(exc)},
-    )
-
-
 @app.exception_handler(NotImplementedError)
 async def not_implemented_handler(request, exc):
     logging.getLogger(__name__).exception(
@@ -299,6 +274,7 @@ from routes.dev_iteration_notes import router as dev_iteration_notes_router
 from routes.dev_works import router as dev_works_router
 from routes.gates import router as gates_router
 from routes.metrics import router as metrics_router
+from routes.agent_hosts import router as agent_hosts_router
 from routes.repos import router as repos_router
 from routes.reviews import router as reviews_router
 from routes.webhooks import router as webhooks_router
@@ -320,4 +296,5 @@ app.include_router(reviews_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(workspace_events_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(gates_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(metrics_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(agent_hosts_router, prefix="/api/v1", dependencies=auth_required)
 mount_dashboard_spa(app)

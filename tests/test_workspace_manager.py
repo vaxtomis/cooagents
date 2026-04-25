@@ -308,3 +308,14 @@ async def test_regenerate_workspace_md_idempotent(wm_fs):
     await wm_fs.regenerate_workspace_md(ws["id"])
     second = (Path(ws["root_path"]) / "workspace.md").read_text(encoding="utf-8")
     assert first == second
+
+
+async def test_regenerate_workspace_md_missing_workspace_skips(wm_fs):
+    result = await wm_fs.regenerate_workspace_md("ws-does-not-exist")
+    assert result == {"skipped": "missing_workspace"}
+
+
+async def test_regenerate_workspace_md_returns_skipped_none_on_success(wm_fs):
+    ws = await wm_fs.create_with_scaffold(title="R4", slug="r4")
+    result = await wm_fs.regenerate_workspace_md(ws["id"])
+    assert result == {"skipped": None}

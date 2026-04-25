@@ -55,7 +55,7 @@ class ScriptedExecutor:
         self.calls: list[dict] = []
 
     async def run_once(self, agent_type, worktree, timeout_sec,
-                       task_file=None, prompt=None):
+                       task_file=None, prompt=None, **_kwargs):
         prompt_text = Path(task_file).read_text(encoding="utf-8") if task_file else (prompt or "")
         step_tag = _detect_step(prompt_text)
         round_n = _detect_round(prompt_text)

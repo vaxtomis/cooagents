@@ -16,7 +16,6 @@ from src.database import Database
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.storage import LocalFileStore
 from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
-from src.sync.workspace_sync import WorkspaceSync
 from src.workspace_manager import WorkspaceManager
 
 
@@ -35,12 +34,8 @@ async def client(tmp_path):
     workspaces = WorkspaceManager(
         db, project_root=tmp_path, workspaces_root=ws_root, registry=registry,
     )
-    workspace_sync = WorkspaceSync(
-        store=store, repo=repo, registry=registry, workspaces=workspaces,
-    )
     test_app.state.db = db
     test_app.state.workspaces = workspaces
-    test_app.state.workspace_sync = workspace_sync
     test_app.state.start_time = time.time()
 
     # slowapi limiter requires app.state.limiter when @limiter.limit is used.
@@ -170,45 +165,22 @@ async def test_delete_missing_returns_404(client):
     assert r.status_code == 404
 
 
-async def test_materialize_route_returns_report(client):
+async def test_materialize_route_is_deleted(client):
     r = await client.post(
         "/api/v1/workspaces", json={"title": "M", "slug": "mat"}
     )
     wid = r.json()["id"]
     resp = await client.post(f"/api/v1/workspaces/{wid}/materialize")
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["workspace_id"] == wid
-    assert body["pulled"] == 0
-    assert body["missing_oss"] == 0
-    assert isinstance(body["errors"], list)
-
-
-async def test_materialize_unknown_workspace_returns_404(client):
-    resp = await client.post("/api/v1/workspaces/ws-nope/materialize")
     assert resp.status_code == 404
 
 
-async def test_regenerate_index_route_returns_retries_and_etag(client):
+async def test_regenerate_index_route_is_deleted(client):
     r = await client.post(
         "/api/v1/workspaces", json={"title": "G", "slug": "regen"}
     )
     wid = r.json()["id"]
     resp = await client.post(f"/api/v1/workspaces/{wid}/regenerate-index")
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["retries"] == 0
-    # Local-only backend => etag is None.
-    assert body.get("etag") is None
-
-
-async def test_regenerate_index_missing_workspace_returns_skip(client):
-    resp = await client.post(
-        "/api/v1/workspaces/ws-missing/regenerate-index"
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["skipped"] == "missing_workspace"
+    assert resp.status_code == 404
 
 
 async def test_sync_reports_drift(client, tmp_path):

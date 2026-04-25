@@ -78,7 +78,8 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         config: Any,          # Settings
         registry: Any,        # WorkspaceFileRegistry (Phase 3)
         webhooks: Any = None,  # WebhookNotifier (optional; None disables deliver side-channel)
-        workspace_sync: Any = None,  # WorkspaceSync (Phase 5); None = no-op
+        agent_host_repo: Any = None,      # Phase 8a: AgentHostRepo
+        agent_dispatch_repo: Any = None,  # Phase 8a: AgentDispatchRepo
     ) -> None:
         self.db = db
         self.workspaces = workspaces
@@ -88,7 +89,8 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         self.config = config
         self.registry = registry
         self.webhooks = webhooks
-        self.workspace_sync = workspace_sync
+        self.agent_host_repo = agent_host_repo
+        self.agent_dispatch_repo = agent_dispatch_repo
         # Phase 2 manager owns workspaces_root; mirror it for quick path math
         # (absolute paths embedded in LLM prompts).
         self.workspaces_root = Path(workspaces.workspaces_root).resolve()
@@ -173,6 +175,49 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         row = await self._get(dev_id)
         return _decode_gates(row.get("gates_json") if row else None)
 
+    # ---- Phase 8a host dispatch helpers ----
+
+    async def _pick_host(self, agent: str) -> str:
+        from src.agent_hosts.dispatch_decider import choose_host
+        from src.models import LOCAL_HOST_ID
+
+        if self.agent_host_repo is None:
+            return LOCAL_HOST_ID
+        try:
+            return await choose_host(self.agent_host_repo, agent)
+        except Exception:
+            logger.exception("choose_host failed; falling back to local")
+            return LOCAL_HOST_ID
+
+    async def _open_dispatch(
+        self, *, host_id: str, workspace_id: str,
+        correlation_id: str, correlation_kind: str,
+    ) -> str | None:
+        if self.agent_dispatch_repo is None:
+            return None
+        try:
+            ad = await self.agent_dispatch_repo.start(
+                host_id=host_id, workspace_id=workspace_id,
+                correlation_id=correlation_id, correlation_kind=correlation_kind,
+            )
+            await self.agent_dispatch_repo.mark_running(ad["id"])
+            return ad["id"]
+        except Exception:
+            logger.exception("agent_dispatches start failed")
+            return None
+
+    async def _close_dispatch(
+        self, ad_id: str | None, *, state: str, exit_code: int,
+    ) -> None:
+        if ad_id is None or self.agent_dispatch_repo is None:
+            return
+        try:
+            await self.agent_dispatch_repo.mark_finished(
+                ad_id, state=state, exit_code=exit_code,
+            )
+        except Exception:
+            logger.exception("agent_dispatches mark_finished failed")
+
     # ---- public API ----
 
     async def create(
@@ -192,21 +237,6 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 f"workspace {workspace_id!r} is archived; cannot create DevWork"
             )
 
-        # Phase 5: cold-hydrate local FS before writing new files. Non-fatal.
-        if self.workspace_sync is not None:
-            try:
-                report = await self.workspace_sync.materialize(workspace_id)
-                logger.debug(
-                    "dev_work create: materialize report=%r", report,
-                )
-            except NotFoundError:
-                raise
-            except Exception:
-                logger.exception(
-                    "materialize failed for workspace %s; proceeding",
-                    workspace_id,
-                )
-
         dd = await self.db.fetchone(
             "SELECT * FROM design_docs WHERE id=?", (design_doc_id,)
         )
@@ -225,14 +255,15 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
 
         dev_id = self._new_id()
         now = self._now()
+        host_id = await self._pick_host(agent)
         await self.db.execute(
             """INSERT INTO dev_works
                (id, workspace_id, design_doc_id, repo_path, prompt,
                 worktree_path, worktree_branch, current_step,
                 iteration_rounds, first_pass_success, last_score,
-                last_problem_category, agent, gates_json,
+                last_problem_category, agent, agent_host_id, gates_json,
                 escalated_at, completed_at, created_at, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 dev_id,
                 workspace_id,
@@ -247,6 +278,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 None,
                 None,
                 agent,
+                host_id,
                 None,
                 None,
                 None,
@@ -442,11 +474,30 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         step_tag: str,
         round_n: int,
     ) -> tuple[int, str]:
-        """Wrapper around ``executor.run_once`` with uniform event emission."""
+        """Wrapper around ``executor.run_once`` with uniform event emission.
+
+        Phase 8a: opens an ``agent_dispatches`` row and routes to the host
+        recorded on the dev_works row (defaults to ``"local"``).
+        """
+        host_id = dw.get("agent_host_id") or "local"
+        ad_id = await self._open_dispatch(
+            host_id=host_id, workspace_id=dw["workspace_id"],
+            correlation_id=dw["id"], correlation_kind="dev_work",
+        )
         try:
             stdout, rc = await self.executor.run_once(
                 agent, worktree, timeout, task_file=task_file,
+                host_id=host_id,
+                workspace_id=dw["workspace_id"],
+                correlation_id=dw["id"],
             )
+            dispatch_state = "succeeded" if rc == 0 else "failed"
+        except asyncio.TimeoutError:
+            logger.warning(
+                "dev_work %s LLM call timed out at %s round=%s",
+                dw["id"], step_tag, round_n,
+            )
+            rc, stdout, dispatch_state = 124, "", "timeout"
         except Exception:
             logger.exception(
                 "dev_work %s LLM call failed at %s round=%s",
@@ -456,6 +507,8 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             )
             rc = 1
             stdout = ""
+            dispatch_state = "failed"
+        await self._close_dispatch(ad_id, state=dispatch_state, exit_code=rc)
         await emit_and_deliver(
             self.db,
             self.webhooks,

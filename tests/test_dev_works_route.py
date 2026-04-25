@@ -56,7 +56,7 @@ class ScriptedExecutor:
     """Writes success outputs for every step so the happy path completes."""
 
     async def run_once(self, agent_type, worktree, timeout_sec,
-                       task_file=None, prompt=None):
+                       task_file=None, prompt=None, **_kwargs):
         text = Path(task_file).read_text(encoding="utf-8") if task_file else (prompt or "")
         # Step2 — append H2s to iteration note
         m = re.search(r"在 `([^`]+\.md)` 现有文件末尾", text)

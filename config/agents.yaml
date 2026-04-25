@@ -1,12 +1,22 @@
-hosts: []
-# Example:
-# - id: local-pc
-#   host: local
-#   agent_type: both
-#   max_concurrent: 2
-# - id: dev-server
-#   host: dev@10.0.0.5
-#   agent_type: codex
-#   max_concurrent: 4
-#   ssh_key: ~/.ssh/id_rsa
-#   labels: [fast]
+hosts:
+  - id: local
+    host: local
+    agent_type: both
+    max_concurrent: 2
+# SSH strict host-key checking. Default ON. Only set to false on a throwaway
+# dev network where MITM is not in scope; the host fingerprint must already
+# be in ssh_known_hosts_path for the connection to succeed.
+ssh_strict_host_key: true
+# Path consulted when ssh_strict_host_key is true. Default user known_hosts.
+ssh_known_hosts_path: ~/.ssh/known_hosts
+# ssh_key paths must resolve under one of these roots, otherwise the host is
+# rejected at upsert/load. Tightens the blast radius if the API is reachable.
+ssh_key_allowed_roots:
+  - ~/.ssh
+# Example remote host (Phase 8b+):
+#   - id: dev-server
+#     host: dev@10.0.0.5
+#     agent_type: codex
+#     max_concurrent: 4
+#     ssh_key: ~/.ssh/id_rsa
+#     labels: [fast]

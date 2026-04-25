@@ -3,10 +3,9 @@
 
 Surface-compatible with ``LocalFileStore`` — same five async methods, same
 ``FileRef`` shape, same ``BadRequestError`` / ``NotFoundError`` vocabulary.
-Raises ``EtagMismatch`` (defined in ``src.storage.base`` as a plain
-``Exception`` subclass) when a conditional PUT fails its ETag precondition
-(412 Precondition Failed). Phase 5's ``register()`` narrows on
-``EtagMismatch`` to drive retry semantics.
+``put_bytes`` is an unconditional PUT: cooagents is the sole writer in
+Phase 1–7b, so no precondition is required. Phase 8 will reintroduce CAS
+at Agent boundaries against the Agent execution model.
 
 Credentials are externally injected: the constructor accepts any
 SDK-compatible ``CredentialsProvider`` (static, env-backed, STS, …),
@@ -33,23 +32,21 @@ import alibabacloud_oss_v2.aio as oss_aio
 from alibabacloud_oss_v2 import exceptions as oss_exceptions
 
 from src.exceptions import BadRequestError, NotFoundError
-from src.storage.base import EtagMismatch, FileRef, normalize_key
+from src.storage.base import FileRef, normalize_key
 
 logger = logging.getLogger(__name__)
 
 
-# Backward-compat re-export: Phase 4 integration tests import EtagMismatch
-# from this module. The canonical definition lives in src.storage.base.
-__all__ = ["EtagMismatch", "OSSFileStore"]
+__all__ = ["OSSFileStore"]
 
 
 def _normalize_etag(raw: str | None) -> str | None:
     """Strip surrounding whitespace/quotes and lowercase the hex.
 
     OSS sometimes wraps the ETag in literal quotes and uses uppercase hex;
-    lowercasing gives stable cross-client string equality for CAS tokens.
-    Multipart ETags include a ``-N`` suffix — the hex prefix is lowercased
-    and the ``-N`` suffix is preserved as-is.
+    lowercasing gives stable cross-client string equality. Multipart ETags
+    include a ``-N`` suffix — the hex prefix is lowercased and the ``-N``
+    suffix is preserved as-is.
     """
     if raw is None:
         return None
@@ -89,10 +86,6 @@ def _unwrap_service_error(
 
 def _is_not_found(err: oss_exceptions.ServiceError) -> bool:
     return err.status_code == 404 or err.code == "NoSuchKey"
-
-
-def _is_precondition_failed(err: oss_exceptions.ServiceError) -> bool:
-    return err.status_code == 412 or err.code == "PreconditionFailed"
 
 
 class OSSFileStore:
@@ -177,45 +170,11 @@ class OSSFileStore:
             await client.close()
 
     async def put_bytes(self, key: str, data: bytes) -> FileRef:
-        return await self.put_bytes_conditional(key, data)
-
-    async def put_bytes_conditional(
-        self,
-        key: str,
-        data: bytes,
-        *,
-        if_match: str | None = None,
-        if_none_match: str | None = None,
-    ) -> FileRef:
         norm_str, oss_key = self._build_object_key(key)
         client = await self._get_client()
-        headers: dict[str, str] = {}
-        if if_match is not None:
-            headers["If-Match"] = if_match
-        if if_none_match is not None:
-            headers["If-None-Match"] = if_none_match
-        req_kwargs: dict[str, Any] = {
-            "bucket": self._bucket,
-            "key": oss_key,
-            "body": data,
-        }
-        if headers:
-            req_kwargs["headers"] = headers
-        try:
-            result = await client.put_object(oss.PutObjectRequest(**req_kwargs))
-        except Exception as exc:
-            svc = _unwrap_service_error(exc)
-            if svc is not None and _is_precondition_failed(svc):
-                logger.warning(
-                    "oss conditional PUT 412 for key=%s if_match_set=%s if_none_match_set=%s",
-                    norm_str,
-                    if_match is not None,
-                    if_none_match is not None,
-                )
-                raise EtagMismatch(
-                    f"conditional PUT failed for {norm_str!r}: {svc.code}"
-                ) from exc
-            raise
+        result = await client.put_object(
+            oss.PutObjectRequest(bucket=self._bucket, key=oss_key, body=data)
+        )
         etag = _normalize_etag(result.etag)
         logger.debug(
             "oss put_bytes: %s (%d bytes) -> etag=%s", norm_str, len(data), etag

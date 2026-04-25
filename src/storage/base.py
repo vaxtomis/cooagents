@@ -31,16 +31,6 @@ class FileStore(Protocol):
     async def list(self, prefix: str) -> list[FileRef]: ...
 
 
-class EtagMismatch(Exception):
-    """Conditional write/delete failed its ETag precondition.
-
-    Backend-agnostic — raised by any FileStore implementation that supports
-    CAS writes (OSSFileStore today; future S3/MinIO/OBS backends share this
-    type). LocalFileStore never raises it because local FS has no ETag.
-    Registry callers narrow on this type to drive retry loops.
-    """
-
-
 def normalize_key(key: str) -> PurePosixPath:
     """Validate a workspace-relative POSIX key and return its PurePosixPath.
 

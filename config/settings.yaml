@@ -84,3 +84,19 @@ hermes:
     # HERMES_WEBHOOK_SECRET; never commit a real value.
     secret: ""
     events: []
+
+# Storage backend (Phase 6). Leave fully commented to stay on the default
+# LocalFileStore. To switch on OSS, set storage.oss.enabled: true AND export
+# OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET; bucket/region/endpoint can live
+# in YAML since they are not secrets. See PRD §Technical Approach.
+# storage:
+#   oss:
+#     enabled: true
+#     bucket: "cooagents-prod"
+#     region: "cn-hangzhou"
+#     endpoint: "https://oss-cn-hangzhou.aliyuncs.com"
+#     prefix: "workspaces/"
+#     # access_key_id / access_key_secret: read from env vars
+#     # OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET. Do NOT commit real values.
+#     access_key_id: ""
+#     access_key_secret: ""
