@@ -12,8 +12,24 @@ from pathlib import Path
 _BRANCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_.\-]{0,199}$")
 
 
-async def run_git(*args, cwd=None, check=True) -> tuple[str, str, int]:
-    """Run a git command, return (stdout, stderr, returncode)."""
+async def run_git(
+    *args,
+    cwd=None,
+    check=True,
+    env: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> tuple[str, str, int]:
+    """Run a git command, return (stdout, stderr, returncode).
+
+    When ``env`` is ``None``, the child inherits the parent environment (the
+    documented :func:`asyncio.create_subprocess_exec` default). Pass an
+    explicit dict only when overriding a value such as ``GIT_SSH_COMMAND``;
+    never pass an empty dict, which would unset ``PATH`` and break ``git``.
+
+    ``timeout`` (seconds) bounds wall-clock time. On timeout or cancellation
+    the child is killed before propagating the exception so a hung remote
+    cannot leak a zombie ``git`` process and an indefinitely held fd.
+    """
     import asyncio
 
     proc = await asyncio.create_subprocess_exec(
@@ -22,8 +38,25 @@ async def run_git(*args, cwd=None, check=True) -> tuple[str, str, int]:
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
-    stdout, stderr = await proc.communicate()
+    try:
+        if timeout is not None:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout,
+            )
+        else:
+            stdout, stderr = await proc.communicate()
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await proc.wait()
+        except ProcessLookupError:
+            pass
+        raise
     out = stdout.decode().strip()
     err = stderr.decode().strip()
     if check and proc.returncode != 0:

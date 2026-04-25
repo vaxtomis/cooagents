@@ -407,6 +407,10 @@ class ReposFetchConfig(BaseModel):
     across phases; Phase 1 readers ignore the values."""
     interval_s: int = Field(300, ge=10, le=86400)
     parallel: int = Field(4, ge=1, le=64)
+    # Wall-clock cap on a single ``git clone`` / ``git fetch`` invocation.
+    # Protects the loop's semaphore slots and the route's request worker
+    # from hostile/stalled remotes that ``BatchMode=yes`` cannot guard.
+    timeout_s: int = Field(120, ge=1, le=3600)
 
 
 class ReposConfig(BaseModel):

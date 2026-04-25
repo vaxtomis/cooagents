@@ -24,8 +24,10 @@ _VALID_FETCH_STATUSES: frozenset[str] = frozenset(
 # Cap on persisted error strings — same rationale as agent_hosts._sanitize_health_err.
 _MAX_FETCH_ERR_LEN = 256
 # fetch_status values that imply we successfully reached the remote and can
-# stamp ``last_fetched_at`` with the current time.
-_SUCCESSFUL_FETCH_STATUSES: frozenset[str] = frozenset({"healthy", "stale"})
+# stamp ``last_fetched_at`` with the current time. ``stale`` is *not*
+# included: staleness means the row is old, so refreshing the timestamp
+# when transitioning healthy→stale would contradict the marker itself.
+_SUCCESSFUL_FETCH_STATUSES: frozenset[str] = frozenset({"healthy"})
 
 
 def _now() -> str:

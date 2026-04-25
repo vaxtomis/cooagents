@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
     # Lazy import keeps src.repos out of module-load chains (mirrors
     # the agent_hosts pattern above). Defensive try/except: a malformed
     # repos.yaml must not block startup.
-    from src.repos import RepoRegistryRepo
+    from src.repos import RepoFetcher, RepoHealthLoop, RepoRegistryRepo
 
     repo_registry_repo = RepoRegistryRepo(db)
     try:
@@ -109,6 +109,22 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).exception(
             "repos sync_from_config failed; continuing startup"
         )
+
+    # Phase 2 (repo-registry): bare-clone fetcher + periodic health loop.
+    # Reuses agents.yaml known_hosts in v1 — no separate repos allow-list yet.
+    repo_fetcher = RepoFetcher(
+        workspaces_root=workspaces_root,
+        strict_host_key=settings.repos.ssh_strict_host_key,
+        known_hosts_path=settings.agents.ssh_known_hosts_path,
+        timeout_s=settings.repos.fetch.timeout_s,
+    )
+    repo_health_loop = RepoHealthLoop(
+        repo_fetcher,
+        repo_registry_repo,
+        interval_s=settings.repos.fetch.interval_s,
+        parallel=settings.repos.fetch.parallel,
+    )
+
     ssh_dispatcher = SshDispatcher(
         agent_host_repo,
         ssh_timeout_s=settings.health_check.ssh_timeout,
@@ -168,14 +184,18 @@ async def lifespan(app: FastAPI):
     app.state.agent_host_repo = agent_host_repo
     app.state.agent_dispatch_repo = agent_dispatch_repo
     app.state.repo_registry_repo = repo_registry_repo
+    app.state.repo_fetcher = repo_fetcher
+    app.state.repo_health_loop = repo_health_loop
     app.state.ssh_dispatcher = ssh_dispatcher
     app.state.health_probe_loop = health_probe_loop
     app.state.start_time = time.time()
 
     health_probe_loop.start()
+    repo_health_loop.start()
 
     yield
 
+    await repo_health_loop.stop()
     await health_probe_loop.stop()
     await webhooks.close()
     if hasattr(store, "close"):
