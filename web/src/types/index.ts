@@ -99,6 +99,8 @@ export interface DesignWork {
   version: string | null;
   created_at: string;
   updated_at: string;
+  // Phase 4 (repo-registry): persisted refs from design_work_repos.
+  repo_refs: DesignRepoRefView[];
 }
 
 export interface DesignDoc {
@@ -137,6 +139,11 @@ export interface DevWork {
   worktree_branch: string | null;
   created_at: string;
   updated_at: string;
+  // Phase 4 (repo-registry): persisted refs from dev_work_repos.
+  repo_refs: DevRepoRefView[];
+  // Phase 5 (repo-registry): worker-facing handoff. Same row source as
+  // repo_refs, additive url / ssh_key_path / push_err.
+  repos: WorkerRepoHandoff[];
 }
 
 export interface DevIterationNote {
@@ -234,12 +241,17 @@ export interface CreateDesignWorkPayload {
   needs_frontend_mockup?: boolean;
   agent?: AgentKind;
   rubric_threshold?: number;
+  // Phase 4 (repo-registry): optional repo binding. Empty list keeps
+  // pure-doc DesignWorks creatable; omit (or send `[]`) when none.
+  repo_refs?: RepoRef[];
 }
 
 export interface CreateDevWorkPayload {
   workspace_id: string;
   design_doc_id: string;
-  repo_path: string;
+  // Phase 4 (repo-registry): at least one ref required; mount uniqueness
+  // enforced server-side and pre-validated client-side in the form.
+  repo_refs: DevRepoRef[];
   prompt: string;
   agent?: AgentKind;
 }
@@ -340,4 +352,46 @@ export interface FetchRepoResponse {
   outcome: string;
   fetch_status: RepoFetchStatus;
   last_fetched_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Repo refs — mirrors src/models.py:564-639 (DesignWork + DevWork sides).
+// ---------------------------------------------------------------------------
+
+// DesignWork-side repo binding (request + response sub-shape).
+export interface RepoRef {
+  repo_id: string;
+  base_branch: string;
+}
+
+// DevWork-side repo binding (request shape).
+export interface DevRepoRef extends RepoRef {
+  mount_name: string;
+  base_rev_lock?: boolean;
+  is_primary?: boolean;
+}
+
+// Read-only view over a `design_work_repos` row.
+export interface DesignRepoRefView {
+  repo_id: string;
+  branch: string;
+  rev: string | null;
+}
+
+// Read-only view over a `dev_work_repos` row (Phase 4 progress contract).
+export interface DevRepoRefView {
+  repo_id: string;
+  mount_name: string;
+  base_branch: string;
+  base_rev: string | null;
+  devwork_branch: string;
+  push_state: "pending" | "pushed" | "failed";
+  is_primary: boolean;
+}
+
+// Worker-facing handoff payload (Phase 5). Adds operational config + push_err.
+export interface WorkerRepoHandoff extends DevRepoRefView {
+  url: string;
+  ssh_key_path: string | null;
+  push_err: string | null;
 }

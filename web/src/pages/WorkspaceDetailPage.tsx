@@ -7,6 +7,11 @@ import { createDevWork, listDevWorks } from "../api/devWorks";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
 import { archiveWorkspace, getWorkspace } from "../api/workspaces";
 import { EmptyState, SectionPanel } from "../components/SectionPanel";
+import {
+  MOUNT_NAME_RE,
+  RepoRefsEditor,
+  type RepoRefsEditorRow,
+} from "../components/RepoRefsEditor";
 import { StatusBadge } from "../components/StatusBadge";
 import { useWorkspacePolling } from "../hooks/useWorkspacePolling";
 import { extractError } from "../lib/extractError";
@@ -14,7 +19,9 @@ import type {
   AgentKind,
   DesignDoc,
   DesignWork,
+  DevRepoRef,
   DevWork,
+  RepoRef,
   WorkspaceEvent,
 } from "../types";
 
@@ -83,6 +90,8 @@ function DesignWorkCreateForm({
   const [userInput, setUserInput] = useState("");
   const [needsFrontendMockup, setNeedsFrontendMockup] = useState(false);
   const [agent, setAgent] = useState<AgentKind>("claude");
+  const [showRepos, setShowRepos] = useState(false);
+  const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -94,6 +103,18 @@ function DesignWorkCreateForm({
     if (!trimmedTitle) return setError("请填写标题");
     if (!SLUG_RE.test(trimmedSlug)) return setError("slug 必须为 kebab-case");
     if (trimmedInput.length === 0) return setError("请填写用户输入");
+    let designRefs: RepoRef[] | undefined;
+    if (showRepos && repoRefs.length > 0) {
+      for (const row of repoRefs) {
+        if (!row.repo_id || !row.base_branch) {
+          return setError("请为每个仓库选择仓库与 base_branch");
+        }
+      }
+      designRefs = repoRefs.map((r) => ({
+        repo_id: r.repo_id,
+        base_branch: r.base_branch,
+      }));
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -105,11 +126,14 @@ function DesignWorkCreateForm({
         mode: "new",
         needs_frontend_mockup: needsFrontendMockup,
         agent,
+        repo_refs: designRefs,
       });
       setTitle("");
       setSlug("");
       setUserInput("");
       setNeedsFrontendMockup(false);
+      setShowRepos(false);
+      setRepoRefs([]);
       setOpen(false);
       onCreated(created);
     } catch (err) {
@@ -182,6 +206,23 @@ function DesignWorkCreateForm({
           </select>
         </label>
       </div>
+      <div className="space-y-2">
+        <button
+          aria-expanded={showRepos}
+          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
+          onClick={() => setShowRepos((v) => !v)}
+          type="button"
+        >
+          {showRepos
+            ? "收起仓库绑定"
+            : repoRefs.length > 0
+              ? `添加仓库绑定（已配置 ${repoRefs.length} 行，需展开后才会提交）`
+              : "添加仓库绑定（可选）"}
+        </button>
+        {showRepos ? (
+          <RepoRefsEditor minRows={0} mode="design" onChange={setRepoRefs} value={repoRefs} />
+        ) : null}
+      </div>
       <div className="space-y-1">
         <p className="text-[11px] text-muted-soft">v1 仅支持 mode=new（新增设计）。</p>
       </div>
@@ -235,7 +276,7 @@ function DevWorkCreateForm({
 }) {
   const [open, setOpen] = useState(false);
   const [designDocId, setDesignDocId] = useState("");
-  const [repoPath, setRepoPath] = useState("");
+  const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
   const [prompt, setPrompt] = useState("");
   const [agent, setAgent] = useState<AgentKind>("claude");
   const [error, setError] = useState<string | null>(null);
@@ -246,20 +287,39 @@ function DevWorkCreateForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!designDocId) return setError("请选择已发布的 DesignDoc");
-    if (!repoPath.trim()) return setError("请填写 repo_path");
+    if (repoRefs.length === 0) return setError("请至少添加一个仓库");
+    const mountSeen = new Set<string>();
+    for (const [i, row] of repoRefs.entries()) {
+      if (!row.repo_id) return setError(`第 ${i + 1} 行：请选择仓库`);
+      if (!row.base_branch) return setError(`第 ${i + 1} 行：请选择 base_branch`);
+      const mount = row.mount_name.trim();
+      if (!mount) return setError(`第 ${i + 1} 行：请填写 mount_name`);
+      if (!MOUNT_NAME_RE.test(mount)) {
+        return setError(`第 ${i + 1} 行：mount_name 不合法`);
+      }
+      if (mountSeen.has(mount)) return setError(`mount_name "${mount}" 重复`);
+      mountSeen.add(mount);
+    }
     if (!prompt.trim()) return setError("请填写 prompt");
+    const payloadRefs: DevRepoRef[] = repoRefs.map((r) => ({
+      repo_id: r.repo_id,
+      base_branch: r.base_branch,
+      mount_name: r.mount_name.trim(),
+      base_rev_lock: !!r.base_rev_lock,
+      is_primary: !!r.is_primary,
+    }));
     setError(null);
     setSubmitting(true);
     try {
       const created = await createDevWork({
         workspace_id: workspaceId,
         design_doc_id: designDocId,
-        repo_path: repoPath.trim(),
+        repo_refs: payloadRefs,
         prompt: prompt.trim(),
         agent,
       });
       setDesignDocId("");
-      setRepoPath("");
+      setRepoRefs([]);
       setPrompt("");
       setOpen(false);
       onCreated(created);
@@ -303,18 +363,14 @@ function DevWorkCreateForm({
           ))}
         </select>
       </label>
-      <label className="block space-y-1 text-xs text-muted">
-        <span>repo_path</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 font-mono text-sm text-copy outline-none"
-          onChange={(event) => setRepoPath(event.target.value)}
-          placeholder="/absolute/path/to/repo"
-          value={repoPath}
-        />
-      </label>
+      <div className="block space-y-1 text-xs text-muted">
+        <span>仓库绑定（至少 1 个）</span>
+        <RepoRefsEditor minRows={1} mode="dev" onChange={setRepoRefs} value={repoRefs} />
+      </div>
       <label className="block space-y-1 text-xs text-muted">
         <span>prompt</span>
         <textarea
+          aria-label="DevWork prompt"
           className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm text-copy outline-none"
           onChange={(event) => setPrompt(event.target.value)}
           rows={4}

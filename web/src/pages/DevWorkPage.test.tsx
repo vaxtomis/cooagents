@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import type { DevWork, GateInfo } from "../types";
+import type { DevWork, GateInfo, WorkerRepoHandoff } from "../types";
 import { DevWorkPage } from "./DevWorkPage";
 
 vi.mock("../api/devWorks", () => ({
@@ -46,6 +46,8 @@ const devWork: DevWork = {
   worktree_branch: "feat/dv-1",
   created_at: "2026-04-01T00:00:00Z",
   updated_at: "2026-04-23T00:00:00Z",
+  repo_refs: [],
+  repos: [],
 };
 
 const waitingGate: GateInfo = {
@@ -84,6 +86,53 @@ describe("DevWorkPage", () => {
       expect(screen.getByRole("button", { name: "批准" })).toBeEnabled();
       expect(screen.getByRole("button", { name: "驳回" })).toBeEnabled();
     });
+  });
+
+  it("renders the per-mount push status grid with err tooltip", async () => {
+    const repos: WorkerRepoHandoff[] = [
+      {
+        repo_id: "repo-aaa111",
+        mount_name: "frontend",
+        base_branch: "main",
+        base_rev: "a1b2c3d4e5f6",
+        devwork_branch: "devwork/ws-1/dv-1/frontend",
+        push_state: "pushed",
+        is_primary: true,
+        url: "git@github.com:org/frontend.git",
+        ssh_key_path: null,
+        push_err: null,
+      },
+      {
+        repo_id: "repo-bbb222",
+        mount_name: "backend",
+        base_branch: "main",
+        base_rev: null,
+        devwork_branch: "devwork/ws-1/dv-1/backend",
+        push_state: "failed",
+        is_primary: false,
+        url: "git@github.com:org/backend.git",
+        ssh_key_path: null,
+        push_err: "remote rejected: protected branch",
+      },
+    ];
+    vi.mocked(getDevWork).mockResolvedValue({ ...devWork, repos });
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    await waitFor(() => expect(getDevWork).toHaveBeenCalled());
+    expect(await screen.findByText("frontend")).toBeInTheDocument();
+    expect(screen.getByText("backend")).toBeInTheDocument();
+    // Failed row exposes the err message both inline and via title=.
+    const failedMsg = await screen.findByText(
+      "remote rejected: protected branch",
+    );
+    expect(failedMsg).toBeInTheDocument();
+    expect(failedMsg.getAttribute("title")).toBe(
+      "remote rejected: protected branch",
+    );
   });
 
   it("treats 404 from getGate as no-gate state (not an error)", async () => {

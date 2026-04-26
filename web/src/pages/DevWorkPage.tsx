@@ -9,6 +9,7 @@ import { listReviews } from "../api/reviews";
 import { DevWorkStepProgress } from "../components/DevWorkStepProgress";
 import { GateActionPanel } from "../components/GateActionPanel";
 import { MarkdownPanel } from "../components/MarkdownPanel";
+import { RepoPushStatusGrid } from "../components/RepoPushStatusGrid";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
 import { ScoreBadge } from "../components/ScoreBadge";
 import { StatusBadge } from "../components/StatusBadge";
@@ -284,6 +285,10 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
           <MetricCard label="worktree_branch" value={devWork.worktree_branch ?? "-"} />
           <MetricCard label="worktree_path" value={devWork.worktree_path ?? "-"} />
         </div>
+      </SectionPanel>
+
+      <SectionPanel kicker="仓库" title="仓库与推送状态">
+        <RepoPushStatusGrid repos={devWork.repos ?? []} />
       </SectionPanel>
 
       <SectionPanel

@@ -86,6 +86,11 @@ const STATUS_META: Record<string, { label: string; tone: StatusTone; className: 
   unknown: muted("未知"),
   healthy: success("健康"),
   error: danger("失败"),
+
+  // Repo push state (Phase 5 — dev_work_repos.push_state).
+  pending: warning("待推送"),
+  pushed: success("已推送"),
+  // `failed` already mapped above to danger("失败").
 };
 
 export function resolveStatusBadge(status: string | null | undefined) {
