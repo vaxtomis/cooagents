@@ -86,53 +86,55 @@ Skill 会识别 runtime、收集 `repo_path` / `admin_password`、运行 `bootst
 
 ```mermaid
 flowchart TB
-  subgraph Browser["运维控制台 (浏览器)"]
-    SPA["React 18 + Vite + Tailwind v4 + SWR<br/>web/src/* → web/dist/"]
+  subgraph Browser["运维控制台 浏览器"]
+    SPA["React 18 + Vite + Tailwind v4 + SWR"]
   end
 
-  subgraph CP["FastAPI Control Plane (src/app.py)"]
+  subgraph CP["FastAPI Control Plane - src/app.py"]
     direction TB
-    R["Routes /api/v1/*<br/>workspaces · repos · agent-hosts<br/>design-works · dev-works · reviews<br/>gates · metrics · webhooks"]
+    R["Routes /api/v1<br/>workspaces · repos · agent-hosts<br/>design-works · dev-works · reviews<br/>gates · metrics · webhooks"]
     SM["State Machines<br/>DesignWorkSM · DevWorkSM"]
     MGR["Managers / Repos<br/>WorkspaceManager · DesignDocManager<br/>AgentHostRepo · RepoRegistryRepo"]
     LOOP["Background Loops<br/>HealthProbeLoop · RepoHealthLoop"]
-    R --> SM --> MGR
+    R --> SM
+    SM --> MGR
     LOOP --> MGR
   end
 
   subgraph Exec["执行通道"]
     AC["AcpxExecutor"]
-    SSH["SshDispatcher (asyncssh)"]
-    AC -->|host_id == local| LOC["local: acpx CLI"]
-    AC -->|host_id != local| SSH
+    SSH["SshDispatcher - asyncssh"]
+    LOC["local acpx CLI"]
+    AC -- "host_id = local" --> LOC
+    AC -- "host_id != local" --> SSH
   end
 
-  subgraph Hosts["Agent Hosts (远端 SSH)"]
-    W["cooagents-worker (CLI)<br/>materialize · acpx exec · upload"]
+  subgraph Hosts["Agent Hosts 远端 SSH"]
+    WK["cooagents-worker CLI<br/>materialize · acpx exec · upload"]
   end
 
   subgraph Storage["持久化层"]
     DB[("SQLite<br/>.coop/state.db")]
-    FS[("Workspace FS<br/>WORKSPACES_ROOT/<slug>/")]
-    OSS[("Aliyun OSS (可选)")]
-    REPOS[("git bare clones<br/>.repos/<id>.git")]
+    FS[("Workspace FS<br/>WORKSPACES_ROOT/slug/")]
+    OSS[("Aliyun OSS 可选")]
+    REPOS[("git bare clones<br/>.repos/repo-id.git")]
   end
 
   subgraph Notify["事件分发"]
     WH["WebhookNotifier"]
-    OPENCLAW["OpenClaw / Hermes / Feishu"]
+    OUT["OpenClaw / Hermes / Feishu"]
   end
 
-  SPA <-->|cookie session| R
+  SPA <-- "cookie session" --> R
   SM --> AC
-  SSH -->|ssh exec| W
-  W -->|httpx| R
+  SSH -- "ssh exec" --> WK
+  WK -- "httpx files API" --> R
   MGR --> DB
   MGR --> FS
   MGR --> OSS
   LOOP --> REPOS
-  W -->|GET/POST /workspaces/{id}/files| R
-  SM --> WH --> OPENCLAW
+  SM --> WH
+  WH --> OUT
 ```
 
 **控制平面只有一个进程**（FastAPI / uvicorn），它是 **唯一的 DB 写者** 和 **唯一的 OSS 写者**。Agent 主机即便跑在远端，也通过 `POST /workspaces/{id}/files` 回流文件，绝不直连 DB / OSS。
