@@ -251,6 +251,19 @@ class WorkspaceMetrics(BaseModel):
     avg_iteration_rounds: float
 
 
+class RepoRegistryMetrics(BaseModel):
+    """PRD Phase 9 (repo-registry) Success Metrics 2 and 3 — lifetime by
+    default; ``?since=&until=`` windows ``multi_repo_dev_work_share``.
+    ``healthy_repos_share`` is a current-state snapshot and ignores the
+    window (parallel to ``WorkspaceMetrics.active_workspaces``).
+
+    Metric 1 (DevWork creation reject rate) is deferred to a follow-up
+    PRP; the schema has no ``dev_works.state`` / ``last_err`` columns.
+    """
+    multi_repo_dev_work_share: float
+    healthy_repos_share: float
+
+
 # ---------------------------------------------------------------------------
 # Phase 3 — DesignWork request/response DTOs
 # ---------------------------------------------------------------------------

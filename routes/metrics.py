@@ -9,54 +9,19 @@ Pure read: four SELECT aggregates, no mutation.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
 
-from src.exceptions import BadRequestError
+from routes._metrics_common import append_range, parse_iso
 from src.models import WorkspaceMetrics
 
+# Backwards-compatible re-exports: any caller still importing the
+# leading-underscore names from this module keeps working.
+_parse_iso = parse_iso
+_append_range = append_range
+
 router = APIRouter(tags=["metrics"])
-
-
-def _parse_iso(value: str | None, name: str) -> str | None:
-    """Parse and normalize to the canonical UTC isoformat used by writers.
-
-    DB rows are written as ``datetime.now(timezone.utc).isoformat()`` (offset
-    ``+00:00``). Clients may pass ``Z`` suffix or naive/alt-offset values;
-    normalize so lexicographic `>=` / `<=` binds match stored rows. Naive
-    input is assumed UTC.
-    """
-    if value is None:
-        return None
-    raw = value.replace("Z", "+00:00") if value.endswith("Z") else value
-    try:
-        dt = datetime.fromisoformat(raw)
-    except ValueError as exc:
-        raise BadRequestError(
-            f"{name} must be ISO8601 (e.g. 2026-04-23T00:00:00+00:00): {exc}"
-        ) from exc
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    else:
-        dt = dt.astimezone(timezone.utc)
-    return dt.isoformat()
-
-
-def _append_range(
-    where: list[str],
-    params: list[Any],
-    column: str,
-    since: str | None,
-    until: str | None,
-) -> None:
-    if since is not None:
-        where.append(f"{column} >= ?")
-        params.append(since)
-    if until is not None:
-        where.append(f"{column} <= ?")
-        params.append(until)
 
 
 @router.get("/metrics/workspaces")
@@ -65,8 +30,8 @@ async def workspace_metrics(
     since: str | None = Query(None, description="ISO8601 lower bound (inclusive)"),
     until: str | None = Query(None, description="ISO8601 upper bound (inclusive)"),
 ) -> WorkspaceMetrics:
-    since = _parse_iso(since, "since")
-    until = _parse_iso(until, "until")
+    since = parse_iso(since, "since")
+    until = parse_iso(until, "until")
 
     db = request.app.state.db
 
@@ -83,7 +48,7 @@ async def workspace_metrics(
     # total_workspaces (denominator for HI ratio): all statuses
     ws_where: list[str] = []
     ws_params: list[Any] = []
-    _append_range(ws_where, ws_params, "created_at", since, until)
+    append_range(ws_where, ws_params, "created_at", since, until)
     ws_sql = "SELECT COUNT(*) AS c FROM workspaces"
     if ws_where:
         ws_sql += " WHERE " + " AND ".join(ws_where)
@@ -93,7 +58,7 @@ async def workspace_metrics(
     # human_intervention events in window
     hi_where = ["event_name='workspace.human_intervention'"]
     hi_params: list[Any] = []
-    _append_range(hi_where, hi_params, "ts", since, until)
+    append_range(hi_where, hi_params, "ts", since, until)
     hi_row = await db.fetchone(
         "SELECT COUNT(*) AS c FROM workspace_events WHERE "
         + " AND ".join(hi_where),
@@ -104,7 +69,7 @@ async def workspace_metrics(
     # dev_works aggregate: numerator (fps=1), denominator (terminal), avg rounds
     dw_where = ["current_step IN ('COMPLETED','ESCALATED')"]
     dw_params: list[Any] = []
-    _append_range(dw_where, dw_params, "created_at", since, until)
+    append_range(dw_where, dw_params, "created_at", since, until)
     dw_row = await db.fetchone(
         "SELECT "
         "SUM(CASE WHEN first_pass_success=1 THEN 1 ELSE 0 END) AS numerator, "

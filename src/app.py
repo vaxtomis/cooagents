@@ -381,6 +381,7 @@ from routes.dev_iteration_notes import router as dev_iteration_notes_router
 from routes.dev_works import router as dev_works_router
 from routes.gates import router as gates_router
 from routes.metrics import router as metrics_router
+from routes.metrics_repos import router as metrics_repos_router
 from routes.agent_hosts import router as agent_hosts_router
 from routes.repos import router as repos_router
 from routes.reviews import router as reviews_router
@@ -403,5 +404,6 @@ app.include_router(reviews_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(workspace_events_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(gates_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(metrics_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(metrics_repos_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(agent_hosts_router, prefix="/api/v1", dependencies=auth_required)
 mount_dashboard_spa(app)
