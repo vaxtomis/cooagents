@@ -18,8 +18,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from string import Template
 
-from src.exceptions import BadRequestError
-
 _TPL_DIR = Path(__file__).resolve().parents[1] / "templates"
 _STEP2_TPL = _TPL_DIR / "STEP2-iteration.md.tpl"
 _STEP3_TPL = _TPL_DIR / "STEP3-context.md.tpl"
@@ -132,34 +130,89 @@ def compose_step4(inputs: Step4Inputs) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step5 — Review / scoring prompt
+# Step5 — Review / scoring prompt (Phase 8: path-based, multi-repo aware)
 # ---------------------------------------------------------------------------
+
+# Honest description of the current execution gap: only the primary mount has
+# a local worktree on this server (the multi-mount worker described by the
+# repo-registry PRD is not yet built). Embedded as the single source of truth
+# so tests and template render the exact same wording.
+_BTRACK_LIMITATION_NOTE = (
+    "⚠️ 当前实现限制（B-track）：仅 primary mount 在本机有 git "
+    "worktree；非 primary mount 暂未在本机产生代码改动（多仓 worker "
+    "由后续 PRD 上线）。"
+    "评分时 — primary mount 在其 worktree_path 下 `git diff HEAD` "
+    "查看本轮改动；非 primary mount 仅基于 Step4 findings 中该 mount "
+    "的条目判断；无相关 finding 视为本轮该仓无问题。"
+)
+
+# Aggregation rule order (`design_hollow > req_gap > impl_gap > null`) is
+# load-bearing: it matches how the SM routes those categories
+# (escalate / loop-Step2 / loop-Step4 / COMPLETED). Keep duplicated assertions
+# in tests/test_dev_prompt_composer.py in sync when wording is tuned.
+_AGGREGATION_RULE = """\
+按以下优先级聚合，**最严重的 category 取胜**：
+
+1. **设计文档本身缺乏可评估内容**支撑本次多仓任务 → `problem_category="design_hollow"`
+2. 否则**任一仓**的迭代设计/开发计划/用例清单与设计文档或用户诉求有缺口 → `problem_category="req_gap"`
+3. 否则**任一仓**存在实现/测试/代码回归（lint 失败、测试失败、代码与计划不符） → `problem_category="impl_gap"`
+4. 否则全部通过阈值 → `problem_category=null` 且 `score >= $rubric_threshold`
+"""
+
+
+@dataclass(frozen=True)
+class MountTableEntry:
+    mount_name: str
+    repo_id: str
+    role: str            # repos.role value, e.g. "backend"; "other" for NULL
+    is_primary: bool
+    base_branch: str
+    devwork_branch: str
+    worktree_path: str | None  # set only for primary; None for others
+
+
+def _render_mount_table(entries: tuple[MountTableEntry, ...]) -> str:
+    if not entries:
+        return "_(no repo_refs registered for this DevWork)_"
+    header = (
+        "| mount | repo_id | role | primary | base_branch | "
+        "devwork_branch | worktree_path / 备注 |\n"
+        "|---|---|---|---|---|---|---|"
+    )
+    rows: list[str] = [header]
+    for e in entries:
+        primary_cell = "✅" if e.is_primary else ""
+        loc = e.worktree_path or "_(无本地 worktree — 多仓 worker 待上线)_"
+        rows.append(
+            f"| `{e.mount_name}` | `{e.repo_id}` | {e.role} | "
+            f"{primary_cell} | `{e.base_branch}` | "
+            f"`{e.devwork_branch}` | {loc} |"
+        )
+    return "\n".join(rows)
+
 
 @dataclass(frozen=True)
 class Step5Inputs:
-    design_doc_text: str
-    # Exact body of the design doc's ``## 打分 rubric`` section (E2).
-    rubric_section_text: str
-    iteration_note_text: str
-    diff_text: str
-    step4_findings_json: str
+    design_doc_path: str
+    iteration_note_path: str
+    step4_findings_path: str
+    mount_table_entries: tuple[MountTableEntry, ...]
+    primary_worktree_path: str | None
     rubric_threshold: int
     output_json_path: str
 
 
 def compose_step5(inputs: Step5Inputs) -> str:
-    if not inputs.rubric_section_text.strip():
-        # Structural failure: design_doc lacks the rubric section.  The caller
-        # (SM) should have caught this at Step1, but fail-fast if we slip past.
-        raise BadRequestError(
-            "design doc missing '## 打分 rubric' section — cannot compose Step5 prompt"
-        )
     return _STEP5_TEMPLATE.safe_substitute(
-        design_doc_text=inputs.design_doc_text,
-        rubric_section_text=inputs.rubric_section_text,
-        iteration_note_text=inputs.iteration_note_text,
-        diff_text=inputs.diff_text,
-        step4_findings_json=inputs.step4_findings_json,
+        design_doc_path=inputs.design_doc_path,
+        iteration_note_path=inputs.iteration_note_path,
+        step4_findings_path=inputs.step4_findings_path,
+        mount_table=_render_mount_table(inputs.mount_table_entries),
+        primary_worktree_path=(
+            inputs.primary_worktree_path or "_(no primary worktree)_"
+        ),
+        btrack_limitation=_BTRACK_LIMITATION_NOTE,
+        aggregation_rule=_AGGREGATION_RULE,
         rubric_threshold=str(inputs.rubric_threshold),
         output_json_path=inputs.output_json_path,
     )

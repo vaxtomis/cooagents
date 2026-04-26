@@ -13,9 +13,10 @@ dict and drives one tick.
 The mixin expects the concrete class to provide:
   * ``self.db`` / ``self.workspaces`` / ``self.iteration_notes`` / ``self.registry``
   * ``self.config.devwork`` — step timeouts + max_rounds
-  * ``self._now()`` / ``self._run_llm`` / ``self._collect_diff`` /
-    ``self._gates`` / ``self._update_gates_field`` / ``self._transition`` /
+  * ``self._now()`` / ``self._run_llm`` / ``self._gates`` /
+    ``self._update_gates_field`` / ``self._transition`` /
     ``self._record_review`` / ``self._resolve_rubric_threshold`` /
+    ``self._load_mount_table_entries`` /
     ``self._escalate`` / ``self._loop_or_escalate`` / ``self._abs_for``
 
 Do not import :mod:`src.dev_work_sm` here — avoids a circular import.
@@ -341,7 +342,13 @@ class DevWorkStepHandlersMixin:
         )
 
     async def _s5_review(self, dw: dict[str, Any]) -> None:
-        """Rubric scoring; in-place retry once on parse failure."""
+        """Rubric scoring; in-place retry once on parse failure.
+
+        Phase 8: prompt is path-based — the LLM Reads the design doc /
+        iteration note / Step4 findings itself, and Bashes ``git diff HEAD``
+        in the primary worktree. The SM only does the rubric pre-flight
+        (so an empty rubric escalates without spinning up a Step5 round).
+        """
         round_n = dw["iteration_rounds"] + 1
         rubric_threshold = await self._resolve_rubric_threshold(dw)
 
@@ -360,8 +367,9 @@ class DevWorkStepHandlersMixin:
                 problem_category=ProblemCategory.design_hollow,
             )
             return
-        rubric_body = extract_rubric_section(design_text)
-        if not rubric_body:
+        # Pre-flight only: confirm the rubric section exists. The composer no
+        # longer embeds the body — Claude reads it itself from $design_doc_path.
+        if not extract_rubric_section(design_text):
             await self._escalate(
                 dw,
                 reason="design_doc lacks '## 打分 rubric' section",
@@ -378,48 +386,26 @@ class DevWorkStepHandlersMixin:
                 problem_category=ProblemCategory.req_gap,
             )
             return
-        try:
-            iteration_note_text = await self.registry.read_text(
-                workspace_slug=ws["slug"],
-                relative_path=note["markdown_path"],
-            )
-        except NotFoundError as exc:
-            # Scoring against a synthetic placeholder would produce a
-            # semantically meaningless result; escalate instead of silently
-            # substituting as prior versions did.
-            logger.warning(
-                "dev_work %s iteration note unreadable at Step5: %s (%s)",
-                dw["id"],
-                note["markdown_path"],
-                exc,
-            )
-            await self._escalate(
-                dw,
-                reason=f"iteration note unreadable at Step5: {exc}",
-                problem_category=None,
-            )
-            return
 
-        gates = await self._gates(dw["id"])
-        step4_findings = gates.get(f"step4_findings_round{round_n}", {})
-        step4_findings_json = json.dumps(
-            step4_findings, ensure_ascii=False, indent=2
+        findings_rel = (
+            f"devworks/{dw['id']}/artifacts/step4-findings-round{round_n}.json"
         )
-
-        diff_text = await self._collect_diff(dw["worktree_path"])
-
         review_rel = (
             f"devworks/{dw['id']}/artifacts/step5-review-round{round_n}.json"
         )
         review_abs = self._abs_for(ws, review_rel)
 
+        mount_entries = await self._load_mount_table_entries(dw)
+
         prompt = compose_step5(
             Step5Inputs(
-                design_doc_text=design_text,
-                rubric_section_text=rubric_body,
-                iteration_note_text=iteration_note_text,
-                diff_text=diff_text,
-                step4_findings_json=step4_findings_json,
+                design_doc_path=self._abs_for(ws, dd["path"]),
+                iteration_note_path=self._abs_for(
+                    ws, note["markdown_path"]
+                ),
+                step4_findings_path=self._abs_for(ws, findings_rel),
+                mount_table_entries=mount_entries,
+                primary_worktree_path=dw.get("worktree_path"),
                 rubric_threshold=rubric_threshold,
                 output_json_path=review_abs,
             )
@@ -441,6 +427,7 @@ class DevWorkStepHandlersMixin:
         )
 
         retry_key = f"step5_retry_round{round_n}"
+        gates = await self._gates(dw["id"])
         attempt = int(gates.get(retry_key, 0))
 
         outcome: ReviewOutcome | None = None

@@ -24,9 +24,10 @@ from pathlib import Path
 from typing import Any
 
 from src.design_validator import validate_design_markdown
+from src.dev_prompt_composer import MountTableEntry
 from src.dev_work_steps import DevWorkStepHandlersMixin
 from src.exceptions import BadRequestError, NotFoundError
-from src.git_utils import DEVWORK_BRANCH_FMT, ensure_worktree, run_git
+from src.git_utils import DEVWORK_BRANCH_FMT, ensure_worktree
 from src.models import (
     REPO_ROLE_PRIMARY_PRIORITY,
     AgentKind,
@@ -647,18 +648,46 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         )
         return rc, stdout or ""
 
-    async def _collect_diff(self, worktree_path: str) -> str:
-        """Best-effort `git diff` collection; returns empty string on failure."""
-        if not worktree_path:
-            return ""
-        try:
-            out, _err, rc = await run_git(
-                "diff", "HEAD", cwd=worktree_path, check=False
+    async def _load_mount_table_entries(
+        self, dw: dict[str, Any],
+    ) -> tuple[MountTableEntry, ...]:
+        """Build the Step5 mount-table input ordered primary-first.
+
+        Phase 8 (B-track): only the primary mount carries a populated
+        ``worktree_path`` — non-primary mounts have no local worktree until
+        the multi-mount worker (a future PRD) ships. Sort key intentionally
+        bypasses :meth:`_select_primary_ref` because that helper would re-run
+        the auto-selection rule, which can disagree with the explicit
+        ``is_primary`` bit recorded by ``_s0_init`` if ``repos.role`` was
+        edited between create and review.
+        """
+        rows = await self.db.fetchall(
+            "SELECT dwr.repo_id, dwr.mount_name, dwr.base_branch, "
+            "dwr.devwork_branch, dwr.is_primary, r.role AS repo_role "
+            "FROM dev_work_repos dwr "
+            "JOIN repos r ON r.id = dwr.repo_id "
+            "WHERE dwr.dev_work_id=? "
+            "ORDER BY dwr.mount_name",
+            (dw["id"],),
+        )
+        if not rows:
+            return ()
+        ordered = sorted(
+            rows, key=lambda r: (not r["is_primary"], r["mount_name"])
+        )
+        primary_wt = dw.get("worktree_path")
+        return tuple(
+            MountTableEntry(
+                mount_name=r["mount_name"],
+                repo_id=r["repo_id"],
+                role=r["repo_role"] or "other",
+                is_primary=bool(r["is_primary"]),
+                base_branch=r["base_branch"],
+                devwork_branch=r["devwork_branch"],
+                worktree_path=primary_wt if r["is_primary"] else None,
             )
-        except Exception:
-            logger.exception("collect_diff failed at %s", worktree_path)
-            return ""
-        return out if rc == 0 else ""
+            for r in ordered
+        )
 
     async def _resolve_rubric_threshold(self, dw: dict[str, Any]) -> int:
         """Prefer design_doc.rubric_threshold; fall back to scoring default."""

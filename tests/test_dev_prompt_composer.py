@@ -1,14 +1,14 @@
-"""Phase 4: dev_prompt_composer unit tests."""
+"""Phase 4 + Phase 8: dev_prompt_composer unit tests."""
 from __future__ import annotations
-
-import pytest
 
 from src.dev_prompt_composer import (
     IterationHeaderInputs,
+    MountTableEntry,
     Step2Inputs,
     Step3Inputs,
     Step4Inputs,
     Step5Inputs,
+    _BTRACK_LIMITATION_NOTE,
     compose_iteration_header,
     compose_step2,
     compose_step3,
@@ -16,7 +16,6 @@ from src.dev_prompt_composer import (
     compose_step5,
     extract_rubric_section,
 )
-from src.exceptions import BadRequestError
 
 
 def test_iteration_header_has_frontmatter_and_h1():
@@ -70,26 +69,99 @@ def test_step4_prompt_includes_findings_path():
     assert "/f.json" in out
 
 
-def test_step5_prompt_injects_rubric_and_threshold():
+def test_step5_renders_paths_only():
     out = compose_step5(Step5Inputs(
-        design_doc_text="D",
-        rubric_section_text="| 项 | 权重 |\n|---|---|",
-        iteration_note_text="N", diff_text="diff",
-        step4_findings_json="{}", rubric_threshold=85,
-        output_json_path="/s.json",
+        design_doc_path="/ws/foo/designs/d.md",
+        iteration_note_path="/ws/foo/devworks/dev-x/iteration-round-1.md",
+        step4_findings_path=(
+            "/ws/foo/devworks/dev-x/artifacts/step4-findings-round1.json"
+        ),
+        mount_table_entries=(
+            MountTableEntry(
+                mount_name="backend", repo_id="repo-bbb",
+                role="backend", is_primary=True,
+                base_branch="main",
+                devwork_branch="devwork/ws-foo/aaa111111111",
+                worktree_path="/ws/foo/.coop/worktrees/devwork-ws-foo-aaa",
+            ),
+            MountTableEntry(
+                mount_name="frontend", repo_id="repo-aaa",
+                role="frontend", is_primary=False,
+                base_branch="main",
+                devwork_branch="devwork/ws-foo/aaa111111111",
+                worktree_path=None,
+            ),
+        ),
+        primary_worktree_path=(
+            "/ws/foo/.coop/worktrees/devwork-ws-foo-aaa"
+        ),
+        rubric_threshold=85,
+        output_json_path=(
+            "/ws/foo/devworks/dev-x/artifacts/step5-review-round1.json"
+        ),
     ))
-    assert "| 项 | 权重 |" in out
+    # Paths present
+    assert "/ws/foo/designs/d.md" in out
+    assert "iteration-round-1.md" in out
+    assert "step4-findings-round1.json" in out
+    # Mount table renders both rows
+    assert "| `backend` |" in out
+    assert "| `frontend` |" in out
+    assert "✅" in out  # primary marked
+    # frontend B-track marker (no local worktree)
+    assert "_(无本地 worktree — 多仓 worker 待上线)_" in out
+    # Limitation note + aggregation rule + threshold
+    assert _BTRACK_LIMITATION_NOTE in out
+    # Aggregation rule wording is asserted by a stable substring (the
+    # constant interpolates ``$rubric_threshold`` at compose time, so
+    # asserting on the raw constant would not match the rendered output).
+    assert "**最严重的 category 取胜**" in out
+    assert "design_hollow" in out
+    assert "req_gap" in out
+    assert "impl_gap" in out
     assert "85" in out
-    assert "/s.json" in out
+    # No embedded content from the previous embed-everything layout.
+    assert "## 设计文档" not in out
+    assert "## 本轮 diff" not in out
 
 
-def test_step5_fails_fast_on_missing_rubric():
-    with pytest.raises(BadRequestError):
-        compose_step5(Step5Inputs(
-            design_doc_text="D", rubric_section_text="",
-            iteration_note_text="", diff_text="", step4_findings_json="{}",
-            rubric_threshold=80, output_json_path="/s.json",
-        ))
+def test_step5_with_no_mounts_falls_back_to_marker():
+    out = compose_step5(Step5Inputs(
+        design_doc_path="/d", iteration_note_path="/n",
+        step4_findings_path="/f", mount_table_entries=(),
+        primary_worktree_path=None, rubric_threshold=85,
+        output_json_path="/s",
+    ))
+    assert "no repo_refs registered for this DevWork" in out
+    # primary_worktree_path falls back to the human-readable placeholder.
+    assert "_(no primary worktree)_" in out
+
+
+def test_step5_aggregation_priority_order_in_template():
+    out = compose_step5(Step5Inputs(
+        design_doc_path="/d", iteration_note_path="/n",
+        step4_findings_path="/f", mount_table_entries=(),
+        primary_worktree_path=None, rubric_threshold=85,
+        output_json_path="/s",
+    ))
+    # design_hollow MUST appear before req_gap MUST appear before impl_gap.
+    assert (
+        out.index("design_hollow")
+        < out.index("req_gap")
+        < out.index("impl_gap")
+    )
+
+
+def test_step5_no_longer_raises_on_empty_rubric_section():
+    """Phase 8: rubric pre-flight moved out of the composer into the SM."""
+    out = compose_step5(Step5Inputs(
+        design_doc_path="/d", iteration_note_path="/n",
+        step4_findings_path="/f", mount_table_entries=(),
+        primary_worktree_path=None, rubric_threshold=80,
+        output_json_path="/s",
+    ))
+    # Composes a (degenerate) prompt without raising.
+    assert "/d" in out
 
 
 def test_extract_rubric_section_parses():
