@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Bot,
+  Database,
   FolderKanban,
   GitBranch,
   LayoutDashboard,
@@ -20,6 +21,8 @@ import { CrossWorkspaceDevWorkPage } from "./pages/CrossWorkspaceDevWorkPage";
 import { DesignWorkPage } from "./pages/DesignWorkPage";
 import { DevWorkPage } from "./pages/DevWorkPage";
 import { LoginPage } from "./pages/LoginPage";
+import { RepoDetailPage } from "./pages/RepoDetailPage";
+import { ReposPage } from "./pages/ReposPage";
 import { WorkspaceDashboardPage } from "./pages/WorkspaceDashboardPage";
 import { WorkspaceDetailPage } from "./pages/WorkspaceDetailPage";
 import { WorkspacesPage } from "./pages/WorkspacesPage";
@@ -40,6 +43,7 @@ type PageMeta = {
 const navItems: NavItem[] = [
   { to: "/", label: "概览", icon: LayoutDashboard, end: true },
   { to: "/workspaces", label: "工作区域", icon: FolderKanban },
+  { to: "/repos", label: "仓库注册表", icon: Database },
   { to: "/dev-works", label: "跨区域 DevWorks", icon: GitBranch },
 ];
 
@@ -93,6 +97,23 @@ function resolvePageMeta(pathname: string): PageMeta {
       title: "跨区域 DevWorks",
       eyebrow: "跨 Workspace 视图",
       description: "按 Workspace 分组展示所有 DevWork，仅供浏览。",
+    };
+  }
+
+  if (pathname === "/repos") {
+    return {
+      title: "仓库注册表",
+      eyebrow: "Repo Registry",
+      description:
+        "查看与管理已注册仓库的 fetch 健康状态、立即触发 fetch、从 config/repos.yaml 同步。",
+    };
+  }
+
+  if (/^\/repos\/[^/]+$/.test(pathname)) {
+    return {
+      title: "仓库详情",
+      eyebrow: "Branches / Tree / Log",
+      description: "通过 bare clone 浏览分支、目录、文件与提交日志。",
     };
   }
 
@@ -248,6 +269,8 @@ const routes = [
       { path: "workspaces/:wsId/design-works/:dwId", element: <DesignWorkPage /> },
       { path: "workspaces/:wsId/dev-works/:dvId", element: <DevWorkPage /> },
       { path: "dev-works", element: <CrossWorkspaceDevWorkPage /> },
+      { path: "repos", element: <ReposPage /> },
+      { path: "repos/:repoId", element: <RepoDetailPage /> },
     ],
   },
 ];

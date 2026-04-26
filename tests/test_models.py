@@ -12,11 +12,15 @@ from src.models import (
     DesignWorkState,
     DevIterationNote,
     DevRepoRef,
+    DevRepoRefView,
     DevWork,
+    DevWorkProgress,
     DevWorkStep,
     ProblemCategory,
     RepoRef,
     Review,
+    UpdateRepoPushStateRequest,
+    WorkerRepoHandoff,
     Workspace,
     WorkspaceEvent,
     WorkspaceStatus,
@@ -215,3 +219,64 @@ def test_create_design_work_request_with_repo_refs():
         repo_refs=[RepoRef(repo_id="repo-aaa", base_branch="main")],
     )
     assert len(req.repo_refs) == 1
+
+
+# Phase 5 (repo-registry) — worker handoff DTOs ------------------------------
+
+
+def test_worker_handoff_inherits_dev_repo_ref_view_fields():
+    """WorkerRepoHandoff is a DevRepoRefView + url + ssh_key_path + push_err."""
+    base_fields = set(DevRepoRefView.model_fields.keys())
+    handoff_fields = set(WorkerRepoHandoff.model_fields.keys())
+    assert base_fields.issubset(handoff_fields)
+    assert {"url", "ssh_key_path", "push_err"}.issubset(handoff_fields)
+
+
+def test_worker_handoff_happy():
+    h = WorkerRepoHandoff(
+        repo_id="repo-1",
+        mount_name="backend",
+        base_branch="main",
+        devwork_branch="devwork/x/backend",
+        push_state="pending",
+        url="git@gh:org/repo.git",
+        ssh_key_path="/home/agent/.ssh/id_a",
+    )
+    assert h.url == "git@gh:org/repo.git"
+    assert h.ssh_key_path == "/home/agent/.ssh/id_a"
+    assert h.push_err is None
+    assert h.is_primary is False  # default from DevRepoRefView
+
+
+def test_update_push_state_request_rejects_pending():
+    """The Literal forces the worker to use the dedicated state values."""
+    with pytest.raises(ValidationError):
+        UpdateRepoPushStateRequest(push_state="pending")
+
+
+def test_update_push_state_request_rejects_oversize_error_msg():
+    with pytest.raises(ValidationError):
+        UpdateRepoPushStateRequest(
+            push_state="failed", error_msg="x" * 2049,
+        )
+
+
+def test_update_push_state_request_happy_pushed():
+    r = UpdateRepoPushStateRequest(push_state="pushed")
+    assert r.push_state == "pushed"
+    assert r.error_msg is None
+
+
+def test_dev_work_progress_repos_default_empty():
+    """The new repos[] field is additive — old payloads still parse."""
+    p = DevWorkProgress(
+        id="dev-x",
+        workspace_id="ws-x",
+        design_doc_id="des-x",
+        current_step=DevWorkStep.STEP1_VALIDATE,
+        iteration_rounds=0,
+        created_at="t",
+        updated_at="t",
+    )
+    assert p.repos == []
+    assert p.repo_refs == []

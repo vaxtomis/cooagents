@@ -19,6 +19,7 @@ from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.git_utils import run_git
+from src.repos import DevWorkRepoStateRepo
 from src.repos.registry import RepoRegistryRepo
 from src.workspace_manager import WorkspaceManager
 
@@ -174,6 +175,7 @@ async def client(tmp_path):
     test_app.state.dev_work_sm = sm
     test_app.state.settings = settings
     test_app.state.repo_registry_repo = repo_registry
+    test_app.state.dev_work_repo_state = DevWorkRepoStateRepo(db)
     test_app.state.repo_inspector = inspector
     test_app.state.start_time = time.time()
 
@@ -182,6 +184,14 @@ async def client(tmp_path):
     limiter = Limiter(key_func=client_ip, default_limits=["1000/minute"])
     test_app.state.limiter = limiter
     limiter.enabled = False
+    # Disable the module-level limiter on the dev_works router so the
+    # Phase 5 push-state tests (which fire many POSTs from the same IP)
+    # don't accumulate state across tests. Restore the prior value in the
+    # fixture's teardown so a later test that imports ``routes.dev_works``
+    # still sees production-configured rate-limiting.
+    from routes.dev_works import limiter as dev_works_limiter
+    prev_dw_limiter_enabled = dev_works_limiter.enabled
+    dev_works_limiter.enabled = False
 
     @test_app.exception_handler(NotFoundError)
     async def _nf(request, exc):
@@ -234,11 +244,14 @@ async def client(tmp_path):
     test_app.state._dd = dd
     test_app.state._repo_id = "repo-test00000001"
 
-    async with AsyncClient(
-        transport=ASGITransport(app=test_app), base_url="http://test"
-    ) as ac:
-        ac._app = test_app
-        yield ac
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=test_app), base_url="http://test"
+        ) as ac:
+            ac._app = test_app
+            yield ac
+    finally:
+        dev_works_limiter.enabled = prev_dw_limiter_enabled
 
     await db.close()
 
@@ -362,3 +375,168 @@ async def test_post_repos_ensure_404(client):
         "/api/v1/repos/ensure", json={"repo_path": "/x"},
     )
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 (repo-registry): worker-facing repos[] + push-state writeback
+# ---------------------------------------------------------------------------
+
+
+async def _register_secondary_repo(
+    app, *, repo_id: str, name: str, role: str = "frontend",
+) -> str:
+    """Register a second bare repo so multi-repo tests can exercise repos[]."""
+    ws_root = app.state.workspaces.workspaces_root
+    bare_dir = ws_root / ".coop" / "registry" / "repos" / f"{repo_id}.git"
+    await _make_bare_clone(bare_dir)
+    await app.state.repo_registry_repo.upsert(
+        id=repo_id,
+        name=name,
+        url=str(bare_dir.with_suffix(".src")),
+        default_branch="main",
+        ssh_key_path=f"/home/agent/.ssh/{name}_id",
+        bare_clone_path=str(bare_dir),
+        role=role,
+    )
+    await app.state.repo_registry_repo.update_fetch_status(
+        repo_id, status="healthy", bare_clone_path=str(bare_dir),
+    )
+    return repo_id
+
+
+async def test_get_dev_work_returns_repos_with_url_and_ssh_key(client):
+    app = client._app
+    fe_id = await _register_secondary_repo(
+        app, repo_id="repo-test00000002", name="fe", role="frontend",
+    )
+    payload = _payload(app, repo_refs=[
+        {"repo_id": app.state._repo_id, "mount_name": "backend",
+         "base_branch": "main"},
+        {"repo_id": fe_id, "mount_name": "frontend",
+         "base_branch": "main"},
+    ])
+    create = await client.post("/api/v1/dev-works", json=payload)
+    assert create.status_code == 201, create.text
+    dev_id = create.json()["id"]
+
+    r = await client.get(f"/api/v1/dev-works/{dev_id}")
+    assert r.status_code == 200
+    body = r.json()
+    repos = body["repos"]
+    assert len(repos) == 2
+    by_mount = {x["mount_name"]: x for x in repos}
+    assert "backend" in by_mount and "frontend" in by_mount
+    assert by_mount["backend"]["url"]  # joined from repos.url
+    assert by_mount["frontend"]["url"]
+    # ssh_key_path round-trips when set on the registry row.
+    assert by_mount["frontend"]["ssh_key_path"] == "/home/agent/.ssh/fe_id"
+    # Phase 4 repo_refs still present + repo_id matches per-row.
+    assert {r["repo_id"] for r in body["repo_refs"]} == {
+        x["repo_id"] for x in repos
+    }
+    # Initial state — pending until a worker writes back.
+    assert all(x["push_state"] == "pending" for x in repos)
+
+
+async def test_post_push_state_pending_to_pushed(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+
+    r = await client.post(
+        f"/api/v1/dev-works/{dev_id}/repos/backend/push-state",
+        json={"push_state": "pushed"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    backend = next(x for x in body["repos"] if x["mount_name"] == "backend")
+    assert backend["push_state"] == "pushed"
+    assert backend.get("push_err") is None
+
+
+async def test_post_push_state_failed_persists_error_msg(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+
+    # Include control bytes to assert sanitisation at persistence.
+    err = "remote rejected:\x00\x07\nmaster branch protected"
+    r = await client.post(
+        f"/api/v1/dev-works/{dev_id}/repos/backend/push-state",
+        json={"push_state": "failed", "error_msg": err},
+    )
+    assert r.status_code == 200, r.text
+    backend = next(
+        x for x in r.json()["repos"] if x["mount_name"] == "backend"
+    )
+    assert backend["push_state"] == "failed"
+    assert backend["push_err"]
+    # Control bytes stripped; preserved letters survive.
+    assert "\x00" not in backend["push_err"]
+    assert "\x07" not in backend["push_err"]
+    assert "remote rejected" in backend["push_err"]
+
+
+async def test_post_push_state_idempotent_pushed(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+
+    url = f"/api/v1/dev-works/{dev_id}/repos/backend/push-state"
+    r1 = await client.post(url, json={"push_state": "pushed"})
+    r2 = await client.post(url, json={"push_state": "pushed"})
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    backend = next(
+        x for x in r2.json()["repos"] if x["mount_name"] == "backend"
+    )
+    assert backend["push_state"] == "pushed"
+
+
+async def test_post_push_state_pushed_then_failed_409(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+
+    url = f"/api/v1/dev-works/{dev_id}/repos/backend/push-state"
+    ok = await client.post(url, json={"push_state": "pushed"})
+    assert ok.status_code == 200
+
+    bad = await client.post(
+        url, json={"push_state": "failed", "error_msg": "late"},
+    )
+    assert bad.status_code == 409
+    body = bad.json()
+    # ConflictError handler rounds out the error body with current_stage.
+    assert body.get("current_stage") == "pushed"
+
+
+async def test_post_push_state_unknown_dev_work_404(client):
+    r = await client.post(
+        "/api/v1/dev-works/dev-doesnotexist/repos/backend/push-state",
+        json={"push_state": "pushed"},
+    )
+    assert r.status_code == 404
+
+
+async def test_post_push_state_unknown_mount_404(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+    r = await client.post(
+        f"/api/v1/dev-works/{dev_id}/repos/no-such-mount/push-state",
+        json={"push_state": "pushed"},
+    )
+    assert r.status_code == 404
+
+
+async def test_post_push_state_rejects_pending_422(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+    # Pydantic Literal["pushed","failed"] rejects "pending" at the boundary.
+    r = await client.post(
+        f"/api/v1/dev-works/{dev_id}/repos/backend/push-state",
+        json={"push_state": "pending"},
+    )
+    assert r.status_code == 422

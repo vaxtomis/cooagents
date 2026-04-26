@@ -243,3 +243,101 @@ export interface CreateDevWorkPayload {
   prompt: string;
   agent?: AgentKind;
 }
+
+// ---------------------------------------------------------------------------
+// Repo Registry — mirrors src/models.py:481-696
+// ---------------------------------------------------------------------------
+
+export type RepoRole =
+  | "backend"
+  | "frontend"
+  | "fullstack"
+  | "infra"
+  | "docs"
+  | "other";
+
+export type RepoFetchStatus = "unknown" | "healthy" | "error";
+
+export interface Repo {
+  id: string;
+  name: string;
+  url: string;
+  default_branch: string;
+  ssh_key_path: string | null;
+  bare_clone_path: string | null;
+  role: RepoRole;
+  fetch_status: RepoFetchStatus;
+  last_fetched_at: string | null;
+  last_fetch_err: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRepoPayload {
+  name: string;
+  url: string;
+  default_branch?: string;
+  ssh_key_path?: string | null;
+  role?: RepoRole;
+}
+
+export interface UpdateRepoPayload {
+  name?: string;
+  url?: string;
+  default_branch?: string;
+  ssh_key_path?: string | null;
+  role?: RepoRole;
+}
+
+export interface ReposSyncReport {
+  fs_only: string[];
+  db_only: string[];
+  in_sync: string[];
+}
+
+export interface RepoBranches {
+  default_branch: string;
+  branches: string[];
+}
+
+export interface RepoTreeEntry {
+  path: string;
+  type: "blob" | "tree";
+  mode: string;
+  size: number | null;
+}
+
+export interface RepoTree {
+  ref: string;
+  path: string;
+  entries: RepoTreeEntry[];
+  truncated: boolean;
+}
+
+export interface RepoBlob {
+  ref: string;
+  path: string;
+  size: number;
+  binary: boolean;
+  content: string | null;
+}
+
+export interface RepoLogEntry {
+  sha: string;
+  author: string;
+  email: string;
+  committed_at: string;
+  subject: string;
+}
+
+export interface RepoLog {
+  ref: string;
+  path: string | null;
+  entries: RepoLogEntry[];
+}
+
+export interface FetchRepoResponse {
+  outcome: string;
+  fetch_status: RepoFetchStatus;
+  last_fetched_at: string | null;
+}

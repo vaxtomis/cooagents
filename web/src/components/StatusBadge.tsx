@@ -81,6 +81,11 @@ const STATUS_META: Record<string, { label: string; tone: StatusTone; className: 
   req_gap: warning("需求缺口"),
   impl_gap: warning("实现缺口"),
   design_hollow: warning("设计空洞"),
+
+  // Repo registry — fetch_status enum.
+  unknown: muted("未知"),
+  healthy: success("健康"),
+  error: danger("失败"),
 };
 
 export function resolveStatusBadge(status: string | null | undefined) {

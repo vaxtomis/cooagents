@@ -1,4 +1,4 @@
-"""DevWork lifecycle routes (Phase 4).
+"""DevWork lifecycle routes (Phase 4 + Phase 5).
 
 Endpoints:
     POST   /api/v1/dev-works                — create + background drive
@@ -6,6 +6,9 @@ Endpoints:
     GET    /api/v1/dev-works/{id}           — progress snapshot
     POST   /api/v1/dev-works/{id}/tick      — manual single-step advance
     POST   /api/v1/dev-works/{id}/cancel    — move to CANCELLED
+    POST   /api/v1/dev-works/{id}/repos/{mount}/push-state
+                                            — worker writeback for push
+                                              outcomes (Phase 5)
 
 C1 (v1 invariant): at most one active DevWork per design_doc. POST of a
 second DevWork against the same ``design_doc_id`` while a prior one is not
@@ -16,6 +19,11 @@ race-winner's INSERT via sqlite3.IntegrityError).
 Phase 4 (repo-registry): ``repo_path`` is replaced by ``repo_refs``. The
 4-step validation chain runs *after* the active-DevWork-per-design_doc
 fast-path so a duplicate doesn't pay the inspector cost.
+
+Phase 5 (repo-registry): GET /api/v1/dev-works/{id} also returns a
+``repos[]`` block carrying ``url`` + ``ssh_key_path`` (worker-facing
+handoff). The Phase 4 ``repo_refs`` field stays — UI consumers don't
+need ``url``.
 """
 from __future__ import annotations
 
@@ -31,6 +39,8 @@ from src.models import (
     DevRepoRefView,
     DevWorkProgress,
     DevWorkStep,
+    UpdateRepoPushStateRequest,
+    WorkerRepoHandoff,
 )
 from src.request_utils import client_ip
 
@@ -49,20 +59,25 @@ _NON_TERMINAL = tuple(
 )
 
 
-async def _load_repo_refs(
-    db, dev_id: str
-) -> list[DevRepoRefView]:
-    rows = await db.fetchall(
-        "SELECT repo_id, mount_name, base_branch, base_rev, "
-        "devwork_branch, push_state, is_primary "
-        "FROM dev_work_repos WHERE dev_work_id=? ORDER BY mount_name",
-        (dev_id,),
-    )
-    return [_row_to_repo_ref(r) for r in rows]
+def _handoff_to_repo_ref(handoff: WorkerRepoHandoff) -> DevRepoRefView:
+    """Project the worker handoff down to the Phase 4 repo_refs view.
 
-
-def _row_to_repo_ref(r: dict) -> DevRepoRefView:
+    Avoids a second query against ``dev_work_repos`` — the worker handoff
+    row is a strict superset of :class:`DevRepoRefView`'s fields.
+    """
     return DevRepoRefView(
+        repo_id=handoff.repo_id,
+        mount_name=handoff.mount_name,
+        base_branch=handoff.base_branch,
+        base_rev=handoff.base_rev,
+        devwork_branch=handoff.devwork_branch,
+        push_state=handoff.push_state,
+        is_primary=handoff.is_primary,
+    )
+
+
+def _row_to_worker_handoff(r: dict) -> WorkerRepoHandoff:
+    return WorkerRepoHandoff(
         repo_id=r["repo_id"],
         mount_name=r["mount_name"],
         base_branch=r["base_branch"],
@@ -70,31 +85,34 @@ def _row_to_repo_ref(r: dict) -> DevRepoRefView:
         devwork_branch=r["devwork_branch"],
         push_state=r["push_state"],
         is_primary=bool(r.get("is_primary")),
+        url=r["url"],
+        ssh_key_path=r.get("ssh_key_path"),
+        push_err=r.get("push_err"),
     )
 
 
-async def _load_repo_refs_batch(
-    db, dev_ids: list[str]
-) -> dict[str, list[DevRepoRefView]]:
-    """Single-query bulk fetch — avoids N+1 on list endpoints."""
-    if not dev_ids:
-        return {}
-    placeholders = ",".join("?" for _ in dev_ids)
-    rows = await db.fetchall(
-        f"SELECT dev_work_id, repo_id, mount_name, base_branch, base_rev, "
-        f"devwork_branch, push_state, is_primary "
-        f"FROM dev_work_repos WHERE dev_work_id IN ({placeholders}) "
-        f"ORDER BY dev_work_id, mount_name",
-        tuple(dev_ids),
-    )
-    grouped: dict[str, list[DevRepoRefView]] = {dwid: [] for dwid in dev_ids}
-    for r in rows:
-        grouped[r["dev_work_id"]].append(_row_to_repo_ref(r))
-    return grouped
+async def _load_worker_repos(
+    state_repo, dev_id: str
+) -> list[WorkerRepoHandoff]:
+    rows = await state_repo.list_for_dev_work(dev_id)
+    return [_row_to_worker_handoff(r) for r in rows]
+
+
+async def _load_worker_repos_batch(
+    state_repo, dev_ids: list[str]
+) -> dict[str, list[WorkerRepoHandoff]]:
+    """Bulk variant — avoids N+1 on the list-DevWork endpoint."""
+    grouped_rows = await state_repo.list_for_dev_works_batch(dev_ids)
+    return {
+        dwid: [_row_to_worker_handoff(r) for r in rows]
+        for dwid, rows in grouped_rows.items()
+    }
 
 
 def _row_to_progress(
-    row: dict, repo_refs: list[DevRepoRefView] | None = None
+    row: dict,
+    repo_refs: list[DevRepoRefView] | None = None,
+    repos: list[WorkerRepoHandoff] | None = None,
 ) -> DevWorkProgress:
     fps = row.get("first_pass_success")
     return DevWorkProgress(
@@ -113,6 +131,7 @@ def _row_to_progress(
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         repo_refs=repo_refs or [],
+        repos=repos or [],
     )
 
 
@@ -163,8 +182,10 @@ async def create_dev_work(
         ) from exc
     sm.schedule_driver(dw["id"])
     response.headers["Location"] = f"/api/v1/dev-works/{dw['id']}"
-    refs = await _load_repo_refs(db, dw["id"])
-    return _row_to_progress(dw, refs)
+    state_repo = request.app.state.dev_work_repo_state
+    repos = await _load_worker_repos(state_repo, dw["id"])
+    refs = [_handoff_to_repo_ref(h) for h in repos]
+    return _row_to_progress(dw, refs, repos)
 
 
 @router.get("/dev-works")
@@ -172,31 +193,44 @@ async def list_dev_works(
     request: Request, workspace_id: str
 ) -> list[DevWorkProgress]:
     db = request.app.state.db
+    state_repo = request.app.state.dev_work_repo_state
     rows = await db.fetchall(
         "SELECT * FROM dev_works WHERE workspace_id=? ORDER BY created_at DESC",
         (workspace_id,),
     )
-    refs_by_id = await _load_repo_refs_batch(db, [r["id"] for r in rows])
-    return [_row_to_progress(r, refs_by_id.get(r["id"], [])) for r in rows]
+    dev_ids = [r["id"] for r in rows]
+    repos_by_id = await _load_worker_repos_batch(state_repo, dev_ids)
+    return [
+        _row_to_progress(
+            r,
+            [_handoff_to_repo_ref(h) for h in repos_by_id.get(r["id"], [])],
+            repos_by_id.get(r["id"], []),
+        )
+        for r in rows
+    ]
 
 
 @router.get("/dev-works/{dev_id}")
 async def get_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
     db = request.app.state.db
+    state_repo = request.app.state.dev_work_repo_state
     row = await db.fetchone("SELECT * FROM dev_works WHERE id=?", (dev_id,))
     if not row:
         raise NotFoundError(f"dev_work {dev_id!r} not found")
-    refs = await _load_repo_refs(db, dev_id)
-    return _row_to_progress(row, refs)
+    repos = await _load_worker_repos(state_repo, dev_id)
+    refs = [_handoff_to_repo_ref(h) for h in repos]
+    return _row_to_progress(row, refs, repos)
 
 
 @router.post("/dev-works/{dev_id}/tick")
 @limiter.limit("30/minute")
 async def tick_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
     sm = request.app.state.dev_work_sm
+    state_repo = request.app.state.dev_work_repo_state
     dw = await sm.tick(dev_id)
-    refs = await _load_repo_refs(request.app.state.db, dev_id)
-    return _row_to_progress(dw, refs)
+    repos = await _load_worker_repos(state_repo, dev_id)
+    refs = [_handoff_to_repo_ref(h) for h in repos]
+    return _row_to_progress(dw, refs, repos)
 
 
 @router.post("/dev-works/{dev_id}/cancel", status_code=204)
@@ -205,3 +239,39 @@ async def cancel_dev_work(dev_id: str, request: Request) -> Response:
     sm = request.app.state.dev_work_sm
     await sm.cancel(dev_id)
     return Response(status_code=204)
+
+
+@router.post(
+    "/dev-works/{dev_id}/repos/{mount_name}/push-state",
+    response_model=DevWorkProgress,
+)
+@limiter.limit("30/minute")
+async def update_repo_push_state(
+    dev_id: str,
+    mount_name: str,
+    payload: UpdateRepoPushStateRequest,
+    request: Request,
+) -> DevWorkProgress:
+    """Worker writeback for ``dev_work_repos.push_state`` (Phase 5).
+
+    Forward-only outcome state machine; idempotent on ``pushed -> pushed``;
+    rejects ``pushed -> failed`` with 409. The ``pending`` state is
+    rejected at the boundary by the pydantic Literal on the request
+    model, so this handler only sees ``pushed`` / ``failed``.
+    """
+    db = request.app.state.db
+    state_repo = request.app.state.dev_work_repo_state
+    # Existence of the parent dev_work first — keeps 404 ordering stable
+    # (existing dev_work + missing mount → 404 from the repo class).
+    dw = await db.fetchone("SELECT * FROM dev_works WHERE id=?", (dev_id,))
+    if dw is None:
+        raise NotFoundError(f"dev_work {dev_id!r} not found")
+    await state_repo.update_push_state(
+        dev_id,
+        mount_name,
+        push_state=payload.push_state,
+        error_msg=payload.error_msg,
+    )
+    repos = await _load_worker_repos(state_repo, dev_id)
+    refs = [_handoff_to_repo_ref(h) for h in repos]
+    return _row_to_progress(dw, refs, repos)

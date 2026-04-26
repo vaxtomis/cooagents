@@ -122,6 +122,7 @@ async def lifespan(app: FastAPI):
     # the agent_hosts pattern above). Defensive try/except: a malformed
     # repos.yaml must not block startup.
     from src.repos import (
+        DevWorkRepoStateRepo,
         RepoFetcher,
         RepoHealthLoop,
         RepoInspector,
@@ -129,6 +130,10 @@ async def lifespan(app: FastAPI):
     )
 
     repo_registry_repo = RepoRegistryRepo(db)
+    # Phase 5 (repo-registry): single-writer for dev_work_repos.push_state /
+    # push_err. The SM keeps owning the initial ``pending`` INSERT; this
+    # repo class owns ``pushed`` / ``failed``.
+    dev_work_repo_state = DevWorkRepoStateRepo(db)
     try:
         repo_sync_report = await repo_registry_repo.sync_from_config(
             settings.repos
@@ -222,6 +227,7 @@ async def lifespan(app: FastAPI):
     app.state.agent_host_repo = agent_host_repo
     app.state.agent_dispatch_repo = agent_dispatch_repo
     app.state.repo_registry_repo = repo_registry_repo
+    app.state.dev_work_repo_state = dev_work_repo_state
     app.state.repo_fetcher = repo_fetcher
     app.state.repo_health_loop = repo_health_loop
     app.state.repo_inspector = repo_inspector

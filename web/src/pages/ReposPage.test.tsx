@@ -1,0 +1,208 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { SWRConfig } from "swr";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
+import {
+  createRepo,
+  deleteRepo,
+  fetchRepo,
+  listRepos,
+  syncRepos,
+} from "../api/repos";
+import type { Repo } from "../types";
+import { ReposPage } from "./ReposPage";
+
+vi.mock("../api/repos", () => ({
+  listRepos: vi.fn(),
+  getRepo: vi.fn(),
+  createRepo: vi.fn(),
+  updateRepo: vi.fn(),
+  deleteRepo: vi.fn(),
+  syncRepos: vi.fn(),
+  fetchRepo: vi.fn(),
+  repoBranches: vi.fn(),
+  repoTree: vi.fn(),
+  repoBlob: vi.fn(),
+  repoLog: vi.fn(),
+}));
+
+const navigateMock = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  );
+  return { ...actual, useNavigate: () => navigateMock };
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
+function renderPage() {
+  render(
+    <SWRConfig
+      value={{
+        dedupingInterval: 0,
+        provider: () => new Map(),
+        revalidateOnFocus: false,
+      }}
+    >
+      <MemoryRouter>
+        <ReposPage />
+      </MemoryRouter>
+    </SWRConfig>,
+  );
+}
+
+const repoA: Repo = {
+  id: "repo-aaa111",
+  name: "frontend",
+  url: "git@github.com:org/frontend.git",
+  default_branch: "main",
+  ssh_key_path: null,
+  bare_clone_path: null,
+  role: "frontend",
+  fetch_status: "healthy",
+  last_fetched_at: "2026-04-26T12:00:14Z",
+  last_fetch_err: null,
+  created_at: "2026-04-01T00:00:00Z",
+  updated_at: "2026-04-26T12:00:14Z",
+};
+
+const repoB: Repo = {
+  id: "repo-bbb222",
+  name: "backend",
+  url: "git@github.com:org/backend.git",
+  default_branch: "main",
+  ssh_key_path: null,
+  bare_clone_path: null,
+  role: "backend",
+  fetch_status: "error",
+  last_fetched_at: null,
+  last_fetch_err: "ssh: Could not resolve host",
+  created_at: "2026-04-01T00:00:00Z",
+  updated_at: "2026-04-26T12:00:14Z",
+};
+
+describe("ReposPage", () => {
+  it("renders repos from the API", async () => {
+    vi.mocked(listRepos).mockResolvedValue([repoA, repoB]);
+    renderPage();
+    // Each repo URL is unique on the page; matching it asserts both rows
+    // rendered without colliding with the role <option> labels in the form.
+    expect(
+      await screen.findByText("git@github.com:org/frontend.git"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("git@github.com:org/backend.git"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("ssh: Could not resolve host"),
+    ).toBeInTheDocument();
+  });
+
+  it("creates a repo and refreshes the list", async () => {
+    vi.mocked(listRepos).mockResolvedValue([]);
+    vi.mocked(createRepo).mockResolvedValue({
+      ...repoA,
+      id: "repo-new",
+      name: "new-repo",
+    });
+
+    renderPage();
+    await waitFor(() => expect(listRepos).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText("name"), {
+      target: { value: "new-repo" },
+    });
+    fireEvent.change(screen.getByLabelText("url"), {
+      target: { value: "git@github.com:org/new.git" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "注册" }));
+
+    await waitFor(() => {
+      expect(createRepo).toHaveBeenCalledWith({
+        name: "new-repo",
+        url: "git@github.com:org/new.git",
+        default_branch: "main",
+        role: "backend",
+        ssh_key_path: null,
+      });
+    });
+  });
+
+  it("shows inline validation error for invalid repo name", async () => {
+    vi.mocked(listRepos).mockResolvedValue([]);
+    renderPage();
+    await waitFor(() => expect(listRepos).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText("name"), {
+      target: { value: "-bad" },
+    });
+    fireEvent.change(screen.getByLabelText("url"), {
+      target: { value: "git@github.com:org/x.git" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "注册" }));
+
+    expect(await screen.findByText(/字母或数字开头/)).toBeInTheDocument();
+    expect(createRepo).not.toHaveBeenCalled();
+  });
+
+  it("triggers an immediate fetch when the row button is clicked", async () => {
+    vi.mocked(listRepos).mockResolvedValue([repoA]);
+    vi.mocked(fetchRepo).mockResolvedValue({
+      outcome: "fetched",
+      fetch_status: "healthy",
+      last_fetched_at: "2026-04-26T13:00:00Z",
+    });
+
+    renderPage();
+    const fetchBtn = await screen.findByRole("button", { name: /立即 fetch/ });
+    fireEvent.click(fetchBtn);
+
+    await waitFor(() => {
+      expect(fetchRepo).toHaveBeenCalledWith("repo-aaa111");
+    });
+  });
+
+  it("confirms before delete and surfaces 409 error", async () => {
+    vi.mocked(listRepos).mockResolvedValue([repoA]);
+    vi.mocked(deleteRepo).mockRejectedValue(
+      new ApiError(409, "still referenced by DevWork", null),
+    );
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderPage();
+    const deleteBtn = await screen.findByRole("button", { name: /删除/ });
+    fireEvent.click(deleteBtn);
+
+    await waitFor(() => {
+      expect(deleteRepo).toHaveBeenCalledWith("repo-aaa111");
+    });
+    expect(
+      await screen.findByText("still referenced by DevWork"),
+    ).toBeInTheDocument();
+    confirmSpy.mockRestore();
+  });
+
+  it("syncs repos and shows the report counts", async () => {
+    vi.mocked(listRepos).mockResolvedValue([repoA]);
+    vi.mocked(syncRepos).mockResolvedValue({
+      in_sync: ["repo-aaa111"],
+      fs_only: ["new-from-yaml"],
+      db_only: [],
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderPage();
+    await waitFor(() => expect(listRepos).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /同步配置/ }));
+
+    await waitFor(() => expect(syncRepos).toHaveBeenCalled());
+    expect(
+      await screen.findByText(/in_sync: 1.*fs_only: 1.*db_only: 0/),
+    ).toBeInTheDocument();
+    confirmSpy.mockRestore();
+  });
+});

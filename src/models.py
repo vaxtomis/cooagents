@@ -363,6 +363,12 @@ class DevWorkProgress(BaseModel):
     updated_at: str
     # Phase 4 (repo-registry): persisted refs from dev_work_repos.
     repo_refs: list["DevRepoRefView"] = Field(default_factory=list)
+    # Phase 5 (repo-registry): worker-facing handoff. Same row source as
+    # repo_refs, additive ``url`` / ``ssh_key_path`` / ``push_err`` so
+    # the agent host worker can clone, push, and writeback push outcomes
+    # without a follow-up GET on /api/v1/repos/{id}. UI consumers keep
+    # reading repo_refs.
+    repos: list["WorkerRepoHandoff"] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -612,6 +618,38 @@ class DevRepoRefView(BaseModel):
     devwork_branch: str
     push_state: str
     is_primary: bool = False
+
+
+class WorkerRepoHandoff(DevRepoRefView):
+    """Worker-facing handoff payload (Phase 5).
+
+    Extends :class:`DevRepoRefView` with the operational config the agent
+    host worker needs to clone + push without a follow-up GET on
+    ``/api/v1/repos/{id}``. ``url`` and ``ssh_key_path`` are surfaced
+    verbatim — they are operational config in v1, not secrets (see
+    Phase 5 plan, decisions log).
+
+    ``push_err`` is exposed here (and intentionally not on
+    :class:`DevRepoRefView`) so a worker that just reported ``failed``
+    can see the persisted, sanitised tail of its own error message
+    without a follow-up read.
+    """
+    url: str
+    ssh_key_path: str | None = None
+    push_err: str | None = None
+
+
+class UpdateRepoPushStateRequest(BaseModel):
+    """Worker → cooagents writeback for ``dev_work_repos.push_state``.
+
+    Forward-only outcomes; the SM still owns ``pending``. The route
+    rejects ``pending`` here so a malformed worker can't unwind state.
+    The boundary ``error_msg`` cap (2048) keeps the request body bounded;
+    the persistence layer (``_MAX_PUSH_ERR_LEN`` in
+    :mod:`src.repos.dev_work_repo_state`) does the final 256-char trim.
+    """
+    push_state: Literal["pushed", "failed"]
+    error_msg: str | None = Field(default=None, max_length=2048)
 
 
 # Inspector response DTOs (Phase 3) ------------------------------------------
