@@ -16,8 +16,21 @@ from src.dev_work_sm import DevWorkStateMachine
 from src.storage import LocalFileStore
 from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.git_utils import run_git
-from src.models import DevWorkStep, ProblemCategory
+from src.models import DevRepoRef, DevWorkStep, ProblemCategory
+from src.repos.registry import RepoRegistryRepo
 from src.workspace_manager import WorkspaceManager
+
+
+def _refs_arg(env, mount: str = "backend") -> list:
+    """Helper: build the validated repo_refs tuple list for sm.create()."""
+    return [(
+        DevRepoRef(
+            repo_id=env["repo_id"],
+            base_branch="main",
+            mount_name=mount,
+        ),
+        None,
+    )]
 
 DESIGN_FIXTURE = Path(__file__).parent / "fixtures" / "design" / "perfect" / "round1.md"
 
@@ -188,6 +201,11 @@ async def _init_repo(path: Path) -> None:
     await run_git("commit", "-m", "init", cwd=str(path))
 
 
+async def _make_bare_clone(src: Path, bare: Path) -> None:
+    bare.parent.mkdir(parents=True, exist_ok=True)
+    await run_git("clone", "--bare", str(src), str(bare))
+
+
 @pytest.fixture
 async def env(tmp_path):
     db = Database(db_path=tmp_path / "t.db", schema_path="db/schema.sql")
@@ -216,14 +234,31 @@ async def env(tmp_path):
     dd["status"] = "published"
     repo_dir = tmp_path / "repo"
     await _init_repo(repo_dir)
+    repo_id = "repo-test00000001"
+    bare_dir = ws_root / ".coop" / "registry" / "repos" / f"{repo_id}.git"
+    await _make_bare_clone(repo_dir, bare_dir)
+    repo_registry = RepoRegistryRepo(db)
+    await repo_registry.upsert(
+        id=repo_id,
+        name="testrepo",
+        url=str(repo_dir),
+        default_branch="main",
+        bare_clone_path=str(bare_dir),
+        role="backend",
+    )
+    await repo_registry.update_fetch_status(
+        repo_id, status="healthy", bare_clone_path=str(bare_dir),
+    )
     ini = DevIterationNoteManager(db)
     yield dict(db=db, wm=wm, ws=ws, ddm=ddm, ini=ini, registry=registry,
-               dd=dd, repo=str(repo_dir), ws_root=ws_root, root=tmp_path)
+               dd=dd, repo=str(repo_dir), repo_id=repo_id,
+               ws_root=ws_root, root=tmp_path,
+               repo_registry=repo_registry)
     await db.close()
 
 
 def _make_sm(env, executor, cfg=None):
-    return DevWorkStateMachine(
+    sm = DevWorkStateMachine(
         db=env["db"],
         workspaces=env["wm"],
         design_docs=env["ddm"],
@@ -232,6 +267,10 @@ def _make_sm(env, executor, cfg=None):
         config=cfg or _build_config(),
         registry=env["registry"],
     )
+    # Override workspaces_root so _s0_init's bare-clone lookup matches the
+    # registry row (the manager normally derives this from settings).
+    sm.workspaces_root = env["ws_root"].resolve()
+    return sm
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +288,7 @@ async def test_create_requires_published_design_doc(env):
         await sm.create(
             workspace_id=env["ws"]["id"],
             design_doc_id=env["dd"]["id"],
-            repo_path=env["repo"],
+            repo_refs=_refs_arg(env),
             prompt="build login",
         )
 
@@ -266,7 +305,7 @@ async def test_happy_path_first_pass(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     final = await sm.run_to_completion(dw["id"])
@@ -300,7 +339,7 @@ async def test_req_gap_routes_to_step2(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     final = await sm.run_to_completion(dw["id"])
@@ -323,7 +362,7 @@ async def test_impl_gap_routes_to_step4(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     final = await sm.run_to_completion(dw["id"])
@@ -341,7 +380,7 @@ async def test_design_hollow_escalates_immediately(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     final = await sm.run_to_completion(dw["id"])
@@ -369,7 +408,7 @@ async def test_max_rounds_escalates(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     final = await sm.run_to_completion(dw["id"])
@@ -386,7 +425,7 @@ async def test_step1_invalid_design_escalates(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     final = await sm.run_to_completion(dw["id"])
@@ -405,7 +444,7 @@ async def test_step2_missing_h2_loops_as_req_gap(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     final = await sm.run_to_completion(dw["id"])
@@ -422,7 +461,7 @@ async def test_step2_front_matter_not_tampered(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     await sm.run_to_completion(dw["id"])
@@ -448,7 +487,7 @@ async def test_step3_first_failure_retries_in_place(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     final = await sm.run_to_completion(dw["id"])
@@ -466,7 +505,7 @@ async def test_cancel_moves_to_cancelled(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     await sm.cancel(dw["id"])
@@ -474,6 +513,41 @@ async def test_cancel_moves_to_cancelled(env):
         "SELECT * FROM dev_works WHERE id=?", (dw["id"],)
     )
     assert row["current_step"] == "CANCELLED"
+
+
+# ---- _select_primary_ref unit tests (Phase 4) -------------------------------
+
+def test_select_primary_explicit_wins_over_role_priority():
+    """Explicit is_primary=True overrides role-based selection."""
+    rows = [
+        {"mount_name": "frontend", "is_primary": 0, "repo_role": "backend"},
+        {"mount_name": "infra", "is_primary": 1, "repo_role": "infra"},
+        {"mount_name": "backend", "is_primary": 0, "repo_role": "backend"},
+    ]
+    picked = DevWorkStateMachine._select_primary_ref(rows)
+    assert picked["mount_name"] == "infra"
+
+
+def test_select_primary_role_priority_then_mount_tiebreak():
+    """No explicit primary → REPO_ROLE_PRIMARY_PRIORITY decides; ties broken
+    lexicographically by mount_name."""
+    rows = [
+        {"mount_name": "b-svc", "is_primary": 0, "repo_role": "backend"},
+        {"mount_name": "a-svc", "is_primary": 0, "repo_role": "backend"},
+        {"mount_name": "ui",    "is_primary": 0, "repo_role": "frontend"},
+    ]
+    picked = DevWorkStateMachine._select_primary_ref(rows)
+    assert picked["mount_name"] == "a-svc"
+
+
+def test_select_primary_unknown_role_falls_to_lowest_priority():
+    """A NULL/unknown role row sorts last (priority = len(priorities))."""
+    rows = [
+        {"mount_name": "weird", "is_primary": 0, "repo_role": None},
+        {"mount_name": "docs",  "is_primary": 0, "repo_role": "docs"},
+    ]
+    picked = DevWorkStateMachine._select_primary_ref(rows)
+    assert picked["mount_name"] == "docs"
 
 
 async def test_workspace_md_shows_devwork(env):
@@ -485,7 +559,7 @@ async def test_workspace_md_shows_devwork(env):
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
         design_doc_id=env["dd"]["id"],
-        repo_path=env["repo"],
+        repo_refs=_refs_arg(env),
         prompt="build login",
     )
     await sm.run_to_completion(dw["id"])

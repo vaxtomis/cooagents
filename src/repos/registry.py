@@ -1,12 +1,11 @@
 """DB-layer registry for the ``repos`` table (Phase 1, repo-registry).
 
 Mirrors the style of :class:`src.agent_hosts.repo.AgentHostRepo`: explicit
-boundary validation, JSON-encoded list columns, and isolated transactions
-per write so callers don't need to wrap them.
+boundary validation and isolated transactions per write so callers don't
+need to wrap them.
 """
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -14,19 +13,22 @@ from typing import Any
 
 from src.config import ReposConfig
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
+from src.models import RepoRole
 
 logger = logging.getLogger(__name__)
 
 
 _VALID_FETCH_STATUSES: frozenset[str] = frozenset(
-    {"unknown", "healthy", "stale", "error"}
+    {"unknown", "healthy", "error"}
 )
+# Phase 4 (repo-registry): closed enum stored on repos.role. Single source of
+# truth is src.models.RepoRole — derive here so adding a role only requires
+# updating the enum.
+_VALID_REPO_ROLES: frozenset[str] = frozenset(r.value for r in RepoRole)
 # Cap on persisted error strings — same rationale as agent_hosts._sanitize_health_err.
 _MAX_FETCH_ERR_LEN = 256
 # fetch_status values that imply we successfully reached the remote and can
-# stamp ``last_fetched_at`` with the current time. ``stale`` is *not*
-# included: staleness means the row is old, so refreshing the timestamp
-# when transitioning healthy→stale would contradict the marker itself.
+# stamp ``last_fetched_at`` with the current time.
 _SUCCESSFUL_FETCH_STATUSES: frozenset[str] = frozenset({"healthy"})
 
 
@@ -50,26 +52,6 @@ def _sanitize_fetch_err(err: str | None) -> str | None:
     return cleaned
 
 
-def _decode_labels(value: Any) -> list[str]:
-    """Normalise the ``labels_json`` column for callers."""
-    if value is None or value == "":
-        return []
-    try:
-        out = json.loads(value)
-    except (TypeError, ValueError):
-        # Manual SQL edits or restored backups can corrupt this column. Log so
-        # the silent fallback to [] doesn't hide schema corruption from ops.
-        logger.warning("malformed labels_json on repos row: %r", value)
-        return []
-    return [str(x) for x in out] if isinstance(out, list) else []
-
-
-def _row_with_labels(row: dict[str, Any]) -> dict[str, Any]:
-    out = dict(row)
-    out["labels"] = _decode_labels(out.pop("labels_json", "[]"))
-    return out
-
-
 class RepoRegistryRepo:
     """DB-layer CRUD for the ``repos`` table."""
 
@@ -83,10 +65,9 @@ class RepoRegistryRepo:
         name: str,
         url: str,
         default_branch: str = "main",
-        vendor: str | None = None,
-        credential_ref: str | None = None,
+        ssh_key_path: str | None = None,
         bare_clone_path: str | None = None,
-        labels: list[str] | None = None,
+        role: str = "other",
     ) -> dict[str, Any]:
         if not name or not name.strip():
             raise BadRequestError("repo name must not be empty")
@@ -94,8 +75,12 @@ class RepoRegistryRepo:
             raise BadRequestError("repo url must not be empty")
         if not default_branch or not default_branch.strip():
             raise BadRequestError("repo default_branch must not be empty")
+        if role not in _VALID_REPO_ROLES:
+            raise BadRequestError(
+                f"invalid role={role!r}; expected one of "
+                f"{sorted(_VALID_REPO_ROLES)}"
+            )
 
-        labels_json = json.dumps(list(labels or []))
         now = _now()
 
         async with self.db.transaction():
@@ -108,20 +93,20 @@ class RepoRegistryRepo:
                 # last_fetch_err) on plain upsert. Use update_fetch_status()
                 # to mutate those columns explicitly.
                 await self.db.execute(
-                    "UPDATE repos SET name=?, url=?, vendor=?, "
-                    "default_branch=?, credential_ref=?, bare_clone_path=?, "
-                    "labels_json=?, updated_at=? WHERE id=?",
-                    (name, url, vendor, default_branch, credential_ref,
-                     bare_clone_path, labels_json, now, id),
+                    "UPDATE repos SET name=?, url=?, default_branch=?, "
+                    "ssh_key_path=?, bare_clone_path=?, role=?, updated_at=? "
+                    "WHERE id=?",
+                    (name, url, default_branch, ssh_key_path,
+                     bare_clone_path, role, now, id),
                 )
             else:
                 await self.db.execute(
-                    "INSERT INTO repos(id, name, url, vendor, "
-                    "default_branch, credential_ref, bare_clone_path, "
-                    "labels_json, fetch_status, created_at, updated_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (id, name, url, vendor, default_branch, credential_ref,
-                     bare_clone_path, labels_json, "unknown", now, now),
+                    "INSERT INTO repos(id, name, url, default_branch, "
+                    "ssh_key_path, bare_clone_path, role, fetch_status, "
+                    "created_at, updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (id, name, url, default_branch, ssh_key_path,
+                     bare_clone_path, role, "unknown", now, now),
                 )
 
         row = await self.db.fetchone("SELECT * FROM repos WHERE id=?", (id,))
@@ -129,13 +114,13 @@ class RepoRegistryRepo:
             raise RuntimeError(
                 f"repos row {id!r} disappeared between upsert and read"
             )
-        return _row_with_labels(row)
+        return dict(row)
 
     async def get(self, id: str) -> dict[str, Any] | None:
         row = await self.db.fetchone("SELECT * FROM repos WHERE id=?", (id,))
         if row is None:
             return None
-        return _row_with_labels(row)
+        return dict(row)
 
     async def get_by_name(self, name: str) -> dict[str, Any] | None:
         row = await self.db.fetchone(
@@ -143,11 +128,11 @@ class RepoRegistryRepo:
         )
         if row is None:
             return None
-        return _row_with_labels(row)
+        return dict(row)
 
     async def list_all(self) -> list[dict[str, Any]]:
         rows = await self.db.fetchall("SELECT * FROM repos ORDER BY name")
-        return [_row_with_labels(r) for r in rows]
+        return [dict(r) for r in rows]
 
     async def update_fetch_status(
         self,
@@ -193,17 +178,28 @@ class RepoRegistryRepo:
             raise NotFoundError(f"repo not found: {id!r}")
         # Refuse if any FK reference exists in design_work_repos /
         # dev_work_repos. The DB-side ON DELETE RESTRICT is defense-in-depth;
-        # the Python-side check produces a usable error message.
-        for table in ("design_work_repos", "dev_work_repos"):
-            row = await self.db.fetchone(
-                f"SELECT COUNT(*) AS c FROM {table} WHERE repo_id=?",
-                (id,),
+        # the Python-side check produces a usable error message. SQL is
+        # written out per-table (no f-string identifier interpolation) so
+        # this never serves as a copy-paste template for user-supplied table
+        # names.
+        design_row = await self.db.fetchone(
+            "SELECT COUNT(*) AS c FROM design_work_repos WHERE repo_id=?",
+            (id,),
+        )
+        if design_row and design_row["c"] > 0:
+            raise ConflictError(
+                f"repo {id!r} is referenced by {design_row['c']} "
+                "design_work_repos rows; remove those references before deleting"
             )
-            if row and row["c"] > 0:
-                raise ConflictError(
-                    f"repo {id!r} is referenced by {row['c']} {table} rows; "
-                    "remove those references before deleting"
-                )
+        dev_row = await self.db.fetchone(
+            "SELECT COUNT(*) AS c FROM dev_work_repos WHERE repo_id=?",
+            (id,),
+        )
+        if dev_row and dev_row["c"] > 0:
+            raise ConflictError(
+                f"repo {id!r} is referenced by {dev_row['c']} "
+                "dev_work_repos rows; remove those references before deleting"
+            )
         await self.db.execute("DELETE FROM repos WHERE id=?", (id,))
 
     async def sync_from_config(
@@ -229,11 +225,8 @@ class RepoRegistryRepo:
                 name=r.name,
                 url=r.url,
                 default_branch=r.default_branch,
-                vendor=r.vendor,
-                # v1 stores the SSH key path directly in credential_ref. The
-                # column name is the abstraction seam for a future Vault swap.
-                credential_ref=r.ssh_key_path,
-                labels=r.labels,
+                ssh_key_path=r.ssh_key_path,
+                role=r.role,
             )
             upserted_ids.append(repo_id)
 

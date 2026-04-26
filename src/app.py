@@ -34,6 +34,33 @@ from src.webhook_notifier import WebhookNotifier
 from src.workspace_manager import WorkspaceManager
 
 
+async def _warn_legacy_schema(db) -> None:
+    """Phase 4 (repo-registry) safety net.
+
+    Surface a non-fatal warning when ``dev_works.repo_path`` is still
+    present so operators see a clear nudge to wipe ``.coop/state.db``
+    instead of a cryptic ``no such column`` mid-execution.
+    """
+    try:
+        rows = await db.fetchall("PRAGMA table_info(dev_works)")
+    except Exception:
+        # PRAGMA failures are not fatal at startup; the rest of init will
+        # surface real DB problems. Log so corrupt-DB cases are not silent.
+        logging.getLogger(__name__).warning(
+            "_warn_legacy_schema: PRAGMA table_info(dev_works) failed",
+            exc_info=True,
+        )
+        return
+    if any(r.get("name") == "repo_path" for r in rows):
+        logging.getLogger(__name__).warning(
+            "Legacy dev_works.repo_path column detected. Phase 4 "
+            "(repo-registry) requires a schema rebuild — recreate "
+            ".coop/state.db and restart. Continuing startup; DevWork "
+            "creation will fail with 'no such column' until the DB is "
+            "rebuilt."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     project_root = Path(__file__).resolve().parents[1]
@@ -44,6 +71,7 @@ async def lifespan(app: FastAPI):
 
     db = Database(db_path=settings.database.path, schema_path="db/schema.sql")
     await db.connect()
+    await _warn_legacy_schema(db)
 
     webhooks = WebhookNotifier(db, settings=settings)
     await webhooks.bootstrap_builtin_subscriptions(settings)
@@ -93,7 +121,12 @@ async def lifespan(app: FastAPI):
     # Lazy import keeps src.repos out of module-load chains (mirrors
     # the agent_hosts pattern above). Defensive try/except: a malformed
     # repos.yaml must not block startup.
-    from src.repos import RepoFetcher, RepoHealthLoop, RepoRegistryRepo
+    from src.repos import (
+        RepoFetcher,
+        RepoHealthLoop,
+        RepoInspector,
+        RepoRegistryRepo,
+    )
 
     repo_registry_repo = RepoRegistryRepo(db)
     try:
@@ -123,6 +156,11 @@ async def lifespan(app: FastAPI):
         repo_registry_repo,
         interval_s=settings.repos.fetch.interval_s,
         parallel=settings.repos.fetch.parallel,
+    )
+    repo_inspector = RepoInspector(
+        fetcher=repo_fetcher,
+        registry=repo_registry_repo,
+        timeout_s=settings.repos.fetch.timeout_s,
     )
 
     ssh_dispatcher = SshDispatcher(
@@ -186,6 +224,7 @@ async def lifespan(app: FastAPI):
     app.state.repo_registry_repo = repo_registry_repo
     app.state.repo_fetcher = repo_fetcher
     app.state.repo_health_loop = repo_health_loop
+    app.state.repo_inspector = repo_inspector
     app.state.ssh_dispatcher = ssh_dispatcher
     app.state.health_probe_loop = health_probe_loop
     app.state.start_time = time.time()

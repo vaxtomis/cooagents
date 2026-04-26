@@ -61,10 +61,10 @@ async def _seed(db: Database):
          "published", None, 1, _now(), _now()),
     )
     await db.execute(
-        "INSERT INTO dev_works(id,workspace_id,design_doc_id,repo_path,prompt,"
+        "INSERT INTO dev_works(id,workspace_id,design_doc_id,prompt,"
         "current_step,iteration_rounds,agent,created_at,updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?)",
-        ("dev-aaa", "ws-aaa", "des-aaa", str(Path.cwd()), "go",
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        ("dev-aaa", "ws-aaa", "des-aaa", "go",
          "STEP4_DEVELOP", 0, "claude", _now(), _now()),
     )
     await db.execute(

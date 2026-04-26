@@ -11,6 +11,15 @@ from pathlib import Path
 # rejecting control characters that ``git`` would reject later anyway.
 _BRANCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_.\-]{0,199}$")
 
+# Phase 4 (repo-registry): canonical formats for DevWork-owned branches and
+# commit messages. Both ``_s0_init`` and the Phase 5 worker import these so
+# the control plane and execution worker cannot drift on branch naming.
+# - ``slug``: Workspace.slug (kebab-case, ≤63 chars)
+# - ``dw_short``: dev_works.id with the "dev-" prefix removed (hex12)
+# - ``round``, ``step``: per-iteration round counter / step tag
+DEVWORK_BRANCH_FMT = "devwork/{slug}/{dw_short}"
+COMMIT_FMT = "[devwork/{slug}/{dw_short}] round {round}: {step}"
+
 
 async def run_git(
     *args,
@@ -60,7 +69,11 @@ async def run_git(
     out = stdout.decode().strip()
     err = stderr.decode().strip()
     if check and proc.returncode != 0:
-        raise RuntimeError(f"git {' '.join(str(a) for a in args)} failed: {err}")
+        # Surface only the first arg (the git subcommand) and stderr — embedding
+        # the full arg list leaks bare-clone paths and refs into API error
+        # responses when this RuntimeError bubbles up via BadRequestError.
+        subcmd = str(args[0]) if args else "<no-args>"
+        raise RuntimeError(f"git {subcmd} failed (rc={proc.returncode}): {err}")
     return out, err, proc.returncode
 
 

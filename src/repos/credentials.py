@@ -1,9 +1,8 @@
 """Repo credential resolution (Phase 1, repo-registry).
 
 v1 only resolves SSH keys from a filesystem path stored in
-``repos.credential_ref``. The function is the single seam every caller will
-go through, so a future Vault/secret-store implementation can be added as a
-new branch without touching call sites.
+``repos.ssh_key_path``. Single function so tests / fetcher have one
+seam to mock.
 """
 from __future__ import annotations
 
@@ -29,22 +28,18 @@ class SshKeyMaterial:
 def resolve_repo_credential(repo: dict[str, Any]) -> SshKeyMaterial | None:
     """Return credential material for *repo* or ``None`` if unauthenticated.
 
-    A repo row whose ``credential_ref`` is empty/None is treated as a public
+    A repo row whose ``ssh_key_path`` is empty/None is treated as a public
     repository — callers should fall back to ambient SSH config.
     """
-    ref = repo.get("credential_ref")
+    ref = repo.get("ssh_key_path")
     if not ref:
         return None
-    return _path_resolver(ref)
-
-
-def _path_resolver(ref: str) -> SshKeyMaterial:
     p = Path(ref).expanduser()
     if not p.is_absolute():
         # Reject relative paths early; the caller resolves cwd at every entry
         # point, so a relative ref is almost always a config bug rather than
         # an intentional repository-relative key.
         raise BadRequestError(
-            f"credential_ref must be an absolute path, got {ref!r}"
+            f"ssh_key_path must be an absolute path, got {ref!r}"
         )
     return SshKeyMaterial(private_key_path=p)

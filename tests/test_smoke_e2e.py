@@ -24,10 +24,38 @@ from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
 from src.exceptions import BadRequestError, NotFoundError
 from src.git_utils import run_git
-from src.models import DesignWorkMode
+from src.models import DesignWorkMode, DevRepoRef
+from src.repos.registry import RepoRegistryRepo
 from src.storage import LocalFileStore
 from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.workspace_manager import WorkspaceManager
+
+
+async def _seed_repo(
+    db: Database, ws_root: Path, repo_dir: Path,
+    repo_id: str = "repo-test00000001",
+) -> tuple[str, list[tuple[DevRepoRef, str | None]]]:
+    """Register a repo with a real bare clone so DevWork _s0_init succeeds.
+
+    Returns ``(repo_id, repo_refs_arg)`` ready to pass to ``sm.create()``.
+    """
+    bare_dir = ws_root / ".coop" / "registry" / "repos" / f"{repo_id}.git"
+    bare_dir.parent.mkdir(parents=True, exist_ok=True)
+    await run_git("clone", "--bare", str(repo_dir), str(bare_dir))
+    repo_registry = RepoRegistryRepo(db)
+    await repo_registry.upsert(
+        id=repo_id, name=repo_id, url=str(repo_dir),
+        default_branch="main", bare_clone_path=str(bare_dir),
+        role="backend",
+    )
+    await repo_registry.update_fetch_status(
+        repo_id, status="healthy", bare_clone_path=str(bare_dir),
+    )
+    refs = [(
+        DevRepoRef(repo_id=repo_id, base_branch="main", mount_name="backend"),
+        None,
+    )]
+    return repo_id, refs
 
 
 def _build_registry_stack(db, ws_root: Path):
@@ -109,6 +137,7 @@ async def test_smoke_happy_path(tmp_path):
 
         repo_dir = tmp_path / "repo"
         await _init_repo(repo_dir)
+        _, refs = await _seed_repo(db, ws_root, repo_dir)
 
         executor = ScriptedExecutor([
             step2_append_h2,
@@ -120,9 +149,10 @@ async def test_smoke_happy_path(tmp_path):
             db=db, workspaces=wm, design_docs=ddm, iteration_notes=ini,
             executor=executor, config=_build_dev_config(), registry=registry,
         )
+        sm.workspaces_root = ws_root.resolve()
         dw = await sm.create(
             workspace_id=ws["id"], design_doc_id=dd["id"],
-            repo_path=str(repo_dir), prompt="build login",
+            repo_refs=refs, prompt="build login",
         )
         final = await asyncio.wait_for(sm.run_to_completion(dw["id"]), timeout=15)
         assert final["current_step"] == "COMPLETED"
@@ -214,6 +244,7 @@ async def test_smoke_devwork_escalated(tmp_path):
 
         repo_dir = tmp_path / "repo"
         await _init_repo(repo_dir)
+        _, refs = await _seed_repo(db, ws_root, repo_dir)
 
         executor = ScriptedExecutor([
             step2_append_h2,
@@ -226,9 +257,10 @@ async def test_smoke_devwork_escalated(tmp_path):
             executor=executor, config=_build_dev_config(max_rounds=1),
             registry=registry,
         )
+        sm.workspaces_root = ws_root.resolve()
         dw = await sm.create(
             workspace_id=ws["id"], design_doc_id=dd["id"],
-            repo_path=str(repo_dir), prompt="build login",
+            repo_refs=refs, prompt="build login",
         )
         final = await asyncio.wait_for(sm.run_to_completion(dw["id"]), timeout=15)
         assert final["current_step"] == "ESCALATED"

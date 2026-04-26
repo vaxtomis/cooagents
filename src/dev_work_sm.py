@@ -26,8 +26,14 @@ from typing import Any
 from src.design_validator import validate_design_markdown
 from src.dev_work_steps import DevWorkStepHandlersMixin
 from src.exceptions import BadRequestError, NotFoundError
-from src.git_utils import ensure_worktree, run_git
-from src.models import AgentKind, DevWorkStep, ProblemCategory
+from src.git_utils import DEVWORK_BRANCH_FMT, ensure_worktree, run_git
+from src.models import (
+    REPO_ROLE_PRIMARY_PRIORITY,
+    AgentKind,
+    DevRepoRef,
+    DevWorkStep,
+    ProblemCategory,
+)
 from src.reviewer import ReviewOutcome
 from src.workspace_events import emit_and_deliver
 
@@ -225,10 +231,18 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         *,
         workspace_id: str,
         design_doc_id: str,
-        repo_path: str,
+        repo_refs: list[tuple[DevRepoRef, str | None]],
         prompt: str,
         agent: str = AgentKind.claude.value,
     ) -> dict[str, Any]:
+        """Create a DevWork plus its ``dev_work_repos`` rows atomically.
+
+        ``repo_refs`` is the validated tuple list returned by
+        ``routes._repo_refs_validation.validate_dev_repo_refs`` — each
+        entry is ``(DevRepoRef, base_rev_or_none)``. The dev_works INSERT
+        and N dev_work_repos INSERTs run inside one transaction so a
+        partial failure leaves no orphan dev_works row.
+        """
         ws = await self.workspaces.get(workspace_id)
         if ws is None:
             raise NotFoundError(f"workspace {workspace_id!r} not found")
@@ -253,46 +267,88 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 f"{dd['workspace_id']!r}, not {workspace_id!r}"
             )
 
+        if not repo_refs:
+            raise BadRequestError(
+                "repo_refs must contain at least one entry"
+            )
+
         dev_id = self._new_id()
         now = self._now()
         host_id = await self._pick_host(agent)
-        await self.db.execute(
-            """INSERT INTO dev_works
-               (id, workspace_id, design_doc_id, repo_path, prompt,
-                worktree_path, worktree_branch, current_step,
-                iteration_rounds, first_pass_success, last_score,
-                last_problem_category, agent, agent_host_id, gates_json,
-                escalated_at, completed_at, created_at, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                dev_id,
-                workspace_id,
-                design_doc_id,
-                repo_path,
-                prompt,
-                None,
-                None,
-                DevWorkStep.INIT.value,
-                0,
-                None,
-                None,
-                None,
-                agent,
-                host_id,
-                None,
-                None,
-                None,
-                now,
-                now,
-            ),
+        dw_short = dev_id.removeprefix("dev-")
+        devwork_branch = DEVWORK_BRANCH_FMT.format(
+            slug=ws["slug"], dw_short=dw_short
         )
+
+        async with self.db.transaction():
+            await self.db.execute(
+                """INSERT INTO dev_works
+                   (id, workspace_id, design_doc_id, prompt,
+                    worktree_path, worktree_branch, current_step,
+                    iteration_rounds, first_pass_success, last_score,
+                    last_problem_category, agent, agent_host_id, gates_json,
+                    escalated_at, completed_at, created_at, updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    dev_id,
+                    workspace_id,
+                    design_doc_id,
+                    prompt,
+                    None,
+                    None,
+                    DevWorkStep.INIT.value,
+                    0,
+                    None,
+                    None,
+                    None,
+                    agent,
+                    host_id,
+                    None,
+                    None,
+                    None,
+                    now,
+                    now,
+                ),
+            )
+            for ref, base_rev in repo_refs:
+                await self.db.execute(
+                    """INSERT INTO dev_work_repos(
+                           dev_work_id, repo_id, mount_name, base_branch,
+                           base_rev, devwork_branch, push_state, push_err,
+                           is_primary, created_at, updated_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        dev_id,
+                        ref.repo_id,
+                        ref.mount_name,
+                        ref.base_branch,
+                        base_rev,
+                        devwork_branch,
+                        "pending",
+                        None,
+                        1 if ref.is_primary else 0,
+                        now,
+                        now,
+                    ),
+                )
+
         await emit_and_deliver(
             self.db,
             self.webhooks,
             event_name="dev_work.started",
             workspace_id=workspace_id,
             correlation_id=dev_id,
-            payload={"design_doc_id": design_doc_id, "repo_path": repo_path},
+            payload={
+                "design_doc_id": design_doc_id,
+                "repo_refs": [
+                    {
+                        "repo_id": r.repo_id,
+                        "mount_name": r.mount_name,
+                        "base_branch": r.base_branch,
+                    }
+                    for r, _ in repo_refs
+                ],
+            },
         )
         try:
             await self.workspaces.regenerate_workspace_md(workspace_id)
@@ -386,19 +442,91 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
     async def _noop(self, dw: dict[str, Any]) -> None:
         return
 
+    @staticmethod
+    def _select_primary_ref(
+        rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Two-layer primary-ref selection (no keyword matching).
+
+        1. Explicit ``is_primary=1`` row wins (boundary + DB enforce
+           "at most one"; we just pick the first such row).
+        2. Else the lowest priority index of ``repos.role``; ties broken
+           by lexicographic ``mount_name``.
+        """
+        explicit = [r for r in rows if r.get("is_primary")]
+        if explicit:
+            return explicit[0]
+        priority = {
+            role.value: i
+            for i, role in enumerate(REPO_ROLE_PRIMARY_PRIORITY)
+        }
+        return min(
+            rows,
+            key=lambda r: (
+                priority.get(r.get("repo_role") or "other", len(priority)),
+                r["mount_name"],
+            ),
+        )
+
     async def _s0_init(self, dw: dict[str, Any]) -> None:
-        """Lazily create the git worktree under workspaces_root/.coop/worktrees/."""
-        ws = await self.workspaces.get(dw["workspace_id"])
-        short_id = dw["id"].removeprefix("dev-")  # hex12
-        branch = f"devwork/{ws['slug']}-{short_id}"          # C2
-        branch_safe = branch.replace("/", "-")
-        wt_path = str(
-            self.workspaces_root / ".coop" / "worktrees" / branch_safe
-        )                                                     # C3
-        try:
-            _, wt_path = await ensure_worktree(
-                dw["repo_path"], branch, wt_path
+        """Resolve the primary ref and materialize a worktree for it.
+
+        Phase 4 transition: ``git worktree add`` runs against the
+        control-plane bare clone at
+        ``<workspaces_root>/.coop/registry/repos/<repo_id>.git``. This
+        intentionally pollutes the bare's reflog and ``worktrees/``
+        metadata; Phase 5 cleans up via ``git worktree prune --expire=now``
+        once the worker takes over execution. See
+        ``.claude/PRPs/plans/repo-registry-phase4-...`` (Method A) for the
+        decision and the Method B/C alternatives that were rejected.
+        """
+        refs = await self.db.fetchall(
+            "SELECT dwr.*, r.role AS repo_role "
+            "FROM dev_work_repos dwr "
+            "JOIN repos r ON r.id = dwr.repo_id "
+            "WHERE dwr.dev_work_id=? "
+            "ORDER BY dwr.mount_name",
+            (dw["id"],),
+        )
+        if not refs:
+            await self._escalate(
+                dw,
+                reason="dev_work has no repo_refs",
+                problem_category=None,
             )
+            return
+
+        primary = self._select_primary_ref(refs)
+        bare = (
+            self.workspaces_root / ".coop" / "registry" / "repos"
+            / f"{primary['repo_id']}.git"
+        )
+        branch = primary["devwork_branch"]
+        branch_safe = branch.replace("/", "-")
+        worktrees_root = (
+            self.workspaces_root / ".coop" / "worktrees"
+        ).resolve()
+        wt_path_obj = (worktrees_root / branch_safe).resolve()
+        # Defense-in-depth: slug regex prevents '..' in branch_safe today,
+        # but assert the resolved path stays under .coop/worktrees so a
+        # future relaxation can't escape the sandbox.
+        try:
+            wt_path_obj.relative_to(worktrees_root)
+        except ValueError:
+            await self._escalate(
+                dw,
+                reason=(
+                    f"worktree path escapes .coop/worktrees: {wt_path_obj}"
+                ),
+                problem_category=None,
+            )
+            return
+        wt_path = str(wt_path_obj)
+        try:
+            # TODO(phase5): worktree creation moves to the worker on the
+            # agent host; until then we add to the control-plane bare clone
+            # and accept the reflog noise.
+            _, wt_path = await ensure_worktree(str(bare), branch, wt_path)
         except Exception as exc:
             logger.exception("dev_work %s ensure_worktree failed", dw["id"])
             await self._escalate(

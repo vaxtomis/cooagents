@@ -36,11 +36,11 @@ async def env(tmp_path):
     )
     # dev_works row so FK on dev_iteration_notes.dev_work_id succeeds.
     await db.execute(
-        "INSERT INTO dev_works(id, workspace_id, design_doc_id, repo_path, "
+        "INSERT INTO dev_works(id, workspace_id, design_doc_id, "
         "prompt, current_step, iteration_rounds, agent, created_at, updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "VALUES(?,?,?,?,?,?,?,?,?)",
         (
-            "dev-xxx", ws["id"], "des-abc", "/tmp/repo", "p",
+            "dev-xxx", ws["id"], "des-abc", "p",
             "INIT", 0, "claude", "t", "t",
         ),
     )

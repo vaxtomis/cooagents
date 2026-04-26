@@ -1,6 +1,13 @@
 import pytest
-from src.config import load_repos, load_settings, Settings
+from src.config import _VALID_REPO_ROLES as _CONFIG_VALID_REPO_ROLES, load_repos, load_settings, Settings
 from src.exceptions import BadRequestError
+from src.models import RepoRole
+
+
+def test_config_repo_roles_match_models_enum():
+    """src.config keeps a duplicate frozenset to avoid importing src.models
+    (layering rule). Enforce that the two never drift."""
+    assert _CONFIG_VALID_REPO_ROLES == frozenset(r.value for r in RepoRole)
 
 def test_load_settings_defaults():
     settings = load_settings()
@@ -94,15 +101,13 @@ def test_load_repos_valid(tmp_path):
         "    url: git@github.com:org/frontend.git\n"
         "  - name: backend\n"
         "    url: git@github.com:org/backend.git\n"
-        "    default_branch: develop\n"
-        "    labels: [api, python]\n",
+        "    default_branch: develop\n",
         encoding="utf-8",
     )
     cfg = load_repos(p)
     assert {r.name for r in cfg.repos} == {"frontend", "backend"}
     backend = next(r for r in cfg.repos if r.name == "backend")
     assert backend.default_branch == "develop"
-    assert backend.labels == ["api", "python"]
 
 
 def test_load_repos_rejects_duplicate_names(tmp_path):

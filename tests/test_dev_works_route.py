@@ -19,18 +19,14 @@ from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.git_utils import run_git
+from src.repos.registry import RepoRegistryRepo
 from src.workspace_manager import WorkspaceManager
 
 DESIGN_FIXTURE = Path(__file__).parent / "fixtures" / "design" / "perfect" / "round1.md"
 
 
 def _build_settings(workspace_root: Path | None = None):
-    """Build a minimal Settings stand-in.
-
-    ``workspace_root`` is the resolved directory the route-layer repo_path
-    validator checks against (C1). Tests pass in ``tmp_path`` so the test
-    repo under ``tmp_path/repo`` validates successfully.
-    """
+    """Build a minimal Settings stand-in."""
     root = (workspace_root or Path(".")).resolve()
     return SimpleNamespace(
         design=SimpleNamespace(
@@ -58,7 +54,6 @@ class ScriptedExecutor:
     async def run_once(self, agent_type, worktree, timeout_sec,
                        task_file=None, prompt=None, **_kwargs):
         text = Path(task_file).read_text(encoding="utf-8") if task_file else (prompt or "")
-        # Step2 — append H2s to iteration note
         m = re.search(r"在 `([^`]+\.md)` 现有文件末尾", text)
         if m:
             p = Path(m.group(1))
@@ -69,21 +64,18 @@ class ScriptedExecutor:
                     "\n## 用例清单\n\n| u | i | e | s |\n|---|---|---|---|\n| a | b | c | d |\n"
                 )
             return ("ok", 0)
-        # Step3 — write ctx file
         m = re.search(r"在 `([^`]+\.md)` 写入", text)
         if m:
             p = Path(m.group(1))
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("## 浓缩上下文\n- x\n\n## 疑点与风险\n- y\n", encoding="utf-8")
             return ("ok", 0)
-        # Step4 — write findings.json
         m = re.search(r"将自审结果写入 `([^`]+\.json)`", text)
         if m:
             p = Path(m.group(1))
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(json.dumps({"pass": True, "findings": []}), encoding="utf-8")
             return ("ok", 0)
-        # Step5 — write review JSON
         m = re.search(r"将结果写入 `([^`]+\.json)`", text)
         if m:
             p = Path(m.group(1))
@@ -94,15 +86,53 @@ class ScriptedExecutor:
         return ("", 1)
 
 
-async def _init_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    await run_git("init", cwd=str(path))
-    await run_git("config", "user.email", "t@x", cwd=str(path))
-    await run_git("config", "user.name", "T", cwd=str(path))
-    await run_git("checkout", "-b", "main", cwd=str(path), check=False)
-    (path / "README.md").write_text("# demo\n")
-    await run_git("add", "README.md", cwd=str(path))
-    await run_git("commit", "-m", "init", cwd=str(path))
+async def _make_bare_clone(bare_dir: Path) -> None:
+    """Create an initialised bare repo with one commit on ``main``.
+
+    ``_s0_init`` runs ``git worktree add`` against this bare clone, so we
+    need at least one commit to check out.
+    """
+    bare_dir.parent.mkdir(parents=True, exist_ok=True)
+    src = bare_dir.with_suffix(".src")
+    src.mkdir(parents=True, exist_ok=True)
+    await run_git("init", cwd=str(src))
+    await run_git("config", "user.email", "t@x", cwd=str(src))
+    await run_git("config", "user.name", "T", cwd=str(src))
+    await run_git("checkout", "-b", "main", cwd=str(src), check=False)
+    (src / "README.md").write_text("# demo\n")
+    await run_git("add", "README.md", cwd=str(src))
+    await run_git("commit", "-m", "init", cwd=str(src))
+    await run_git(
+        "clone", "--bare", str(src), str(bare_dir),
+    )
+
+
+class _FakeInspector:
+    """rev_parse against the actual bare clones so the route validator works."""
+
+    def __init__(self, registry: RepoRegistryRepo) -> None:
+        self._registry = registry
+
+    async def rev_parse(
+        self, repo_id: str, ref: str, *, _row=None,
+    ) -> str | None:
+        row = _row if _row is not None else await self._registry.get(repo_id)
+        if row is None:
+            return None
+        bare = row.get("bare_clone_path")
+        if not bare or not Path(bare).exists():
+            return None
+        try:
+            out, _, rc = await run_git(
+                "--git-dir", bare, "rev-parse", "--verify",
+                f"{ref}^{{commit}}", check=False,
+            )
+        except Exception:
+            return None
+        if rc != 0:
+            return None
+        sha = out.strip()
+        return sha or None
 
 
 @pytest.fixture
@@ -124,12 +154,18 @@ async def client(tmp_path):
     design_docs = DesignDocManager(db, registry=registry)
     iteration_notes = DevIterationNoteManager(db)
     executor = ScriptedExecutor()
-    settings = _build_settings(workspace_root=tmp_path)
+    settings = _build_settings(workspace_root=ws_root)
     sm = DevWorkStateMachine(
         db=db, workspaces=workspaces, design_docs=design_docs,
         iteration_notes=iteration_notes, executor=executor,
         config=settings, registry=registry,
     )
+    # Override workspaces_root so _s0_init's bare-clone lookup matches the
+    # registry row written below.
+    sm.workspaces_root = ws_root.resolve()
+
+    repo_registry = RepoRegistryRepo(db)
+    inspector = _FakeInspector(repo_registry)
 
     test_app.state.db = db
     test_app.state.workspaces = workspaces
@@ -137,6 +173,8 @@ async def client(tmp_path):
     test_app.state.iteration_notes = iteration_notes
     test_app.state.dev_work_sm = sm
     test_app.state.settings = settings
+    test_app.state.repo_registry_repo = repo_registry
+    test_app.state.repo_inspector = inspector
     test_app.state.start_time = time.time()
 
     from slowapi import Limiter
@@ -166,7 +204,7 @@ async def client(tmp_path):
     test_app.include_router(ws_router, prefix="/api/v1")
     test_app.include_router(dev_router, prefix="/api/v1")
 
-    # Scaffolding — create workspace, persist+publish a design_doc, init repo.
+    # Scaffolding — create workspace, persist+publish a design_doc, register repo.
     ws = await workspaces.create_with_scaffold(title="T", slug="w1")
     dd = await design_docs.persist(
         workspace_row=ws, slug="demo", version="1.0.0",
@@ -177,20 +215,49 @@ async def client(tmp_path):
         "UPDATE design_docs SET status='published', published_at=? WHERE id=?",
         ("t", dd["id"]),
     )
-    repo_dir = tmp_path / "repo"
-    await _init_repo(repo_dir)
+    bare_dir = ws_root / ".coop" / "registry" / "repos" / "repo-test00000001.git"
+    await _make_bare_clone(bare_dir)
+    await repo_registry.upsert(
+        id="repo-test00000001",
+        name="testrepo",
+        url=str(bare_dir.with_suffix(".src")),
+        default_branch="main",
+        bare_clone_path=str(bare_dir),
+        role="backend",
+    )
+    await repo_registry.update_fetch_status(
+        "repo-test00000001", status="healthy",
+        bare_clone_path=str(bare_dir),
+    )
 
     test_app.state._ws = ws
     test_app.state._dd = dd
-    test_app.state._repo = str(repo_dir)
+    test_app.state._repo_id = "repo-test00000001"
 
     async with AsyncClient(
         transport=ASGITransport(app=test_app), base_url="http://test"
     ) as ac:
-        ac._app = test_app  # stash for tests
+        ac._app = test_app
         yield ac
 
     await db.close()
+
+
+def _payload(app, **overrides) -> dict:
+    body = {
+        "workspace_id": app.state._ws["id"],
+        "design_doc_id": app.state._dd["id"],
+        "prompt": "build login form",
+        "repo_refs": [
+            {
+                "repo_id": app.state._repo_id,
+                "mount_name": "backend",
+                "base_branch": "main",
+            }
+        ],
+    }
+    body.update(overrides)
+    return body
 
 
 async def _wait_for_terminal(client: AsyncClient, dev_id: str, max_attempts: int = 200):
@@ -204,22 +271,18 @@ async def _wait_for_terminal(client: AsyncClient, dev_id: str, max_attempts: int
     pytest.fail(f"dev_work {dev_id} did not reach terminal state in time")
 
 
-async def test_create_201_runs_to_completion(client):
+async def test_create_201_returns_repo_refs(client):
     app = client._app
-    r = await client.post("/api/v1/dev-works", json={
-        "workspace_id": app.state._ws["id"],
-        "design_doc_id": app.state._dd["id"],
-        "repo_path": app.state._repo,
-        "prompt": "build login form",
-    })
+    r = await client.post("/api/v1/dev-works", json=_payload(app))
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["id"].startswith("dev-")
     assert r.headers["Location"] == f"/api/v1/dev-works/{body['id']}"
-    final = await _wait_for_terminal(client, body["id"])
-    assert final["current_step"] == "COMPLETED"
-    assert final["worktree_path"] is not None
-    assert final["worktree_branch"].startswith("devwork/")
+    refs = body["repo_refs"]
+    assert len(refs) == 1
+    assert refs[0]["repo_id"] == app.state._repo_id
+    assert refs[0]["mount_name"] == "backend"
+    assert refs[0]["devwork_branch"].startswith("devwork/")
 
 
 async def test_list_requires_workspace_id(client):
@@ -232,25 +295,54 @@ async def test_get_missing_returns_404(client):
     assert r.status_code == 404
 
 
+async def test_unknown_repo_id_returns_400(client):
+    app = client._app
+    r = await client.post("/api/v1/dev-works", json=_payload(app, repo_refs=[
+        {"repo_id": "repo-doesnotexist", "mount_name": "backend",
+         "base_branch": "main"},
+    ]))
+    assert r.status_code == 400
+    assert "not registered" in r.json()["message"]
+
+
+async def test_unhealthy_repo_returns_400(client):
+    app = client._app
+    # Force the repo into 'error' state.
+    await app.state.repo_registry_repo.update_fetch_status(
+        app.state._repo_id, status="error", err="boom",
+    )
+    r = await client.post("/api/v1/dev-works", json=_payload(app))
+    assert r.status_code == 400
+    assert "not healthy" in r.json()["message"]
+
+
+async def test_missing_branch_returns_400(client):
+    app = client._app
+    r = await client.post("/api/v1/dev-works", json=_payload(app, repo_refs=[
+        {"repo_id": app.state._repo_id, "mount_name": "backend",
+         "base_branch": "no-such-branch"},
+    ]))
+    assert r.status_code == 400
+    assert "not found" in r.json()["message"]
+
+
+async def test_duplicate_mount_name_returns_422(client):
+    """The pydantic boundary validator on CreateDevWorkRequest catches it."""
+    app = client._app
+    r = await client.post("/api/v1/dev-works", json=_payload(app, repo_refs=[
+        {"repo_id": app.state._repo_id, "mount_name": "backend",
+         "base_branch": "main"},
+        {"repo_id": app.state._repo_id, "mount_name": "backend",
+         "base_branch": "main"},
+    ]))
+    assert r.status_code == 422
+
+
 async def test_duplicate_active_devwork_returns_409(client):
     app = client._app
-    r1 = await client.post("/api/v1/dev-works", json={
-        "workspace_id": app.state._ws["id"],
-        "design_doc_id": app.state._dd["id"],
-        "repo_path": app.state._repo,
-        "prompt": "first",
-    })
+    r1 = await client.post("/api/v1/dev-works", json=_payload(app))
     assert r1.status_code == 201
-
-    # Second POST before the first one terminates -> 409.
-    r2 = await client.post("/api/v1/dev-works", json={
-        "workspace_id": app.state._ws["id"],
-        "design_doc_id": app.state._dd["id"],
-        "repo_path": app.state._repo,
-        "prompt": "second",
-    })
-    # Race: could be 201 if the first one has already COMPLETED (then C1
-    # no longer triggers). Accept either — but then the first must be terminal.
+    r2 = await client.post("/api/v1/dev-works", json=_payload(app))
     if r2.status_code != 409:
         final = await _wait_for_terminal(client, r1.json()["id"])
         assert final["current_step"] in {"COMPLETED", "ESCALATED", "CANCELLED"}
@@ -258,10 +350,15 @@ async def test_duplicate_active_devwork_returns_409(client):
 
 async def test_missing_design_doc_returns_404(client):
     app = client._app
-    r = await client.post("/api/v1/dev-works", json={
-        "workspace_id": app.state._ws["id"],
-        "design_doc_id": "des-nope",
-        "repo_path": app.state._repo,
-        "prompt": "x",
-    })
+    r = await client.post("/api/v1/dev-works", json=_payload(
+        app, design_doc_id="des-nope",
+    ))
+    assert r.status_code == 404
+
+
+async def test_post_repos_ensure_404(client):
+    """Phase 4 deleted POST /repos/ensure entirely."""
+    r = await client.post(
+        "/api/v1/repos/ensure", json={"repo_path": "/x"},
+    )
     assert r.status_code == 404

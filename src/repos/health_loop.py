@@ -4,18 +4,14 @@ Mirrors :class:`src.agent_hosts.health_probe.HealthProbeLoop`: one
 asyncio task, public ``probe_once`` for tests, swallow-per-iteration
 errors so one bad repo does not stall the loop.
 
-Stale detection runs at the start of each tick: any healthy row whose
-``last_fetched_at`` is older than ``interval_s * _STALE_MULTIPLIER`` is
-downgraded to ``stale``; the imminent fetch will then overwrite to
-``healthy`` or ``error``. ``stale`` is therefore observable only when
-the loop has been paused (process restart, network outage) — exactly
-the PRD intent.
+Status writes go through :class:`RepoRegistryRepo`; the loop is the
+**only** writer of ``healthy``. Operators infer freshness from
+``last_fetched_at`` directly — there is no separate ``stale`` state.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -23,10 +19,6 @@ if TYPE_CHECKING:
     from src.repos.registry import RepoRegistryRepo
 
 logger = logging.getLogger(__name__)
-
-# v1: 3 missed cycles ⇒ stale (PRD L138). Codified as a module-level
-# constant so the value has a name in tests instead of a magic 3.
-_STALE_MULTIPLIER = 3
 
 
 class RepoHealthLoop:
@@ -70,7 +62,6 @@ class RepoHealthLoop:
     async def probe_once(self) -> None:
         """Fetch every registered repo once. Public for tests to drive."""
         rows = await self.registry.list_all()
-        await self._mark_stale(rows)
         # Semaphore created here, not in __init__: pytest-asyncio creates a
         # new event loop per test and a Semaphore bound to a closed loop
         # raises on the next acquire.
@@ -114,33 +105,6 @@ class RepoHealthLoop:
         await asyncio.gather(
             *[_one(r) for r in rows], return_exceptions=False,
         )
-
-    async def _mark_stale(self, rows: list[dict[str, Any]]) -> None:
-        cutoff = datetime.now(timezone.utc) - timedelta(
-            seconds=self.interval_s * _STALE_MULTIPLIER,
-        )
-        for r in rows:
-            if r.get("fetch_status") != "healthy":
-                continue
-            last = r.get("last_fetched_at")
-            if not last:
-                continue
-            try:
-                last_dt = datetime.fromisoformat(last)
-            except ValueError:
-                # Manual SQL edits or restored backups can corrupt this
-                # column. Log so the silent skip doesn't hide the
-                # corruption from ops.
-                logger.warning(
-                    "malformed last_fetched_at on repo %s: %r", r["id"], last,
-                )
-                continue
-            if last_dt.tzinfo is None:
-                last_dt = last_dt.replace(tzinfo=timezone.utc)
-            if last_dt < cutoff:
-                await self.registry.update_fetch_status(
-                    r["id"], status="stale", err=None,
-                )
 
     async def _run(self) -> None:
         while True:

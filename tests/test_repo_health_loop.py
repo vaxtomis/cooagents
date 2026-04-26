@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -86,31 +85,6 @@ async def test_probe_once_continues_after_one_repo_raises(env):
     await loop.probe_once()
     # Both attempted; list_all() returns rows ORDER BY name.
     assert sorted(fetcher.calls) == ["repo-bad", "repo-ok"]
-
-
-async def test_stale_promotion(env):
-    await _seed(env["registry"], "repo-x", name="x")
-    # Stamp a fresh healthy timestamp, then move it backwards beyond cutoff.
-    await env["registry"].update_fetch_status("repo-x", status="healthy")
-    far_past = (
-        datetime.now(timezone.utc) - timedelta(seconds=3600)
-    ).isoformat()
-    await env["db"].execute(
-        "UPDATE repos SET last_fetched_at=? WHERE id=?",
-        (far_past, "repo-x"),
-    )
-
-    loop = RepoHealthLoop(
-        FakeFetcher({}), env["registry"], interval_s=300, parallel=4,
-    )
-    rows = await env["registry"].list_all()
-    await loop._mark_stale(rows)
-    row = await env["registry"].get("repo-x")
-    assert row["fetch_status"] == "stale"
-    # Marking stale must NOT refresh ``last_fetched_at`` — staleness means
-    # "the row is old"; refreshing the timestamp would contradict the
-    # marker and hide a paused loop from operators.
-    assert row["last_fetched_at"] == far_past
 
 
 async def test_start_stop_cancels_task_cleanly(env):

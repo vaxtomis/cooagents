@@ -40,10 +40,10 @@ async def _seed_dev_work(
         (design_doc_id, ws_id, "s", "1.0.0", "designs/x.md", NOW),
     )
     await db.execute(
-        "INSERT INTO dev_works(id,workspace_id,design_doc_id,repo_path,prompt,"
+        "INSERT INTO dev_works(id,workspace_id,design_doc_id,prompt,"
         "current_step,iteration_rounds,agent,created_at,updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?)",
-        (dw_id, ws_id, design_doc_id, "/tmp/repo", "p", "INIT", 0,
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        (dw_id, ws_id, design_doc_id, "p", "INIT", 0,
          "claude", NOW, NOW),
     )
     return dw_id
@@ -57,14 +57,12 @@ async def test_upsert_inserts_new_repo(env):
         name="frontend",
         url="git@github.com:org/frontend.git",
         default_branch="main",
-        credential_ref="/home/u/.ssh/id_rsa",
-        labels=["web"],
+        ssh_key_path="/home/u/.ssh/id_rsa",
     )
     assert row["id"] == "repo-aaa"
     assert row["name"] == "frontend"
     assert row["fetch_status"] == "unknown"
-    assert row["labels"] == ["web"]
-    assert row["credential_ref"] == "/home/u/.ssh/id_rsa"
+    assert row["ssh_key_path"] == "/home/u/.ssh/id_rsa"
     assert row["default_branch"] == "main"
 
 
@@ -215,17 +213,17 @@ async def test_sync_from_config_reuses_id_for_same_name(env):
 
 def test_credential_resolver_path():
     p = str(Path.home() / ".ssh" / "id_rsa")
-    cred = resolve_repo_credential({"credential_ref": p})
+    cred = resolve_repo_credential({"ssh_key_path": p})
     assert isinstance(cred, SshKeyMaterial)
     assert cred.private_key_path == Path.home() / ".ssh" / "id_rsa"
 
 
 def test_credential_resolver_empty_returns_none():
-    assert resolve_repo_credential({"credential_ref": None}) is None
-    assert resolve_repo_credential({"credential_ref": ""}) is None
+    assert resolve_repo_credential({"ssh_key_path": None}) is None
+    assert resolve_repo_credential({"ssh_key_path": ""}) is None
     assert resolve_repo_credential({}) is None
 
 
 def test_credential_resolver_relative_rejects():
     with pytest.raises(BadRequestError):
-        resolve_repo_credential({"credential_ref": "relative/key"})
+        resolve_repo_credential({"ssh_key_path": "relative/key"})

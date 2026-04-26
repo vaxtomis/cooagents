@@ -58,11 +58,11 @@ async def _seed_dev_work(
 ) -> None:
     created = created_at or _ts(4, 1)
     await db.execute(
-        "INSERT INTO dev_works(id,workspace_id,design_doc_id,repo_path,prompt,"
+        "INSERT INTO dev_works(id,workspace_id,design_doc_id,prompt,"
         "current_step,iteration_rounds,first_pass_success,agent,"
         "created_at,updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        (dw_id, ws_id, dd_id, "/tmp/repo", "p",
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (dw_id, ws_id, dd_id, "p",
          current_step, iteration_rounds, first_pass_success, "claude",
          created, created),
     )

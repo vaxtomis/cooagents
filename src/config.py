@@ -370,20 +370,27 @@ class AgentsConfig(BaseModel):
         return False
 
 
+# Closed enum mirroring ``src.models.RepoRole``. Duplicated here to keep
+# src.config out of src.models's import chain.
+_VALID_REPO_ROLES: frozenset[str] = frozenset(
+    {"backend", "frontend", "fullstack", "infra", "docs", "other"}
+)
+
+
 class RepoConfig(BaseModel):
     """One entry in ``config/repos.yaml`` ``repos`` list (Phase 1, repo-registry).
 
     ``name`` is the operator-facing handle (stable across restarts; the DB
     primary key ``id`` is allocated lazily by the registry on first sync).
     ``ssh_key_path`` is expanded with ``Path(p).expanduser()`` at load time
-    and propagates into ``repos.credential_ref`` via ``RepoRegistryRepo``.
+    and stored on ``repos.ssh_key_path`` verbatim. ``role`` (Phase 4) drives
+    primary-ref auto-selection in DevWork creation.
     """
     name: str = Field(..., min_length=1, max_length=63)
     url: str = Field(..., min_length=1)
     default_branch: str = Field("main", min_length=1, max_length=200)
-    vendor: str | None = None
     ssh_key_path: str | None = None
-    labels: list[str] = Field(default_factory=list)
+    role: str = "other"
 
     @field_validator("name")
     @classmethod
@@ -400,6 +407,15 @@ class RepoConfig(BaseModel):
         if v is None:
             return v
         return str(Path(v).expanduser())
+
+    @field_validator("role")
+    @classmethod
+    def _check_role(cls, v: str) -> str:
+        if v not in _VALID_REPO_ROLES:
+            raise ValueError(
+                f"role must be one of {sorted(_VALID_REPO_ROLES)}; got {v!r}"
+            )
+        return v
 
 
 class ReposFetchConfig(BaseModel):

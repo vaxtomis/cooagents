@@ -5,11 +5,6 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class EnsureRepoRequest(BaseModel):
-    repo_path: str
-    repo_url: str | None = None
-
-
 class CreateWebhookSubscriptionRequest(BaseModel):
     """Webhook subscription request.
 
@@ -160,7 +155,6 @@ class DevWork(BaseModel):
     id: str
     workspace_id: str
     design_doc_id: str
-    repo_path: str
     prompt: str
     worktree_path: str | None = None
     worktree_branch: str | None = None
@@ -175,6 +169,8 @@ class DevWork(BaseModel):
     completed_at: str | None = None
     created_at: str
     updated_at: str
+    # Phase 4 (repo-registry): repo binding moved to dev_work_repos table.
+    repo_refs: list["DevRepoRefView"] = Field(default_factory=list)
 
 
 class DevIterationNote(BaseModel):
@@ -273,6 +269,9 @@ class CreateDesignWorkRequest(BaseModel):
     # first to the LLM-produced front-matter, then to
     # config.scoring.default_threshold (=80). (U2)
     rubric_threshold: int | None = Field(default=None, ge=1, le=100)
+    # Phase 4 (repo-registry): optional repo binding. Empty list keeps
+    # pure-doc DesignWorks creatable.
+    repo_refs: list["RepoRef"] = Field(default_factory=list)
 
     @field_validator("slug")
     @classmethod
@@ -309,6 +308,8 @@ class DesignWorkProgress(BaseModel):
     version: str | None = None
     created_at: str
     updated_at: str
+    # Phase 4 (repo-registry): persisted refs from design_work_repos.
+    repo_refs: list["DesignRepoRefView"] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -319,9 +320,29 @@ class DesignWorkProgress(BaseModel):
 class CreateDevWorkRequest(BaseModel):
     workspace_id: str
     design_doc_id: str
-    repo_path: str = Field(..., min_length=1, max_length=500)
     prompt: str = Field(..., min_length=1, max_length=20000)
     agent: AgentKind = AgentKind.claude
+    # Phase 4 (repo-registry): replaces the free-form ``repo_path`` field.
+    # At least one ref required; ``mount_name`` must be unique within the
+    # payload, and at most one ref may carry ``is_primary=True``. The
+    # 4-step validation chain (existence → health → branch resolves →
+    # in-payload mount uniqueness) lives in ``routes/_repo_refs_validation``.
+    repo_refs: list["DevRepoRef"] = Field(..., min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_repo_refs(self) -> "CreateDevWorkRequest":
+        mounts = [r.mount_name for r in self.repo_refs]
+        if len(set(mounts)) != len(mounts):
+            raise ValueError(
+                f"duplicate mount_name in repo_refs: {sorted(mounts)}"
+            )
+        primaries = sum(1 for r in self.repo_refs if r.is_primary)
+        if primaries > 1:
+            raise ValueError(
+                "at most one repo_ref may have is_primary=True; "
+                f"got {primaries}"
+            )
+        return self
 
 
 class DevWorkProgress(BaseModel):
@@ -340,6 +361,8 @@ class DevWorkProgress(BaseModel):
     worktree_branch: str | None = None
     created_at: str
     updated_at: str
+    # Phase 4 (repo-registry): persisted refs from dev_work_repos.
+    repo_refs: list["DevRepoRefView"] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -432,4 +455,215 @@ class AgentDispatch(BaseModel):
     exit_code: int | None = None
     created_at: str
     updated_at: str
+
+
+# Repo registry (Phase 1 + Phase 3) ------------------------------------------
+# Duplicate the regex from src.config to keep src.models free of src.config
+# imports (avoids an import cycle through the FastAPI app).
+_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,62}$")
+_REPO_FETCH_STATUSES = ("unknown", "healthy", "error")
+
+
+def _validate_repo_name(v: str) -> str:
+    if not _REPO_NAME_PATTERN.match(v):
+        raise ValueError(
+            "repo name must match [A-Za-z0-9][A-Za-z0-9_.\\-]{0,62}"
+        )
+    return v
+
+
+class RepoRole(str, Enum):
+    """Repo classification used by primary-ref auto-selection.
+
+    Closed enum so reviewer prompts and UI badges don't fork by free-text.
+    Default ``other``; pick the closest match if a repo doesn't fit.
+    """
+    backend = "backend"
+    frontend = "frontend"
+    fullstack = "fullstack"
+    infra = "infra"
+    docs = "docs"
+    other = "other"
+
+
+# Used by _s0_init / Phase 5 worker for primary-ref auto-selection. Lower
+# index = higher priority. Don't reorder casually — operators rely on this
+# when they leave is_primary unset on multi-repo DevWorks.
+REPO_ROLE_PRIMARY_PRIORITY: tuple[RepoRole, ...] = (
+    RepoRole.backend,
+    RepoRole.fullstack,
+    RepoRole.frontend,
+    RepoRole.infra,
+    RepoRole.docs,
+    RepoRole.other,
+)
+
+
+class Repo(BaseModel):
+    """Response model — mirrors columns of the ``repos`` table."""
+    id: str
+    name: str
+    url: str
+    default_branch: str = "main"
+    ssh_key_path: str | None = None
+    bare_clone_path: str | None = None
+    role: RepoRole = RepoRole.other
+    fetch_status: Literal["unknown", "healthy", "error"] = "unknown"
+    last_fetched_at: str | None = None
+    last_fetch_err: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class CreateRepoRequest(BaseModel):
+    """Operator-facing create payload.
+
+    ``id`` is optional; the route allocates ``repo-<hex12>`` when omitted.
+    """
+    id: str | None = None
+    name: str = Field(..., min_length=1, max_length=63)
+    url: str = Field(..., min_length=1)
+    default_branch: str = Field("main", min_length=1, max_length=200)
+    ssh_key_path: str | None = None
+    role: RepoRole = RepoRole.other
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, v: str) -> str:
+        return _validate_repo_name(v)
+
+
+class UpdateRepoRequest(BaseModel):
+    """Partial update — every field is optional."""
+    name: str | None = Field(None, min_length=1, max_length=63)
+    url: str | None = Field(None, min_length=1)
+    default_branch: str | None = Field(None, min_length=1, max_length=200)
+    ssh_key_path: str | None = None
+    role: RepoRole | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validate_repo_name(v)
+
+
+# Branch / ref name allowlist. Mirrors src.git_utils._BRANCH_RE and
+# src.repos.inspector._REF_RE — same shape, kept here as a string literal so
+# src.models stays free of the git_utils import (which pulls asyncio chains).
+_REF_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_.\-]{0,199}$")
+
+
+class RepoRef(BaseModel):
+    """DesignWork-side repo binding. ``base_branch`` resolved against the
+    bare clone at create time."""
+    repo_id: str = Field(..., min_length=1)
+    base_branch: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("base_branch")
+    @classmethod
+    def _check_base_branch(cls, v: str) -> str:
+        # Defense-in-depth: validate at the DTO boundary so direct callers
+        # of validate_*_repo_refs (which only see the inspector layer's
+        # _validate_ref later) cannot bypass the allowlist.
+        if not _REF_NAME_RE.match(v):
+            raise ValueError(
+                "base_branch must match [a-zA-Z0-9][a-zA-Z0-9/_.-]{0,199}"
+            )
+        return v
+
+
+class DevRepoRef(RepoRef):
+    """DevWork-side repo binding. Adds ``mount_name`` (unique per DevWork),
+    ``base_rev_lock`` (snapshot ``origin/<branch>`` SHA at create), and
+    ``is_primary`` (explicit override of role-based primary selection)."""
+    mount_name: str = Field(..., min_length=1, max_length=63)
+    base_rev_lock: bool = False
+    is_primary: bool = False
+
+    @field_validator("mount_name")
+    @classmethod
+    def _check_mount(cls, v: str) -> str:
+        if not _REPO_NAME_PATTERN.match(v):
+            raise ValueError(
+                "mount_name must match [A-Za-z0-9][A-Za-z0-9_.\\-]{0,62}"
+            )
+        return v
+
+
+class DesignRepoRefView(BaseModel):
+    """Read-only view over a ``design_work_repos`` row."""
+    repo_id: str
+    branch: str
+    rev: str | None = None
+
+
+class DevRepoRefView(BaseModel):
+    """Read-only view over a ``dev_work_repos`` row.
+
+    Phase 4 progress contract — this is *not* the Phase 5 worker handoff
+    payload (which adds url / ssh_key_path bits).
+    """
+    repo_id: str
+    mount_name: str
+    base_branch: str
+    base_rev: str | None = None
+    devwork_branch: str
+    push_state: str
+    is_primary: bool = False
+
+
+# Inspector response DTOs (Phase 3) ------------------------------------------
+
+class RepoBranches(BaseModel):
+    default_branch: str
+    branches: list[str] = Field(default_factory=list)
+
+
+class RepoTreeEntry(BaseModel):
+    path: str
+    type: Literal["blob", "tree"]
+    mode: str
+    size: int | None = None
+
+
+class RepoTree(BaseModel):
+    ref: str
+    path: str
+    entries: list[RepoTreeEntry] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class RepoBlob(BaseModel):
+    ref: str
+    path: str
+    size: int
+    binary: bool
+    content: str | None = None
+
+
+class RepoLogEntry(BaseModel):
+    sha: str
+    author: str
+    email: str
+    committed_at: str
+    subject: str
+
+
+class RepoLog(BaseModel):
+    ref: str
+    path: str | None = None
+    entries: list[RepoLogEntry] = Field(default_factory=list)
+
+
+# Resolve forward references for models that hold list[\"DevRepoRefView\"] /
+# list[\"RepoRef\"] / list[\"DevRepoRef\"]. The view DTOs and ref DTOs are
+# defined later in this module on purpose — keeping route-facing request
+# models above keeps the file's top-down narrative readable.
+DevWork.model_rebuild()
+CreateDesignWorkRequest.model_rebuild()
+DesignWorkProgress.model_rebuild()
+CreateDevWorkRequest.model_rebuild()
+DevWorkProgress.model_rebuild()
 

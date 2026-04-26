@@ -19,7 +19,7 @@ def _repo(**overrides: Any) -> dict[str, Any]:
         "id": "repo-aaa",
         "name": "frontend",
         "url": "git@github.com:org/frontend.git",
-        "credential_ref": None,
+        "ssh_key_path": None,
     }
     base.update(overrides)
     return base
@@ -79,7 +79,7 @@ async def test_env_injects_git_ssh_command_for_private_repo(env, tmp_path):
     key = tmp_path / "id_rsa"
     key.write_text("FAKE")
     await env["fetcher"].fetch_or_clone(
-        _repo(credential_ref=str(key.resolve())),
+        _repo(ssh_key_path=str(key.resolve())),
     )
     cmd = env["calls"][0]["env"]["GIT_SSH_COMMAND"]
     assert cmd.startswith("ssh ")
@@ -112,7 +112,7 @@ async def test_strict_off_uses_accept_new(tmp_path, monkeypatch):
     key = tmp_path / "id_rsa"
     key.write_text("FAKE")
     await fetcher.fetch_or_clone(
-        _repo(credential_ref=str(key.resolve())),
+        _repo(ssh_key_path=str(key.resolve())),
     )
     cmd = calls[0]["env"]["GIT_SSH_COMMAND"]
     assert "StrictHostKeyChecking=accept-new" in cmd

@@ -66,9 +66,9 @@ async def test_schema_default_agent_host_id_is_local(env):
         (env["ws"]["id"],),
     )
     await env["db"].execute(
-        "INSERT INTO dev_works(id,workspace_id,design_doc_id,repo_path,prompt,"
+        "INSERT INTO dev_works(id,workspace_id,design_doc_id,prompt,"
         "current_step,iteration_rounds,agent,created_at,updated_at) "
-        "VALUES('dw-1', ?, 'des-1', '/r', 'p', 'INIT', 0, 'codex', 't', 't')",
+        "VALUES('dw-1', ?, 'des-1', 'p', 'INIT', 0, 'codex', 't', 't')",
         (env["ws"]["id"],),
     )
     row = await env["db"].fetchone(

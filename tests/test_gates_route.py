@@ -49,10 +49,10 @@ async def _seed_dev_work_with_gate(
     )
     gates_json = json.dumps({"exit": {"status": "waiting"}})
     await db.execute(
-        "INSERT INTO dev_works(id,workspace_id,design_doc_id,repo_path,"
+        "INSERT INTO dev_works(id,workspace_id,design_doc_id,"
         "prompt,current_step,iteration_rounds,agent,gates_json,"
-        "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        (dw_id, ws_id, "dd-g1", "/tmp/repo", "p",
+        "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (dw_id, ws_id, "dd-g1", "p",
          "STEP5_REVIEW", 0, "claude", gates_json, _ts(), _ts()),
     )
 

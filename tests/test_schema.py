@@ -100,15 +100,25 @@ async def test_repos_columns(db):
         "name",
         "url",
         "default_branch",
-        "credential_ref",
+        "ssh_key_path",
         "bare_clone_path",
-        "labels_json",
+        # Phase 4 (repo-registry): role drives primary-ref auto-selection.
+        "role",
         "fetch_status",
         "last_fetched_at",
         "last_fetch_err",
         "created_at",
         "updated_at",
     }.issubset(cols)
+
+
+async def test_dev_works_repo_path_dropped(db):
+    """Phase 4: repo binding moved to dev_work_repos; repo_path is gone."""
+    rows = await db.fetchall("PRAGMA table_info(dev_works)")
+    cols = {r["name"] for r in rows}
+    assert "repo_path" not in cols, (
+        "dev_works.repo_path should be removed in Phase 4 (repo-registry)"
+    )
 
 
 async def test_design_work_repos_pk(db):
@@ -134,22 +144,22 @@ async def test_dev_work_repos_pk_and_unique(db):
         ("des-uniq", "ws-uniq", "s", "1.0.0", "designs/x.md", NOW),
     )
     await db.execute(
-        "INSERT INTO dev_works(id,workspace_id,design_doc_id,repo_path,prompt,"
+        "INSERT INTO dev_works(id,workspace_id,design_doc_id,prompt,"
         "current_step,iteration_rounds,agent,created_at,updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?)",
-        ("dev-uniq", "ws-uniq", "des-uniq", "/tmp/repo", "p", "INIT", 0,
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        ("dev-uniq", "ws-uniq", "des-uniq", "p", "INIT", 0,
          "claude", NOW, NOW),
     )
     # Two distinct repo rows, same dev_work + mount_name → must fail.
     await db.execute(
-        "INSERT INTO repos(id,name,url,default_branch,labels_json,"
-        "fetch_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-        ("repo-a", "alpha", "git@x:o/r.git", "main", "[]", "unknown", NOW, NOW),
+        "INSERT INTO repos(id,name,url,default_branch,"
+        "fetch_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("repo-a", "alpha", "git@x:o/r.git", "main", "unknown", NOW, NOW),
     )
     await db.execute(
-        "INSERT INTO repos(id,name,url,default_branch,labels_json,"
-        "fetch_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-        ("repo-b", "beta", "git@x:o/r2.git", "main", "[]", "unknown", NOW, NOW),
+        "INSERT INTO repos(id,name,url,default_branch,"
+        "fetch_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        ("repo-b", "beta", "git@x:o/r2.git", "main", "unknown", NOW, NOW),
     )
     await db.execute(
         "INSERT INTO dev_work_repos(dev_work_id,repo_id,mount_name,base_branch,"

@@ -46,9 +46,45 @@ class Database:
         # Apply schema (idempotent via CREATE IF NOT EXISTS)
         schema_sql = self._schema_path.read_text(encoding="utf-8")
         await self._conn.executescript(schema_sql)
+        # Run idempotent in-place migrations for schema reshapes that
+        # ``CREATE TABLE IF NOT EXISTS`` cannot apply to existing tables.
+        await self._migrate()
         # Enable WAL journal mode for better concurrency
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        """Apply forward-only migrations to existing tables.
+
+        ``CREATE TABLE IF NOT EXISTS`` is a no-op on existing tables, so
+        any column rename / drop / CHECK change in ``db/schema.sql`` must
+        be re-applied here for environments that ran an earlier schema.
+
+        Each step is idempotent (checks ``PRAGMA table_info`` first) so
+        starting on a fresh DB or repeated startups are both safe.
+        """
+        conn = self._ensure_connected()
+
+        # repo-registry phase 3: collapse ``credential_ref`` → ``ssh_key_path``,
+        # drop ``vendor`` and ``labels_json``, normalize legacy ``stale`` rows.
+        async with conn.execute("PRAGMA table_info(repos)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        if "credential_ref" in cols and "ssh_key_path" not in cols:
+            await conn.execute(
+                "ALTER TABLE repos RENAME COLUMN credential_ref TO ssh_key_path"
+            )
+        if "vendor" in cols:
+            await conn.execute("ALTER TABLE repos DROP COLUMN vendor")
+        if "labels_json" in cols:
+            await conn.execute("ALTER TABLE repos DROP COLUMN labels_json")
+        # The CHECK constraint that previously permitted ``'stale'`` lives
+        # on the existing table definition; rewriting it requires a full
+        # table rebuild. Instead, normalize any legacy 'stale' rows to
+        # 'unknown' — the health loop will re-evaluate on its next tick.
+        await conn.execute(
+            "UPDATE repos SET fetch_status='unknown' WHERE fetch_status='stale'"
+        )
+        await conn.commit()
 
     async def close(self) -> None:
         """Close the database connection."""

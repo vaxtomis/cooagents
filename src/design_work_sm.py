@@ -25,7 +25,7 @@ from src.design_prompt_composer import PromptInputs, compose_prompt
 from src.design_validator import validate_design_markdown
 from src.exceptions import BadRequestError, NotFoundError
 from src.mockup_renderer import MockupSpec, PathMockupRenderer
-from src.models import DesignWorkMode, DesignWorkState
+from src.models import DesignWorkMode, DesignWorkState, RepoRef
 from src.semver import next_version
 from src.storage.registry import WorkspaceFileRegistry
 from src.workspace_events import emit_and_deliver
@@ -196,7 +196,15 @@ class DesignWorkStateMachine:
         needs_frontend_mockup: bool,
         agent: str,
         rubric_threshold: int | None = None,
+        repo_refs: list[tuple[RepoRef, str | None]] | None = None,
     ) -> dict:
+        """Create a DesignWork plus its ``design_work_repos`` rows atomically.
+
+        ``repo_refs`` is the validated tuple list returned by
+        ``routes._repo_refs_validation.validate_design_repo_refs`` — each
+        entry is ``(RepoRef, head_sha_or_none)``. Empty / None means a
+        pure-doc DesignWork (no repo binding).
+        """
         ws = await self.workspaces.get(workspace_id)
         if ws is None:
             raise NotFoundError(f"workspace {workspace_id!r} not found")
@@ -224,39 +232,47 @@ class DesignWorkStateMachine:
         )
         gates_payload = (
             {"rubric_threshold_override": rubric_threshold}
-            if rubric_threshold
+            if rubric_threshold is not None
             else None
         )
 
         host_id = await self._pick_host(agent)
-        await self.db.execute(
-            """INSERT INTO design_works
-               (id, workspace_id, mode, parent_version, needs_frontend_mockup,
-                current_state, loop, missing_sections_json, agent,
-                agent_host_id, user_input_path, title, sub_slug, version,
-                output_path, gates_json, created_at, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                wid,
-                workspace_id,
-                mode.value,
-                parent_version,
-                1 if needs_frontend_mockup else 0,
-                DesignWorkState.INIT.value,
-                0,
-                None,
-                agent,
-                host_id,
-                input_rel,
-                title,
-                sub_slug,
-                version,
-                output_rel,
-                json.dumps(gates_payload) if gates_payload else None,
-                now,
-                now,
-            ),
-        )
+        async with self.db.transaction():
+            await self.db.execute(
+                """INSERT INTO design_works
+                   (id, workspace_id, mode, parent_version, needs_frontend_mockup,
+                    current_state, loop, missing_sections_json, agent,
+                    agent_host_id, user_input_path, title, sub_slug, version,
+                    output_path, gates_json, created_at, updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    wid,
+                    workspace_id,
+                    mode.value,
+                    parent_version,
+                    1 if needs_frontend_mockup else 0,
+                    DesignWorkState.INIT.value,
+                    0,
+                    None,
+                    agent,
+                    host_id,
+                    input_rel,
+                    title,
+                    sub_slug,
+                    version,
+                    output_rel,
+                    json.dumps(gates_payload) if gates_payload else None,
+                    now,
+                    now,
+                ),
+            )
+            for ref, rev in repo_refs or []:
+                await self.db.execute(
+                    """INSERT INTO design_work_repos(
+                           design_work_id, repo_id, branch, rev, created_at)
+                       VALUES(?,?,?,?,?)""",
+                    (wid, ref.repo_id, ref.base_branch, rev, now),
+                )
         await emit_and_deliver(
             self.db,
             self.webhooks,

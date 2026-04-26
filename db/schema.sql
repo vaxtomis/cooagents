@@ -73,22 +73,24 @@ CREATE TABLE IF NOT EXISTS agent_dispatches (
 );
 
 -- 2d. repos — Repo Registry (Phase 1, repo-registry feature).
---     One row per registered git repository. ``credential_ref`` is the
---     credential abstraction seam: v1 holds a filesystem path to an SSH key,
---     a future Vault implementation can store an opaque ``vault://`` ref in
---     the same column without a schema bump. ``bare_clone_path`` is filled
---     by Phase 2's fetcher; nullable in this phase.
+--     One row per registered git repository. ``ssh_key_path`` is the
+--     filesystem path to a passphraseless SSH private key, or NULL for a
+--     public/ambient-auth repo. ``bare_clone_path`` is filled by Phase 2's
+--     fetcher; nullable in this phase.
 CREATE TABLE IF NOT EXISTS repos (
   id                TEXT PRIMARY KEY,                  -- 'repo-<hex12>'
   name              TEXT NOT NULL UNIQUE,              -- operator-facing handle
   url               TEXT NOT NULL,
-  vendor            TEXT,
   default_branch    TEXT NOT NULL DEFAULT 'main',
-  credential_ref    TEXT,                              -- v1: SSH key path; abstraction seam
+  ssh_key_path      TEXT,                              -- absolute path to SSH private key, or NULL
   bare_clone_path   TEXT,                              -- Phase 2 writer; NULL until then
-  labels_json       TEXT NOT NULL DEFAULT '[]',
+  -- Phase 4 (repo-registry): closed enum so reviewer prompts and UI badges
+  -- don't fork by free-text. Drives primary-ref auto-selection in
+  -- DevWorkStateMachine._s0_init when no DevRepoRef.is_primary is set.
+  role              TEXT NOT NULL DEFAULT 'other'
+                    CHECK(role IN ('backend','frontend','fullstack','infra','docs','other')),
   fetch_status      TEXT NOT NULL DEFAULT 'unknown'
-                    CHECK(fetch_status IN ('unknown','healthy','stale','error')),
+                    CHECK(fetch_status IN ('unknown','healthy','error')),
   last_fetched_at   TEXT,
   last_fetch_err    TEXT,
   created_at        TEXT NOT NULL,
@@ -120,6 +122,10 @@ CREATE TABLE IF NOT EXISTS dev_work_repos (
   push_state       TEXT NOT NULL DEFAULT 'pending'
                    CHECK(push_state IN ('pending','pushed','failed')),
   push_err         TEXT,
+  -- Phase 4: explicit override of role-based primary-ref auto-selection.
+  -- The boundary CreateDevWorkRequest validator rejects >1 row marked
+  -- is_primary; the partial UNIQUE index below enforces the same at DB level.
+  is_primary       INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0,1)),
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL,
   PRIMARY KEY (dev_work_id, repo_id),
@@ -158,11 +164,13 @@ CREATE TABLE IF NOT EXISTS design_works (
 );
 
 -- 4. dev_works — DevWork state machine instance + indicator fields
+-- Phase 4 (repo-registry): repo binding moved to dev_work_repos. Old DBs
+-- with a non-null ``repo_path`` column will trip the legacy-schema warning
+-- in src/app.py lifespan; operators wipe ``.coop/state.db`` and restart.
 CREATE TABLE IF NOT EXISTS dev_works (
   id                          TEXT PRIMARY KEY,  -- 'dev-<hex12>'
   workspace_id                TEXT NOT NULL REFERENCES workspaces(id),
   design_doc_id               TEXT NOT NULL REFERENCES design_docs(id),
-  repo_path                   TEXT NOT NULL,
   prompt                      TEXT NOT NULL,
   worktree_path               TEXT,
   worktree_branch             TEXT,
@@ -273,6 +281,12 @@ CREATE INDEX IF NOT EXISTS idx_agent_dispatches_state      ON agent_dispatches(s
 CREATE INDEX IF NOT EXISTS idx_repos_fetch_status          ON repos(fetch_status);
 CREATE INDEX IF NOT EXISTS idx_design_work_repos_repo      ON design_work_repos(repo_id);
 CREATE INDEX IF NOT EXISTS idx_dev_work_repos_repo         ON dev_work_repos(repo_id);
+-- Phase 4: defense-in-depth for the at-most-one-primary rule. The
+-- boundary validator on CreateDevWorkRequest is the first layer; this
+-- partial UNIQUE index catches any race or direct-DB write that bypasses
+-- the boundary.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_dev_work_repos_primary
+  ON dev_work_repos(dev_work_id) WHERE is_primary=1;
 
 -- Phase 8a invariant: the reserved 'local' host always exists so the
 -- design_works.agent_host_id / dev_works.agent_host_id FK ('local' default)
