@@ -106,3 +106,10 @@ def test_empty_output_file_falls_back_to_stdout(tmp_path):
         output_json_path=str(p),
     )
     assert outcome.score == 80
+
+
+def test_problem_category_unchanged_in_phase8():
+    """Phase 8 invariant (PRD L227): the enum is the SM/route contract."""
+    assert tuple(c.value for c in ProblemCategory) == (
+        "req_gap", "impl_gap", "design_hollow",
+    )
