@@ -183,6 +183,10 @@ CREATE TABLE IF NOT EXISTS dev_works (
   -- Phase 8a: which agent host runs this DevWork's LLM calls.
   agent_host_id               TEXT NOT NULL DEFAULT 'local' REFERENCES agent_hosts(id),
   gates_json                  TEXT,
+  -- Phase 3 (devwork-acpx-overhaul): single-row JSON projection of the most
+  -- recent heartbeat tick from LLMRunner.run_with_progress. NULL means no
+  -- LLM call is in flight; the SM clears it on dispatch close.
+  current_progress_json       TEXT,
   escalated_at                TEXT,
   completed_at                TEXT,
   created_at                  TEXT NOT NULL,

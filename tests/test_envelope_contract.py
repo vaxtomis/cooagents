@@ -29,6 +29,7 @@ _EXPECTED_EVENT_NAMES: frozenset[str] = frozenset({
     "dev_work.escalated",
     "dev_work.gate.exit_waiting",
     "dev_work.merge_conflict",
+    "dev_work.progress",
     "dev_work.round_completed",
     "dev_work.score_passed",
     "dev_work.started",

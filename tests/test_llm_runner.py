@@ -18,7 +18,9 @@ from src.config import Settings
 from src.llm_runner import (
     DESIGN_SESSION_PREFIX,
     DW_SESSION_PREFIX,
+    IdleTimeoutError,
     LLMRunner,
+    ProgressTick,
     Session,
     SessionLifecycleError,
     dw_session_name,
@@ -497,3 +499,242 @@ async def test_orphan_sweep_skips_when_list_rc_nonzero(monkeypatch, runner):
 
     cleaned = await runner.orphan_sweep_at_boot(name_prefixes=("dw-",))
     assert cleaned == []
+
+
+# ---- run_with_progress (Phase 3) ----------------------------------------
+
+class _SlowFakeProc:
+    """Subprocess fake whose ``communicate`` sleeps before returning.
+
+    Lets the heartbeat ticker fire several ticks against a deterministic
+    asyncio sleep without spawning a real process.
+    """
+
+    def __init__(
+        self,
+        *,
+        sleep_s: float,
+        stdout: bytes = b"ok",
+        stderr: bytes = b"",
+        rc: int = 0,
+    ) -> None:
+        self._sleep_s = sleep_s
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode: int | None = None
+        self._rc_on_exit = rc
+        self.killed = 0
+
+    async def communicate(self):
+        import asyncio
+        await asyncio.sleep(self._sleep_s)
+        self.returncode = self._rc_on_exit
+        return self._stdout, self._stderr
+
+    def kill(self) -> None:
+        self.killed += 1
+        # Simulate a killed proc: communicate() will still wake up but
+        # returncode is now set by the runner-side branch logic.
+        self.returncode = -9
+
+
+class _NeverFinishingProc:
+    """Subprocess fake whose ``communicate`` never returns until killed."""
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.killed = 0
+        self._wake = None
+
+    async def communicate(self):
+        import asyncio
+        # Block forever; ticker_task.cancel() will interrupt the outer
+        # await proc.communicate() via run_with_progress's finally block
+        # only if the kill() side-effect sets returncode. We resolve when
+        # killed by checking returncode in a tight poll loop.
+        while self.returncode is None:
+            await asyncio.sleep(0.005)
+        return b"", b""
+
+    def kill(self) -> None:
+        self.killed += 1
+        self.returncode = -9
+
+
+@pytest.mark.asyncio
+async def test_run_with_progress_emits_ticks_at_interval(monkeypatch, runner):
+    proc = _SlowFakeProc(sleep_s=0.06)
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+
+    ticks: list[ProgressTick] = []
+
+    async def heartbeat(t: ProgressTick) -> None:
+        ticks.append(t)
+
+    stdout, rc, log = await runner.run_with_progress(
+        cmd=["acpx", "exec"], cwd=".",
+        heartbeat=heartbeat,
+        heartbeat_interval_s=0.02,
+        idle_timeout_s=5.0,
+        step_tag="STEP4_DEVELOP",
+    )
+    assert (stdout, rc) == ("ok", 0)
+    assert len(ticks) >= 2
+    assert log == ticks  # progress_log mirrors callback invocations
+    # Each tick carries a non-decreasing elapsed_s.
+    assert all(
+        ticks[i].elapsed_s <= ticks[i + 1].elapsed_s
+        for i in range(len(ticks) - 1)
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_with_progress_returns_stdout_rc_and_log(monkeypatch, runner):
+    proc = _SlowFakeProc(sleep_s=0.005, stdout=b"hello\n", rc=0)
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+
+    async def heartbeat(_t: ProgressTick) -> None:
+        return
+
+    stdout, rc, log = await runner.run_with_progress(
+        cmd=["acpx"], cwd=".",
+        heartbeat=heartbeat,
+        heartbeat_interval_s=1.0,  # never fires before proc exits
+        idle_timeout_s=5.0,
+        step_tag="STEP2_ITERATION",
+    )
+    assert (stdout, rc) == ("hello", 0)
+    assert log == []  # heartbeat never had time to fire
+
+
+@pytest.mark.asyncio
+async def test_run_with_progress_idle_timeout_kills_proc(monkeypatch):
+    """Phase 3: when last_advance never moves past start, raise + kill.
+
+    Idle detection uses ``proc.returncode is None`` to gate "advance".
+    Stub the ticker's predicate by returning a proc whose returncode is
+    always set to a non-None sentinel BEFORE the first tick — the ticker
+    sees no advance and trips the idle window.
+    """
+    import asyncio
+
+    class _AlreadyExitedProc:
+        def __init__(self) -> None:
+            # returncode pre-set to 0 means the ticker NEVER updates
+            # last_advance, so the idle window must trip on the next tick.
+            self.returncode: int | None = 0
+            self.killed = 0
+            self._done = asyncio.Event()
+
+        async def communicate(self):
+            # Wait until something kills us OR we're released by the test.
+            await self._done.wait()
+            return b"", b""
+
+        def kill(self) -> None:
+            self.killed += 1
+            self._done.set()
+
+    proc = _AlreadyExitedProc()
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+
+    async def heartbeat(_t: ProgressTick) -> None:
+        return
+
+    runner = LLMRunner(
+        executor=AcpxExecutor(db=None, webhook_notifier=None),
+        clock=lambda: FIXED_CLOCK,
+    )
+
+    with pytest.raises(IdleTimeoutError) as exc_info:
+        await runner.run_with_progress(
+            cmd=["acpx"], cwd=".",
+            heartbeat=heartbeat,
+            heartbeat_interval_s=0.01,
+            idle_timeout_s=0.02,
+            step_tag="STEP4_DEVELOP",
+        )
+    assert exc_info.value.step_tag == "STEP4_DEVELOP"
+    assert proc.killed >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_with_progress_heartbeat_callback_failure_does_not_abort(
+    monkeypatch, runner
+):
+    proc = _SlowFakeProc(sleep_s=0.05, stdout=b"done", rc=0)
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+
+    async def heartbeat(_t: ProgressTick) -> None:
+        raise ValueError("boom")
+
+    stdout, rc, log = await runner.run_with_progress(
+        cmd=["acpx"], cwd=".",
+        heartbeat=heartbeat,
+        heartbeat_interval_s=0.01,
+        idle_timeout_s=5.0,
+        step_tag="STEP3_CONTEXT",
+    )
+    # Subprocess still completes normally even though every heartbeat raised.
+    assert (stdout, rc) == ("done", 0)
+    # Ticks were still recorded (the callback failure is logged, not fatal).
+    assert len(log) >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_with_progress_uses_injected_monotonic(monkeypatch):
+    """Phase 3: tests pass a deterministic monotonic so elapsed_s is stable."""
+    proc = _SlowFakeProc(sleep_s=0.04, stdout=b"", rc=0)
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+
+    fake_now = [100.0]
+
+    def fake_monotonic() -> float:
+        # Advance by 7s on each call so the very first tick reports
+        # elapsed_s=7 (start=100, first tick reads 107).
+        fake_now[0] += 7.0
+        return fake_now[0]
+
+    runner = LLMRunner(
+        executor=AcpxExecutor(db=None, webhook_notifier=None),
+        clock=lambda: FIXED_CLOCK,
+        monotonic=fake_monotonic,
+    )
+
+    captured: list[ProgressTick] = []
+
+    async def heartbeat(t: ProgressTick) -> None:
+        captured.append(t)
+
+    await runner.run_with_progress(
+        cmd=["acpx"], cwd=".",
+        heartbeat=heartbeat,
+        heartbeat_interval_s=0.01,
+        idle_timeout_s=10000.0,
+        step_tag="STEP4_DEVELOP",
+    )
+    assert captured, "expected at least one tick before proc exited"
+    # First tick: start was monotonic call #1 (107), tick reads call #2 (114),
+    # elapsed_s = 114 - 107 = 7.
+    assert captured[0].elapsed_s == 7
+    assert captured[0].ts == FIXED_CLOCK

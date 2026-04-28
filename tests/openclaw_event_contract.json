@@ -40,6 +40,9 @@
     "dev_work.step_completed": {
       "required_payload": ["step", "round", "rc"]
     },
+    "dev_work.progress": {
+      "required_payload": ["step", "round", "elapsed_s", "last_heartbeat_at"]
+    },
     "dev_work.round_completed": {
       "required_payload": ["round"]
     },

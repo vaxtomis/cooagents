@@ -41,6 +41,10 @@ def _build_settings(workspace_root: Path | None = None):
         devwork=SimpleNamespace(
             max_rounds=5, step2_timeout=10, step3_timeout=10,
             step4_timeout=10, step5_timeout=10,
+            # Phase 3: keep heartbeats fast and idle window short.
+            progress_heartbeat_interval_s=0.01,
+            step_idle_timeout_s=0.5,
+            step4_acpx_wall_ceiling_s=3600,
             require_human_exit_confirm=False,
         ),
         security=SimpleNamespace(
@@ -542,3 +546,63 @@ async def test_post_push_state_rejects_pending_422(client):
         json={"push_state": "pending"},
     )
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: progress field projection on GET /dev-works/{id}
+# ---------------------------------------------------------------------------
+
+
+async def test_get_dev_work_progress_field_null_when_no_progress(client):
+    """A freshly-created DevWork has progress=None (no LLM call ran yet)."""
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+    # Cancel before the driver loop scribbles a tick to keep the row clean.
+    await client.post(f"/api/v1/dev-works/{dev_id}/cancel")
+    r = await client.get(f"/api/v1/dev-works/{dev_id}")
+    assert r.status_code == 200
+    assert r.json().get("progress") is None
+
+
+async def test_get_dev_work_progress_field_populated(client):
+    """Manually stamping current_progress_json projects into the response."""
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+    await client.post(f"/api/v1/dev-works/{dev_id}/cancel")
+    payload = {
+        "step": "STEP4_DEVELOP",
+        "round": 2,
+        "elapsed_s": 45,
+        "last_heartbeat_at": "2026-04-28T01:23:45+00:00",
+        "dispatch_id": "ad-test1234",
+    }
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_progress_json=? WHERE id=?",
+        (json.dumps(payload, ensure_ascii=False), dev_id),
+    )
+    r = await client.get(f"/api/v1/dev-works/{dev_id}")
+    assert r.status_code == 200
+    progress = r.json()["progress"]
+    assert progress is not None
+    assert progress["elapsed_s"] == 45
+    assert progress["step"] == "STEP4_DEVELOP"
+    assert progress["round"] == 2
+    assert progress["last_heartbeat_at"] == "2026-04-28T01:23:45+00:00"
+    assert progress["dispatch_id"] == "ad-test1234"
+
+
+async def test_get_dev_work_progress_field_tolerates_malformed_json(client):
+    """Garbage in current_progress_json yields progress=None, not 500."""
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+    await client.post(f"/api/v1/dev-works/{dev_id}/cancel")
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_progress_json=? WHERE id=?",
+        ("not json at all{", dev_id),
+    )
+    r = await client.get(f"/api/v1/dev-works/{dev_id}")
+    assert r.status_code == 200
+    assert r.json().get("progress") is None

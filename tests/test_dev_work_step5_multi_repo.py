@@ -51,6 +51,10 @@ def _build_config(max_rounds: int = 5, default_threshold: int = 80):
             max_rounds=max_rounds,
             step2_timeout=10, step3_timeout=10,
             step4_timeout=10, step5_timeout=10,
+            # Phase 3 knobs.
+            progress_heartbeat_interval_s=0.01,
+            step_idle_timeout_s=0.5,
+            step4_acpx_wall_ceiling_s=3600,
             require_human_exit_confirm=False,
         ),
     )
@@ -65,6 +69,23 @@ class ScriptedExecutor:
     def __init__(self, script):
         self.script = list(script)
         self.calls: list[dict] = []
+
+    # Phase 3: dev_work_sm._run_llm now reaches into LLMRunner._build_oneshot_cmd
+    # which delegates here. Mirror the production AcpxExecutor surface.
+    def _build_acpx_exec_cmd(
+        self, agent_type, worktree, timeout_sec,
+        task_file=None, prompt=None,
+    ):
+        cmd: list[str] = [
+            "acpx", "--cwd", worktree, "--format", "json",
+            "--approve-all", agent_type, "exec",
+            "--timeout", str(timeout_sec),
+        ]
+        if task_file is not None:
+            cmd += ["--file", task_file]
+        if prompt is not None:
+            cmd += ["--prompt", prompt]
+        return cmd
 
     async def run_once(self, agent_type, worktree, timeout_sec,
                        task_file=None, prompt=None, **_kwargs):

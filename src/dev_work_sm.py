@@ -30,6 +30,7 @@ from src.dev_prompt_composer import MountTableEntry
 from src.dev_work_steps import DevWorkStepHandlersMixin
 from src.exceptions import BadRequestError, NotFoundError
 from src.git_utils import DEVWORK_BRANCH_FMT, ensure_worktree
+from src.llm_runner import IdleTimeoutError, ProgressTick
 from src.models import (
     REPO_ROLE_PRIMARY_PRIORITY,
     AgentKind,
@@ -38,7 +39,7 @@ from src.models import (
     ProblemCategory,
 )
 from src.reviewer import ReviewOutcome
-from src.workspace_events import emit_and_deliver
+from src.workspace_events import emit_and_deliver, emit_workspace_event
 
 logger = logging.getLogger(__name__)
 
@@ -621,30 +622,101 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             host_id=host_id, workspace_id=dw["workspace_id"],
             correlation_id=dw["id"], correlation_kind="dev_work",
         )
+
+        # Phase 3: STEP4_DEVELOP swaps the per-step wall-clock cap for the
+        # acpx ceiling so the wrapper's idle_timeout becomes the active
+        # bound (PRD "Step4 取消 timeout=900s 硬卡"). Other steps keep their
+        # per-step `step{N}_timeout` value.
+        acpx_timeout = (
+            self.config.devwork.step4_acpx_wall_ceiling_s
+            if step_tag == "STEP4_DEVELOP" else timeout
+        )
+        cmd = self.llm_runner._build_oneshot_cmd(
+            agent, worktree, acpx_timeout,
+            task_file=task_file, prompt=None,
+        )
+
+        async def heartbeat(tick: ProgressTick) -> None:
+            payload = {
+                "step": step_tag,
+                "round": round_n,
+                "elapsed_s": tick.elapsed_s,
+                "last_heartbeat_at": tick.ts,
+                "dispatch_id": ad_id,
+            }
+            # Table-only event log (no webhook fan-out per Decision recap #1).
+            try:
+                await emit_workspace_event(
+                    self.db,
+                    event_name="dev_work.progress",
+                    workspace_id=dw["workspace_id"],
+                    correlation_id=dw["id"],
+                    payload=payload,
+                )
+            except Exception:
+                logger.warning(
+                    "emit_workspace_event(dev_work.progress) failed",
+                    exc_info=True,
+                )
+            # Overwrite dev_works.current_progress_json so GET /dev-works/{id}
+            # serves the latest snapshot without a JOIN.
+            try:
+                await self.db.execute(
+                    "UPDATE dev_works SET current_progress_json=?, "
+                    "updated_at=? WHERE id=?",
+                    (
+                        json.dumps(payload, ensure_ascii=False),
+                        self._now(),
+                        dw["id"],
+                    ),
+                )
+            except Exception:
+                logger.warning(
+                    "UPDATE dev_works.current_progress_json failed",
+                    exc_info=True,
+                )
+
         try:
-            stdout, rc = await self.llm_runner.run_oneshot(
-                agent, worktree, timeout, task_file=task_file,
-                host_id=host_id,
-                workspace_id=dw["workspace_id"],
-                correlation_id=dw["id"],
+            stdout, rc, _progress = await self.llm_runner.run_with_progress(
+                cmd=cmd,
+                cwd=worktree,
+                heartbeat=heartbeat,
+                heartbeat_interval_s=(
+                    self.config.devwork.progress_heartbeat_interval_s
+                ),
+                idle_timeout_s=self.config.devwork.step_idle_timeout_s,
+                step_tag=step_tag,
             )
             dispatch_state = "succeeded" if rc == 0 else "failed"
-        except asyncio.TimeoutError:
+        except IdleTimeoutError as exc:
             logger.warning(
-                "dev_work %s LLM call timed out at %s round=%s",
-                dw["id"], step_tag, round_n,
+                "dev_work %s idle_timeout at %s round=%s after %ss",
+                dw["id"], step_tag, round_n, exc.idle_window_s,
             )
             rc, stdout, dispatch_state = 124, "", "timeout"
         except Exception:
             logger.exception(
                 "dev_work %s LLM call failed at %s round=%s",
-                dw["id"],
-                step_tag,
-                round_n,
+                dw["id"], step_tag, round_n,
             )
             rc = 1
             stdout = ""
             dispatch_state = "failed"
+
+        # Clear the progress snapshot — call is over, the route should stop
+        # showing a "running" badge regardless of outcome (success / fail /
+        # idle_timeout).
+        try:
+            await self.db.execute(
+                "UPDATE dev_works SET current_progress_json=NULL, "
+                "updated_at=? WHERE id=?",
+                (self._now(), dw["id"]),
+            )
+        except Exception:
+            logger.warning(
+                "clear current_progress_json failed", exc_info=True,
+            )
+
         await self._close_dispatch(ad_id, state=dispatch_state, exit_code=rc)
         await emit_and_deliver(
             self.db,

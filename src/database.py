@@ -84,6 +84,17 @@ class Database:
         await conn.execute(
             "UPDATE repos SET fetch_status='unknown' WHERE fetch_status='stale'"
         )
+
+        # devwork-acpx phase 3: add ``current_progress_json`` to dev_works.
+        # Idempotent: PRAGMA gate before ALTER. Existing rows stay NULL — no
+        # backfill, the heartbeat writer populates the column lazily.
+        async with conn.execute("PRAGMA table_info(dev_works)") as cur:
+            dw_cols = {row[1] for row in await cur.fetchall()}
+        if "current_progress_json" not in dw_cols:
+            await conn.execute(
+                "ALTER TABLE dev_works ADD COLUMN current_progress_json TEXT"
+            )
+
         await conn.commit()
 
     async def close(self) -> None:

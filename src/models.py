@@ -358,6 +358,23 @@ class CreateDevWorkRequest(BaseModel):
         return self
 
 
+class ProgressSnapshot(BaseModel):
+    """Phase 3 (devwork-acpx-overhaul): one heartbeat tick projected onto
+    the GET /dev-works/{id} response.
+
+    ``None`` on :class:`DevWorkProgress.progress` means no LLM call is in
+    flight — the SM clears it on dispatch close. Decoded from the
+    ``dev_works.current_progress_json`` blob written by the heartbeat
+    callback in ``DevWorkStateMachine._run_llm``.
+    """
+
+    last_heartbeat_at: str
+    elapsed_s: int
+    step: str
+    round: int
+    dispatch_id: str | None = None
+
+
 class DevWorkProgress(BaseModel):
     id: str
     workspace_id: str
@@ -374,6 +391,10 @@ class DevWorkProgress(BaseModel):
     worktree_branch: str | None = None
     created_at: str
     updated_at: str
+    # Phase 3 (devwork-acpx-overhaul): latest heartbeat tick from the
+    # in-flight LLM call. ``None`` when no call is running (or this DevWork
+    # has never reached an LLM step).
+    progress: ProgressSnapshot | None = None
     # Phase 4 (repo-registry): persisted refs from dev_work_repos.
     repo_refs: list["DevRepoRefView"] = Field(default_factory=list)
     # Phase 5 (repo-registry): worker-facing handoff. Same row source as

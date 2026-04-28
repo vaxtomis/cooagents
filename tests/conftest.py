@@ -92,9 +92,52 @@ def make_test_llm_runner(executor):
 
     Used by every DevWorkStateMachine fixture site after Phase 2 made
     ``llm_runner=`` required.
+
+    Phase 3: tests script behavior via ``executor.run_once`` (the
+    ScriptedExecutor pattern). The production ``run_with_progress`` would
+    instead spawn a real acpx subprocess, which the test environment has
+    no binary for. The subclass below intercepts ``run_with_progress`` and
+    delegates to the scripted ``run_once`` so existing scripted tests keep
+    driving the state machine without changes. Heartbeat callbacks fire
+    zero times (matches the empty ``progress_log`` semantics — tests that
+    care about ticks use ``_FakeLLMRunner`` directly).
     """
     from src.llm_runner import LLMRunner
-    return LLMRunner(executor=executor)
+
+    class _TestLLMRunner(LLMRunner):
+        async def run_with_progress(
+            self, *, cmd, cwd, heartbeat, heartbeat_interval_s,
+            idle_timeout_s, step_tag,
+        ):
+            # Parse by sentinel rather than positional index so the test
+            # adapter survives flag additions to ``_build_acpx_exec_cmd``
+            # (e.g. --model, --json-strict). The agent token is the one
+            # immediately preceding "exec"; --timeout / --file / --prompt
+            # are scanned by name.
+            try:
+                exec_idx = cmd.index("exec")
+                agent = cmd[exec_idx - 1]
+            except (ValueError, IndexError):
+                agent = "claude"
+            timeout_sec = 0
+            if "--timeout" in cmd:
+                try:
+                    timeout_sec = int(cmd[cmd.index("--timeout") + 1])
+                except (ValueError, IndexError):
+                    timeout_sec = 0
+            task_file = None
+            prompt = None
+            if "--file" in cmd:
+                task_file = cmd[cmd.index("--file") + 1]
+            if "--prompt" in cmd:
+                prompt = cmd[cmd.index("--prompt") + 1]
+            stdout, rc = await self._executor.run_once(
+                agent, cwd, timeout_sec,
+                task_file=task_file, prompt=prompt,
+            )
+            return stdout, rc, []
+
+    return _TestLLMRunner(executor=executor)
 
 
 class _FakeLLMRunner:
@@ -107,6 +150,17 @@ class _FakeLLMRunner:
     def __init__(self) -> None:
         self.calls: list[dict] = []
         self.run_oneshot_return: tuple[str, int] = ("", 0)
+        # Phase 3: when set to a list of ProgressTick (or any object with
+        # ``ts`` and ``elapsed_s`` attributes — simple namedtuples work),
+        # ``run_with_progress`` will await ``heartbeat(tick)`` for each
+        # entry before returning ``run_oneshot_return``. Default empty so
+        # existing tests that exercise the SM see zero heartbeats.
+        self.progress_ticks: list = []
+        # Phase 3: opt-in — set to an IdleTimeoutError instance to make the
+        # next ``run_with_progress`` call raise after emitting all queued
+        # ticks. Cleared back to None automatically after the raise so a
+        # single fixture can drive a single failure case.
+        self.next_idle_timeout: Exception | None = None
 
     async def run_oneshot(
         self, agent, worktree, timeout_sec,
@@ -119,6 +173,43 @@ class _FakeLLMRunner:
             workspace_id=workspace_id, correlation_id=correlation_id,
         ))
         return self.run_oneshot_return
+
+    async def run_with_progress(
+        self, *, cmd, cwd, heartbeat, heartbeat_interval_s,
+        idle_timeout_s, step_tag,
+    ):
+        self.calls.append(dict(
+            kind="progress", cmd=list(cmd), cwd=cwd, step_tag=step_tag,
+            heartbeat_interval_s=heartbeat_interval_s,
+            idle_timeout_s=idle_timeout_s,
+        ))
+        for tick in self.progress_ticks:
+            await heartbeat(tick)
+        if self.next_idle_timeout is not None:
+            exc = self.next_idle_timeout
+            self.next_idle_timeout = None
+            raise exc
+        stdout, rc = self.run_oneshot_return
+        return stdout, rc, list(self.progress_ticks)
+
+    # Phase 3: tests that bypass dev_work_sm._run_llm and call
+    # ``llm_runner._build_oneshot_cmd`` directly need the same shape the
+    # real runner ships. The fake mirrors the real signature but returns
+    # a stable, easy-to-assert command list.
+    def _build_oneshot_cmd(
+        self, agent_type, worktree, timeout_sec,
+        task_file=None, prompt=None,
+    ):
+        cmd: list[str] = [
+            "acpx", "--cwd", worktree, "--format", "json",
+            "--approve-all", agent_type, "exec",
+            "--timeout", str(timeout_sec),
+        ]
+        if task_file is not None:
+            cmd += ["--file", task_file]
+        if prompt is not None:
+            cmd += ["--prompt", prompt]
+        return cmd
 
 
 @pytest.fixture

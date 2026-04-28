@@ -51,6 +51,11 @@ def _build_config(max_rounds=5, default_threshold=80):
             step3_timeout=10,
             step4_timeout=10,
             step5_timeout=10,
+            # Phase 3: keep test heartbeats fast and idle window short so a
+            # stuck wrapper test doesn't hang the suite.
+            progress_heartbeat_interval_s=0.01,
+            step_idle_timeout_s=0.5,
+            step4_acpx_wall_ceiling_s=3600,
             require_human_exit_confirm=False,
         ),
     )
@@ -66,6 +71,24 @@ class ScriptedExecutor:
     def __init__(self, script):
         self.script = list(script)
         self.calls: list[dict] = []
+
+    # Phase 3: dev_work_sm._run_llm now reaches into LLMRunner._build_oneshot_cmd
+    # which delegates here. Mirror the production AcpxExecutor surface with a
+    # stable, easy-to-assert command list so existing tests keep passing.
+    def _build_acpx_exec_cmd(
+        self, agent_type, worktree, timeout_sec,
+        task_file=None, prompt=None,
+    ):
+        cmd: list[str] = [
+            "acpx", "--cwd", worktree, "--format", "json",
+            "--approve-all", agent_type, "exec",
+            "--timeout", str(timeout_sec),
+        ]
+        if task_file is not None:
+            cmd += ["--file", task_file]
+        if prompt is not None:
+            cmd += ["--prompt", prompt]
+        return cmd
 
     async def run_once(self, agent_type, worktree, timeout_sec,
                        task_file=None, prompt=None, **_kwargs):
@@ -612,9 +635,14 @@ async def test_dev_work_sm_routes_through_llm_runner(env, fake_llm_runner):
     assert (rc, stdout) == (0, "ok")
     assert len(fake_llm_runner.calls) == 1
     call = fake_llm_runner.calls[0]
-    assert call["agent"] == "claude"
-    assert call["task_file"] == "/tmp/task.md"
-    assert call["correlation_id"] == "dw-x"
+    # Phase 3: SM now drives via run_with_progress; the call carries the
+    # rendered acpx command + cwd instead of the old (agent, task_file)
+    # tuple. Agent and task_file are reachable through the cmd vector.
+    assert call["kind"] == "progress"
+    assert call["step_tag"] == "STEP2"
+    assert call["cwd"] == str(env["ws_root"])
+    assert "claude" in call["cmd"]
+    assert "/tmp/task.md" in call["cmd"]
 
 
 def test_dev_work_sm_requires_llm_runner(env):
@@ -630,4 +658,244 @@ def test_dev_work_sm_requires_llm_runner(env):
             executor=None,
             config=_build_config(),
             registry=env["registry"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: progress heartbeats + idle_timeout + step4 wall ceiling
+# ---------------------------------------------------------------------------
+
+
+def _make_phase3_sm(env, fake_llm_runner):
+    """Build an SM wired to the per-test fake LLM runner.
+
+    All Phase 3 SM tests share this helper so each test only needs to set
+    fake_llm_runner.progress_ticks / .next_idle_timeout and call _run_llm.
+    """
+    from src.dev_work_sm import DevWorkStateMachine
+
+    class _NoopExecutor:
+        async def run_once(self, *a, **kw):  # pragma: no cover - fail if hit
+            raise AssertionError("executor.run_once must not be called")
+
+    sm = DevWorkStateMachine(
+        db=env["db"],
+        workspaces=env["wm"],
+        design_docs=env["ddm"],
+        iteration_notes=env["ini"],
+        executor=_NoopExecutor(),
+        config=_build_config(),
+        registry=env["registry"],
+        llm_runner=fake_llm_runner,
+    )
+    sm.workspaces_root = env["ws_root"].resolve()
+    return sm
+
+
+async def _insert_minimal_dev_work(db, *, dev_id: str, workspace_id: str,
+                                   design_doc_id: str) -> dict:
+    """INSERT a row for tests that exercise _run_llm in isolation."""
+    now = "2026-04-28T00:00:00+00:00"
+    await db.execute(
+        """INSERT INTO dev_works
+           (id, workspace_id, design_doc_id, prompt,
+            worktree_path, worktree_branch, current_step,
+            iteration_rounds, agent, agent_host_id,
+            created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (dev_id, workspace_id, design_doc_id, "test",
+         None, None, "INIT", 0, "claude", "local", now, now),
+    )
+    return await db.fetchone("SELECT * FROM dev_works WHERE id=?", (dev_id,))
+
+
+async def test_run_llm_logs_progress_event_per_tick(env, fake_llm_runner):
+    """Each tick emits exactly one ``dev_work.progress`` row in the table."""
+    from collections import namedtuple
+
+    Tick = namedtuple("Tick", ["ts", "elapsed_s"])
+    fake_llm_runner.progress_ticks = [
+        Tick(ts="2026-04-28T00:00:15+00:00", elapsed_s=15),
+        Tick(ts="2026-04-28T00:00:30+00:00", elapsed_s=30),
+    ]
+    fake_llm_runner.run_oneshot_return = ("ok", 0)
+
+    sm = _make_phase3_sm(env, fake_llm_runner)
+    dw = await _insert_minimal_dev_work(
+        env["db"], dev_id="dev-progress1",
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+    )
+
+    rc, _ = await sm._run_llm(
+        dw, agent="claude", worktree=str(env["ws_root"]),
+        timeout=10, task_file="/tmp/x.md",
+        step_tag="STEP4_DEVELOP", round_n=1,
+    )
+    assert rc == 0
+    rows = await env["db"].fetchall(
+        "SELECT * FROM workspace_events WHERE event_name=? "
+        "AND correlation_id=?",
+        ("dev_work.progress", dw["id"]),
+    )
+    assert len(rows) == 2
+    payloads = [json.loads(r["payload_json"]) for r in rows]
+    assert payloads[0]["elapsed_s"] == 15
+    assert payloads[1]["elapsed_s"] == 30
+    assert payloads[0]["step"] == "STEP4_DEVELOP"
+
+
+async def test_run_llm_writes_progress_json_per_tick(env, fake_llm_runner):
+    """Every tick overwrites dev_works.current_progress_json."""
+    from collections import namedtuple
+
+    Tick = namedtuple("Tick", ["ts", "elapsed_s"])
+
+    captured: list[str] = []
+
+    async def heartbeat_spy_factory(real_heartbeat, dw_id):
+        async def spy(tick):
+            await real_heartbeat(tick)
+            row = await env["db"].fetchone(
+                "SELECT current_progress_json FROM dev_works WHERE id=?",
+                (dw_id,),
+            )
+            captured.append(row["current_progress_json"])
+        return spy
+
+    fake_llm_runner.progress_ticks = [
+        Tick(ts="2026-04-28T00:00:15+00:00", elapsed_s=15),
+        Tick(ts="2026-04-28T00:00:30+00:00", elapsed_s=30),
+    ]
+    fake_llm_runner.run_oneshot_return = ("ok", 0)
+
+    sm = _make_phase3_sm(env, fake_llm_runner)
+    dw = await _insert_minimal_dev_work(
+        env["db"], dev_id="dev-progress2",
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+    )
+
+    # Wrap fake_llm_runner.run_with_progress to spy on current_progress_json
+    # immediately after each heartbeat fires.
+    orig_run = fake_llm_runner.run_with_progress
+
+    async def spy_run(*, cmd, cwd, heartbeat, heartbeat_interval_s,
+                     idle_timeout_s, step_tag):
+        spied_hb = await heartbeat_spy_factory(heartbeat, dw["id"])
+        return await orig_run(
+            cmd=cmd, cwd=cwd, heartbeat=spied_hb,
+            heartbeat_interval_s=heartbeat_interval_s,
+            idle_timeout_s=idle_timeout_s, step_tag=step_tag,
+        )
+
+    fake_llm_runner.run_with_progress = spy_run
+
+    await sm._run_llm(
+        dw, agent="claude", worktree=str(env["ws_root"]),
+        timeout=10, task_file="/tmp/x.md",
+        step_tag="STEP2_ITERATION", round_n=1,
+    )
+    assert len(captured) == 2
+    snap1 = json.loads(captured[0])
+    snap2 = json.loads(captured[1])
+    assert snap1["elapsed_s"] == 15
+    assert snap2["elapsed_s"] == 30
+    assert snap2["last_heartbeat_at"] == "2026-04-28T00:00:30+00:00"
+
+
+async def test_run_llm_clears_progress_json_after_dispatch_close(
+    env, fake_llm_runner
+):
+    """current_progress_json must be NULL after the call returns (any outcome)."""
+    from collections import namedtuple
+
+    Tick = namedtuple("Tick", ["ts", "elapsed_s"])
+    fake_llm_runner.progress_ticks = [
+        Tick(ts="2026-04-28T00:00:15+00:00", elapsed_s=15),
+    ]
+    fake_llm_runner.run_oneshot_return = ("ok", 0)
+
+    sm = _make_phase3_sm(env, fake_llm_runner)
+    dw = await _insert_minimal_dev_work(
+        env["db"], dev_id="dev-progress3",
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+    )
+    await sm._run_llm(
+        dw, agent="claude", worktree=str(env["ws_root"]),
+        timeout=10, task_file="/tmp/x.md",
+        step_tag="STEP3_CONTEXT", round_n=1,
+    )
+    row = await env["db"].fetchone(
+        "SELECT current_progress_json FROM dev_works WHERE id=?", (dw["id"],),
+    )
+    assert row["current_progress_json"] is None
+
+
+async def test_run_llm_idle_timeout_marks_dispatch_timeout(
+    env, fake_llm_runner
+):
+    """IdleTimeoutError → dispatch_state='timeout', step_completed rc=124."""
+    from src.llm_runner import IdleTimeoutError
+
+    fake_llm_runner.next_idle_timeout = IdleTimeoutError(
+        step_tag="STEP4_DEVELOP", idle_window_s=300,
+    )
+
+    sm = _make_phase3_sm(env, fake_llm_runner)
+    dw = await _insert_minimal_dev_work(
+        env["db"], dev_id="dev-progress4",
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+    )
+    rc, _ = await sm._run_llm(
+        dw, agent="claude", worktree=str(env["ws_root"]),
+        timeout=10, task_file="/tmp/x.md",
+        step_tag="STEP4_DEVELOP", round_n=1,
+    )
+    assert rc == 124
+    rows = await env["db"].fetchall(
+        "SELECT * FROM workspace_events WHERE event_name=? "
+        "AND correlation_id=?",
+        ("dev_work.step_completed", dw["id"]),
+    )
+    assert len(rows) == 1
+    assert json.loads(rows[0]["payload_json"])["rc"] == 124
+
+
+async def test_step4_uses_wall_ceiling_not_step4_timeout(env, fake_llm_runner):
+    """Step4 carries --timeout 3600 (ceiling), not the per-step 10."""
+    fake_llm_runner.run_oneshot_return = ("", 0)
+    sm = _make_phase3_sm(env, fake_llm_runner)
+    dw = await _insert_minimal_dev_work(
+        env["db"], dev_id="dev-progress5",
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+    )
+    await sm._run_llm(
+        dw, agent="claude", worktree=str(env["ws_root"]),
+        timeout=10, task_file="/tmp/x.md",
+        step_tag="STEP4_DEVELOP", round_n=1,
+    )
+    cmd = fake_llm_runner.calls[0]["cmd"]
+    assert "--timeout" in cmd
+    timeout_value = cmd[cmd.index("--timeout") + 1]
+    assert timeout_value == "3600"
+
+
+async def test_step2_step3_step5_keep_per_step_timeout(env, fake_llm_runner):
+    """Non-Step4 step_tags keep their per-step timeout (10 in tests)."""
+    fake_llm_runner.run_oneshot_return = ("", 0)
+    sm = _make_phase3_sm(env, fake_llm_runner)
+    dw = await _insert_minimal_dev_work(
+        env["db"], dev_id="dev-progress6",
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+    )
+    for step_tag in ("STEP2_ITERATION", "STEP3_CONTEXT", "STEP5_REVIEW"):
+        fake_llm_runner.calls.clear()
+        await sm._run_llm(
+            dw, agent="claude", worktree=str(env["ws_root"]),
+            timeout=10, task_file="/tmp/x.md",
+            step_tag=step_tag, round_n=1,
+        )
+        cmd = fake_llm_runner.calls[0]["cmd"]
+        timeout_value = cmd[cmd.index("--timeout") + 1]
+        assert timeout_value == "10", (
+            f"{step_tag} should retain per-step timeout, got {timeout_value}"
         )

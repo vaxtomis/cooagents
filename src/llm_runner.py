@@ -30,9 +30,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,32 @@ class Session:
     created_at: str
 
 
+class IdleTimeoutError(RuntimeError):
+    """Raised when no heartbeat advances within ``idle_window_s``.
+
+    Phase 3: in oneshot mode the only "advance" signal is "subprocess
+    still running", so this fires only when acpx itself wedges (zombie /
+    parent-loss). Phase 4 plugs ``acpx status --session`` into the
+    heartbeat callback and the predicate becomes LLM-aware.
+    """
+
+    def __init__(self, *, step_tag: str, idle_window_s: int) -> None:
+        super().__init__(f"idle_timeout: {step_tag} ({idle_window_s}s)")
+        self.step_tag = step_tag
+        self.idle_window_s = idle_window_s
+
+
+@dataclass(frozen=True)
+class ProgressTick:
+    """One heartbeat tick captured by :meth:`LLMRunner.run_with_progress`."""
+
+    ts: str          # ISO8601 wall-clock when the tick fired
+    elapsed_s: int   # seconds since the subprocess was spawned
+
+
+HeartbeatCallback = Callable[[ProgressTick], Awaitable[None]]
+
+
 class SessionLifecycleError(RuntimeError):
     """Raised when sessions ensure / close / prune / list returns rc!=0.
 
@@ -115,10 +142,14 @@ class LLMRunner:
         config: Any = None,
         *,
         clock: Callable[[], str] | None = None,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         self._executor = executor
         self._config = config
         self._clock = clock or _default_clock
+        # Phase 3: injectable monotonic clock so heartbeat tests can advance
+        # wall-time deterministically without sleeping.
+        self._monotonic = monotonic or time.monotonic
         # asyncio.create_task only weakly refs tasks; without a strong ref the
         # GC can drop a deferred prune mid-run. Keep them alive here.
         self._pending_tasks: set[asyncio.Task] = set()
@@ -274,6 +305,95 @@ class LLMRunner:
             agent, worktree, timeout_sec,
             task_file=task_file, prompt=prompt,
             host_id=host_id, workspace_id=workspace_id, correlation_id=correlation_id,
+        )
+
+    # ---- one-shot with progress (Phase 3) -------------------------------
+
+    async def run_with_progress(
+        self,
+        *,
+        cmd: list[str],
+        cwd: str,
+        heartbeat: HeartbeatCallback,
+        heartbeat_interval_s: float,
+        idle_timeout_s: float,
+        step_tag: str,
+    ) -> tuple[str, int, list[ProgressTick]]:
+        """Spawn ``cmd`` and call ``heartbeat`` on every interval tick.
+
+        Returns ``(stdout, returncode, progress_log)``.
+
+        Raises :class:`IdleTimeoutError` when no heartbeat advances within
+        ``idle_timeout_s``: the subprocess is killed and the exception
+        propagates so the caller can branch on it (Phase 3 SM maps it to
+        ``dispatch_state="timeout"``).
+
+        ``heartbeat`` is awaited inside its own try/except so a stuck
+        callback (slow DB UPDATE, blocked event log) cannot kill the LLM
+        call — the tick is logged at exception level and the loop carries
+        on. In Phase 3 oneshot mode the "advance" predicate is
+        process-alive; Phase 4 will swap it for a status_session-derived
+        signal inside the SM-level closure.
+        """
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        start = self._monotonic()
+        progress_log: list[ProgressTick] = []
+
+        async def ticker() -> None:
+            last_advance = start
+            while True:
+                await asyncio.sleep(heartbeat_interval_s)
+                now = self._monotonic()
+                tick = ProgressTick(
+                    ts=self._clock(), elapsed_s=int(now - start),
+                )
+                progress_log.append(tick)
+                try:
+                    await heartbeat(tick)
+                except Exception:
+                    logger.exception(
+                        "llm_runner: heartbeat callback raised at step=%r",
+                        step_tag,
+                    )
+                # Phase 3 oneshot: process-alive == advance. Phase 4 swaps
+                # this for a status_session-derived predicate.
+                if proc.returncode is None:
+                    last_advance = now
+                if (now - last_advance) >= idle_timeout_s:
+                    logger.warning(
+                        "llm_runner: idle_timeout step=%r idle_window_s=%s",
+                        step_tag, idle_timeout_s,
+                    )
+                    proc.kill()
+                    raise IdleTimeoutError(
+                        step_tag=step_tag,
+                        idle_window_s=int(idle_timeout_s),
+                    )
+
+        ticker_task = asyncio.create_task(ticker())
+        idle_exc: IdleTimeoutError | None = None
+        try:
+            stdout, _stderr = await proc.communicate()
+        finally:
+            ticker_task.cancel()
+            try:
+                await ticker_task
+            except asyncio.CancelledError:
+                pass
+            except IdleTimeoutError as exc:
+                idle_exc = exc
+        if idle_exc is not None:
+            raise idle_exc
+        return (
+            stdout.decode("utf-8", errors="replace").strip(),
+            proc.returncode if proc.returncode is not None else -1,
+            progress_log,
         )
 
     # ---- session lifecycle ----------------------------------------------

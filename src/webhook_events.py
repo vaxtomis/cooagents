@@ -37,6 +37,11 @@ class WebhookEvent(StrEnum):
     DEV_WORK_STARTED = "dev_work.started"
     DEV_WORK_STEP_STARTED = "dev_work.step_started"
     DEV_WORK_STEP_COMPLETED = "dev_work.step_completed"
+    # Phase 3 (devwork-acpx-overhaul): naming-convention parity only.
+    # Heartbeat events are written via emit_workspace_event (table-only) and
+    # are NOT delivered through WebhookNotifier.deliver in Phase 3. Kept on
+    # the enum so consumers can opt in once the delivery flag flips.
+    DEV_WORK_PROGRESS = "dev_work.progress"
     DEV_WORK_ROUND_COMPLETED = "dev_work.round_completed"
     DEV_WORK_SCORE_PASSED = "dev_work.score_passed"
     DEV_WORK_ESCALATED = "dev_work.escalated"

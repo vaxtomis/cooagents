@@ -120,6 +120,22 @@ class DevWorkConfig(BaseModel):
     step3_timeout: int = 600
     step4_timeout: int = 900
     step5_timeout: int = 600
+    # Phase 3 (devwork-acpx-overhaul): how often the heartbeat coroutine ticks
+    # while an LLM call is in flight. 15s gives <=30s heartbeat cadence even
+    # when the first tick is delayed by a slow process startup.
+    progress_heartbeat_interval_s: int = 15
+    # Phase 3: idle window. When no heartbeat advances for this many seconds
+    # the runner kills the subprocess and the SM escalates with
+    # reason="idle_timeout: <step_tag>". In oneshot mode this rarely fires
+    # because process-alive == advance; Phase 4 makes it real by plugging
+    # acpx status into the heartbeat callback.
+    step_idle_timeout_s: int = 300
+    # Phase 3: Step4 only — the wall-clock --timeout argument passed to acpx
+    # for STEP4_DEVELOP. PRD "Step4 取消 timeout=900s 硬卡": idle_timeout is
+    # the active bound; this 3600s acts as a backstop so acpx itself does
+    # not kill the process before our wrapper does. step4_timeout (900) is
+    # kept for back-compat and slated for Phase 7 cleanup.
+    step4_acpx_wall_ceiling_s: int = 3600
     # v1 default: Step5 auto-approves when score>=threshold. Phase 5 will
     # flip this to gate on a human confirmation event (PRD L145).
     require_human_exit_confirm: bool = False

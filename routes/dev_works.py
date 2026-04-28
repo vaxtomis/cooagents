@@ -27,6 +27,8 @@ need ``url``.
 """
 from __future__ import annotations
 
+import json
+import logging
 import sqlite3
 
 from fastapi import APIRouter, Request, Response
@@ -39,10 +41,13 @@ from src.models import (
     DevRepoRefView,
     DevWorkProgress,
     DevWorkStep,
+    ProgressSnapshot,
     UpdateRepoPushStateRequest,
     WorkerRepoHandoff,
 )
 from src.request_utils import client_ip
+
+logger = logging.getLogger(__name__)
 
 limiter = Limiter(key_func=client_ip)
 router = APIRouter(tags=["dev-works"])
@@ -109,6 +114,30 @@ async def _load_worker_repos_batch(
     }
 
 
+def _decode_progress(blob: str | None) -> ProgressSnapshot | None:
+    """Decode the heartbeat blob written by ``DevWorkStateMachine._run_llm``.
+
+    Tolerant by design: malformed JSON or shape drift (e.g. an older
+    heartbeat schema) returns ``None`` rather than 500. The next tick
+    overwrites the column with a current-shape payload.
+    """
+    if not blob:
+        return None
+    try:
+        data = json.loads(blob)
+    except (ValueError, TypeError):
+        logger.debug("dev_works.current_progress_json: malformed JSON")
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return ProgressSnapshot(**data)
+    except (ValueError, TypeError):
+        # Stale shape — show nothing rather than 500.
+        logger.debug("dev_works.current_progress_json: stale shape")
+        return None
+
+
 def _row_to_progress(
     row: dict,
     repo_refs: list[DevRepoRefView] | None = None,
@@ -130,6 +159,7 @@ def _row_to_progress(
         worktree_branch=row.get("worktree_branch"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        progress=_decode_progress(row.get("current_progress_json")),
         repo_refs=repo_refs or [],
         repos=repos or [],
     )
