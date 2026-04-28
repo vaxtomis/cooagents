@@ -4,6 +4,11 @@ Workspace-era state machines drive agents synchronously via ``run_once``. No
 host pool, no job lifecycle, no tracing. SSH dispatch / concurrency control,
 if reintroduced, will be rebuilt against the workspace data model — not
 resurrected from the legacy Run-centric stack.
+
+Phase 2 note: :class:`LLMRunner` (``src/llm_runner.py``) is the new public
+surface for cooagents → acpx. ``AcpxExecutor`` survives as the
+local-execution implementation behind ``LLMRunner.run_oneshot`` and is
+slated for removal in Phase 7 cleanup.
 """
 from __future__ import annotations
 

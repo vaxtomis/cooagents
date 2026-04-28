@@ -258,6 +258,7 @@ async def env(tmp_path):
 
 
 def _make_sm(env, executor, cfg=None):
+    from tests.conftest import make_test_llm_runner
     sm = DevWorkStateMachine(
         db=env["db"],
         workspaces=env["wm"],
@@ -266,6 +267,7 @@ def _make_sm(env, executor, cfg=None):
         executor=executor,
         config=cfg or _build_config(),
         registry=env["registry"],
+        llm_runner=make_test_llm_runner(executor),
     )
     # Override workspaces_root so _s0_init's bare-clone lookup matches the
     # registry row (the manager normally derives this from settings).
@@ -348,13 +350,14 @@ async def test_req_gap_routes_to_step2(env):
     assert final["iteration_rounds"] == 1
 
 
-async def test_impl_gap_routes_to_step4(env):
+async def test_impl_gap_routes_to_step2(env):
     script = [
         step2_append_h2, step3_write_ctx, step4_write_findings,
         _step5_writer({"score": 50, "issues": [],
                         "problem_category": "impl_gap"}),
-        # impl_gap -> only Step4 + Step5 rerun (no Step2/Step3)
-        step4_write_findings,
+        # impl_gap -> full iteration rerun (Step2 + Step3 + Step4 + Step5):
+        # impl failures are part of the iteration design loop.
+        step2_append_h2, step3_write_ctx, step4_write_findings,
         _step5_writer({"score": 90, "issues": [], "problem_category": None}),
     ]
     executor = ScriptedExecutor(script)
@@ -565,3 +568,66 @@ async def test_workspace_md_shows_devwork(env):
     await sm.run_to_completion(dw["id"])
     md = (env["ws_root"] / "t" / "workspace.md").read_text(encoding="utf-8")
     assert f"devworks/DEV-{dw['id']}" in md
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: LLMRunner wiring assertions
+# ---------------------------------------------------------------------------
+
+async def test_dev_work_sm_routes_through_llm_runner(env, fake_llm_runner):
+    """_run_llm must call llm_runner.run_oneshot, not executor.run_once."""
+    from src.dev_work_sm import DevWorkStateMachine
+
+    class _NoopExecutor:
+        async def run_once(self, *a, **kw):  # pragma: no cover - fail if hit
+            raise AssertionError("executor.run_once must not be called")
+
+    fake_llm_runner.run_oneshot_return = ("ok", 0)
+    sm = DevWorkStateMachine(
+        db=env["db"],
+        workspaces=env["wm"],
+        design_docs=env["ddm"],
+        iteration_notes=env["ini"],
+        executor=_NoopExecutor(),
+        config=_build_config(),
+        registry=env["registry"],
+        llm_runner=fake_llm_runner,
+    )
+    sm.workspaces_root = env["ws_root"].resolve()
+
+    dw_row = {
+        "id": "dw-x",
+        "workspace_id": env["ws"]["id"],
+        "agent_host_id": "local",
+    }
+    rc, stdout = await sm._run_llm(
+        dw_row,
+        agent="claude",
+        worktree=str(env["ws_root"]),
+        timeout=10,
+        task_file="/tmp/task.md",
+        step_tag="STEP2",
+        round_n=1,
+    )
+    assert (rc, stdout) == (0, "ok")
+    assert len(fake_llm_runner.calls) == 1
+    call = fake_llm_runner.calls[0]
+    assert call["agent"] == "claude"
+    assert call["task_file"] == "/tmp/task.md"
+    assert call["correlation_id"] == "dw-x"
+
+
+def test_dev_work_sm_requires_llm_runner(env):
+    """Phase 2: llm_runner is a required keyword-only argument."""
+    from src.dev_work_sm import DevWorkStateMachine
+
+    with pytest.raises(TypeError):
+        DevWorkStateMachine(
+            db=env["db"],
+            workspaces=env["wm"],
+            design_docs=env["ddm"],
+            iteration_notes=env["ini"],
+            executor=None,
+            config=_build_config(),
+            registry=env["registry"],
+        )

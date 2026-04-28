@@ -11,7 +11,7 @@
 
 ## 目录
 
-- [为什么是 cooagents](#为什么是-cooagents)
+- [功能概览](#功能概览)
 - [快速开始](#快速开始)
 - [架构总览](#架构总览)
 - [核心数据流](#核心数据流)
@@ -25,14 +25,7 @@
 
 ---
 
-## 为什么是 cooagents
-
-传统的 Coding Agent 工具栈把 LLM 调用做成"一次性 prompt"，问题往往出在它们没有处理：
-
-1. **设计与开发的可恢复性** —— LLM 中途失败、人工介入打断、重启之后能不能从断点接着跑？
-2. **多仓协同** —— 一个 DevWork 经常要同时改前端 + 后端 + infra，工作树/分支/推送状态如何统一？
-3. **远端 Agent 主机** —— 把昂贵的 Codex / Claude 留在专门的 GPU/网络机上，控制面留在本地，怎么走 SSH 又不丢工件？
-4. **审计与回放** —— 每一次 LLM 调用、每一次评审、每一次人工 gate，都要留痕。
+## 功能概览
 
 cooagents 围绕这四件事构建：
 
@@ -183,10 +176,8 @@ sequenceDiagram
 
   alt score >= threshold
     SM->>API: COMPLETED
-  else req_gap
+  else req_gap / impl_gap
     SM->>SM: back to STEP2_ITERATION
-  else impl_gap
-    SM->>SM: back to STEP4_DEVELOP
   else design_hollow / 超过 max_rounds
     SM->>API: ESCALATED
   end
@@ -250,7 +241,7 @@ stateDiagram-v2
   STEP4_DEVELOP --> STEP5_REVIEW
   STEP5_REVIEW --> COMPLETED: score >= threshold
   STEP5_REVIEW --> STEP2_ITERATION: req_gap
-  STEP5_REVIEW --> STEP4_DEVELOP: impl_gap
+  STEP5_REVIEW --> STEP2_ITERATION: impl_gap
   STEP5_REVIEW --> ESCALATED: design_hollow
   STEP5_REVIEW --> ESCALATED: rounds > max
   COMPLETED --> [*]
@@ -378,7 +369,7 @@ cd web && npm run dev
 
 - 把 FastAPI 绑定到 `127.0.0.1:8321`，由 nginx / Caddy 终止 HTTPS。
 - 把 `.coop/` 与 `WORKSPACES_ROOT` 放到持久化卷。
-- 设置 `acpx.permission_mode: approve-all`（默认）或更严格的 `approve-reads`。
+- 设置 `acpx.permission_mode: approve-all`（默认）。
 
 ### 远端 Agent Host (Phase 8b)
 
@@ -447,7 +438,6 @@ cd web && npm run build
 - [docs/CODEMAPS/frontend.md](docs/CODEMAPS/frontend.md) — 页面树 / 组件 / hooks
 - [docs/CODEMAPS/data.md](docs/CODEMAPS/data.md) — Schema 详解 / 不变量
 - [docs/CODEMAPS/dependencies.md](docs/CODEMAPS/dependencies.md) — Python / Node 依赖、外部服务
-- [DESIGN.md](DESIGN.md) — Web 控制台的视觉系统（Anthropic Claude 风）
 - [docs/design/](docs/design/) — DES / ADR 模板
 - [docs/dev/](docs/dev/) — PLAN / TEST-REPORT 模板
 

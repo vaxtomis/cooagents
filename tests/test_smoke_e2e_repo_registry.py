@@ -116,9 +116,11 @@ async def test_smoke_multi_repo_happy_path(tmp_path):
             step4_write_findings,
             _step5_writer({"score": 90, "issues": [], "problem_category": None}),
         ])
+        from tests.conftest import make_test_llm_runner
         sm = DevWorkStateMachine(
             db=db, workspaces=wm, design_docs=ddm, iteration_notes=ini,
             executor=executor, config=_build_dev_config(), registry=registry,
+            llm_runner=make_test_llm_runner(executor),
         )
         sm.workspaces_root = ws_root.resolve()
         dw = await sm.create(

@@ -10,6 +10,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from src.acpx_executor import AcpxExecutor
+from src.llm_runner import LLMRunner
 from src.auth import AuthError, AuthSettings, get_current_user
 from src.request_utils import client_ip
 from src.config import load_settings
@@ -188,6 +189,7 @@ async def lifespan(app: FastAPI):
         project_root=project_root,
         ssh_dispatcher=ssh_dispatcher,
     )
+    llm_runner = LLMRunner(executor=executor, config=settings)
     design_docs = DesignDocManager(db, registry=registry)
     design_work_sm = DesignWorkStateMachine(
         db=db,
@@ -212,6 +214,7 @@ async def lifespan(app: FastAPI):
         webhooks=webhooks,
         agent_host_repo=agent_host_repo,
         agent_dispatch_repo=agent_dispatch_repo,
+        llm_runner=llm_runner,
     )
 
     app.state.db = db

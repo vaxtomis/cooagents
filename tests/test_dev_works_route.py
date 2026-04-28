@@ -156,10 +156,12 @@ async def client(tmp_path):
     iteration_notes = DevIterationNoteManager(db)
     executor = ScriptedExecutor()
     settings = _build_settings(workspace_root=ws_root)
+    from tests.conftest import make_test_llm_runner
     sm = DevWorkStateMachine(
         db=db, workspaces=workspaces, design_docs=design_docs,
         iteration_notes=iteration_notes, executor=executor,
         config=settings, registry=registry,
+        llm_runner=make_test_llm_runner(executor),
     )
     # Override workspaces_root so _s0_init's bare-clone lookup matches the
     # registry row written below.

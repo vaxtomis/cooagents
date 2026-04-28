@@ -5,7 +5,9 @@ Steps (PRD L184-189):
          -> STEP4_DEVELOP -> STEP5_REVIEW
     STEP5 score >= threshold -> COMPLETED
     STEP5 problem_category=req_gap   -> back to STEP2_ITERATION
-    STEP5 problem_category=impl_gap  -> back to STEP4_DEVELOP
+    STEP5 problem_category=impl_gap  -> back to STEP2_ITERATION
+        (impl gaps are part of the iteration: re-plan with the failure
+        signal as input rather than blindly re-coding the same design)
     STEP5 problem_category=design_hollow -> ESCALATED
     iteration_rounds > max_rounds -> ESCALATED
 
@@ -87,17 +89,23 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         webhooks: Any = None,  # WebhookNotifier (optional; None disables deliver side-channel)
         agent_host_repo: Any = None,      # Phase 8a: AgentHostRepo
         agent_dispatch_repo: Any = None,  # Phase 8a: AgentDispatchRepo
+        *,
+        llm_runner: Any,                  # Phase 2: LLMRunner — required.
     ) -> None:
         self.db = db
         self.workspaces = workspaces
         self.design_docs = design_docs
         self.iteration_notes = iteration_notes
+        # Phase 2: executor stays on the ctor signature (DesignWork shares the
+        # lifespan factory) but DevWork no longer reads it; _run_llm routes
+        # through llm_runner. Slated for removal in Phase 7 cleanup.
         self.executor = executor
         self.config = config
         self.registry = registry
         self.webhooks = webhooks
         self.agent_host_repo = agent_host_repo
         self.agent_dispatch_repo = agent_dispatch_repo
+        self.llm_runner = llm_runner
         # Phase 2 manager owns workspaces_root; mirror it for quick path math
         # (absolute paths embedded in LLM prompts).
         self.workspaces_root = Path(workspaces.workspaces_root).resolve()
@@ -614,7 +622,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             correlation_id=dw["id"], correlation_kind="dev_work",
         )
         try:
-            stdout, rc = await self.executor.run_once(
+            stdout, rc = await self.llm_runner.run_oneshot(
                 agent, worktree, timeout, task_file=task_file,
                 host_id=host_id,
                 workspace_id=dw["workspace_id"],

@@ -78,13 +78,16 @@ async def test_schema_default_agent_host_id_is_local(env):
 
 
 async def test_pick_host_returns_remote_when_repo_routes_there(env):
+    from tests.conftest import make_test_llm_runner
+    executor = CapturingExecutor(db=None, webhook_notifier=None)
     sm = DevWorkStateMachine(
         db=env["db"], workspaces=env["wm"],
         design_docs=None, iteration_notes=None,
-        executor=CapturingExecutor(db=None, webhook_notifier=None),
+        executor=executor,
         config=type("C", (), {"devwork": type("D", (), {})()})(),
         registry=env["registry"],
         agent_host_repo=env["host_repo"],
+        llm_runner=make_test_llm_runner(executor),
     )
     await env["host_repo"].upsert(id="ah-fast", host="dev@h", agent_type="codex")
     await env["host_repo"].update_health("ah-fast", status="healthy")
@@ -93,13 +96,16 @@ async def test_pick_host_returns_remote_when_repo_routes_there(env):
 
 
 async def test_open_close_dispatch_creates_lifecycle_row(env):
+    from tests.conftest import make_test_llm_runner
+    executor = CapturingExecutor(db=None, webhook_notifier=None)
     sm = DevWorkStateMachine(
         db=env["db"], workspaces=env["wm"],
         design_docs=None, iteration_notes=None,
-        executor=CapturingExecutor(db=None, webhook_notifier=None),
+        executor=executor,
         config=type("C", (), {"devwork": type("D", (), {})()})(),
         registry=env["registry"],
         agent_dispatch_repo=env["dispatch_repo"],
+        llm_runner=make_test_llm_runner(executor),
     )
     ad_id = await sm._open_dispatch(
         host_id="local", workspace_id=env["ws"]["id"],
@@ -115,12 +121,15 @@ async def test_open_close_dispatch_creates_lifecycle_row(env):
 
 
 async def test_open_dispatch_returns_none_without_repo(env):
+    from tests.conftest import make_test_llm_runner
+    executor = CapturingExecutor(db=None, webhook_notifier=None)
     sm = DevWorkStateMachine(
         db=env["db"], workspaces=env["wm"],
         design_docs=None, iteration_notes=None,
-        executor=CapturingExecutor(db=None, webhook_notifier=None),
+        executor=executor,
         config=type("C", (), {"devwork": type("D", (), {})()})(),
         registry=env["registry"],
+        llm_runner=make_test_llm_runner(executor),
     )
     ad_id = await sm._open_dispatch(
         host_id="local", workspace_id=env["ws"]["id"],

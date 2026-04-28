@@ -236,10 +236,12 @@ async def env(tmp_path):
 
 
 def _make_sm(env, executor, cfg=None):
+    from tests.conftest import make_test_llm_runner
     sm = DevWorkStateMachine(
         db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
         iteration_notes=env["ini"], executor=executor,
         config=cfg or _build_config(), registry=env["registry"],
+        llm_runner=make_test_llm_runner(executor),
     )
     sm.workspaces_root = env["ws_root"].resolve()
     return sm
@@ -272,7 +274,7 @@ def _two_mount_refs(env) -> list:
 # ---------------------------------------------------------------------------
 
 async def test_two_mount_devwork_review_picks_impl_gap(env):
-    """impl_gap from a 2-mount review loops Step4 then completes."""
+    """impl_gap from a 2-mount review loops Step2..Step5 then completes."""
     script = [
         # round 1 — fail with impl_gap
         step2_append_h2, step3_write_ctx, step4_write_findings,
@@ -284,8 +286,8 @@ async def test_two_mount_devwork_review_picks_impl_gap(env):
             ],
             "problem_category": "impl_gap",
         }),
-        # round 2 — Step4 + Step5 only
-        step4_write_findings,
+        # round 2 — full iteration rerun (Step2 + Step3 + Step4 + Step5)
+        step2_append_h2, step3_write_ctx, step4_write_findings,
         _step5_writer({
             "score": 92, "issues": [], "problem_category": None,
         }),

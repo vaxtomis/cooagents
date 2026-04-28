@@ -537,18 +537,11 @@ class DevWorkStepHandlersMixin:
             return
 
         cat = outcome.problem_category
-        if cat == ProblemCategory.req_gap:
+        if cat in (ProblemCategory.req_gap, ProblemCategory.impl_gap):
             await self._loop_or_escalate(
                 dw,
                 back_to=DevWorkStep.STEP2_ITERATION,
-                reason=f"req_gap score={outcome.score}",
-                problem_category=cat,
-            )
-        elif cat == ProblemCategory.impl_gap:
-            await self._loop_or_escalate(
-                dw,
-                back_to=DevWorkStep.STEP4_DEVELOP,
-                reason=f"impl_gap score={outcome.score}",
+                reason=f"{cat.value} score={outcome.score}",
                 problem_category=cat,
             )
         else:

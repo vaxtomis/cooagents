@@ -70,3 +70,57 @@ class FakeOSSStore:
 @pytest.fixture
 def fake_oss_store() -> FakeOSSStore:
     return FakeOSSStore()
+
+
+# --------------------------------------------------------------------------
+# DevWork SM: LLMRunner injection (Phase 2)
+#
+# DevWorkStateMachine now requires an ``llm_runner=`` kwarg. Tests that
+# previously injected a ``ScriptedExecutor`` keep working because
+# :meth:`LLMRunner.run_oneshot` is a 1-line delegation to
+# ``executor.run_once`` — wrapping the existing scripted executor in a
+# real LLMRunner preserves every assertion against ``executor.calls`` while
+# exercising the production delegation seam.
+#
+# ``fake_llm_runner`` is the lightweight stub for tests that only need to
+# observe call shape (no scripted side-effects).
+# --------------------------------------------------------------------------
+
+
+def make_test_llm_runner(executor):
+    """Wrap a scripted/fake executor in a real LLMRunner instance.
+
+    Used by every DevWorkStateMachine fixture site after Phase 2 made
+    ``llm_runner=`` required.
+    """
+    from src.llm_runner import LLMRunner
+    return LLMRunner(executor=executor)
+
+
+class _FakeLLMRunner:
+    """Minimal LLMRunner stub for tests that only assert call shape.
+
+    Tests can read ``.calls`` (each entry is a kwargs dict) and tweak
+    ``.run_oneshot_return`` to control the (stdout, rc) tuple.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.run_oneshot_return: tuple[str, int] = ("", 0)
+
+    async def run_oneshot(
+        self, agent, worktree, timeout_sec,
+        task_file=None, prompt=None, *,
+        host_id="local", workspace_id=None, correlation_id=None,
+    ):
+        self.calls.append(dict(
+            agent=agent, worktree=worktree, timeout_sec=timeout_sec,
+            task_file=task_file, prompt=prompt, host_id=host_id,
+            workspace_id=workspace_id, correlation_id=correlation_id,
+        ))
+        return self.run_oneshot_return
+
+
+@pytest.fixture
+def fake_llm_runner() -> _FakeLLMRunner:
+    return _FakeLLMRunner()
