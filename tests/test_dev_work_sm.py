@@ -416,6 +416,58 @@ async def test_step2_writes_feedback_file_on_round_2(env):
     assert feedback_rows[0]["kind"] == "feedback"
 
 
+async def test_step2_feedback_includes_next_round_hints(env):
+    """Phase 5: Round 1's next_round_hints surface in feedback-for-round2.md.
+
+    When round-1 Step5 emits a non-empty `next_round_hints` array, round-2's
+    feedback markdown gets a `## 下一轮提示` H2 listing each hint. Round 2
+    drives to COMPLETED so the test stays self-contained.
+    """
+    round1_payload = {
+        "score": 30,
+        "issues": [{"m": "do better"}],
+        "problem_category": "req_gap",
+        "next_round_hints": [
+            {"kind": "missing_feature", "message": "no /logout endpoint"},
+            {"kind": "optimization", "mount": "backend",
+             "message": "auth.py:42-58 can use lru_cache"},
+            {"message": "bare hint, no kind no mount"},
+        ],
+    }
+    script = [
+        # round 1: req_gap to force round 2 + carries hints.
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer(round1_payload),
+        # round 2: pass.
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 95, "issues": [], "problem_category": None}),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor)
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "COMPLETED"
+
+    body = await env["registry"].read_text(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"devworks/{dw['id']}/feedback/feedback-for-round2.md",
+    )
+    assert "## 下一轮提示" in body
+    assert "missing_feature" in body
+    assert "no /logout endpoint" in body
+    assert "auth.py:42-58" in body
+    # Mount hint should surface as a parenthesised prefix.
+    assert "(backend)" in body
+    # Render guard: hint without kind/mount has no double-space artefact.
+    assert "- bare hint, no kind no mount" in body
+    assert "-  " not in body  # no "- <space><space>" anywhere
+
+
 async def test_step2_prompt_artifact_under_3kib(env):
     """Phase 4 size guard: persisted Step2 prompt must stay ≤ 3 KiB."""
     script = [

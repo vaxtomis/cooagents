@@ -785,12 +785,16 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         return self.config.scoring.default_threshold
 
     async def _render_previous_review_markdown(self, dev_id: str) -> str:
-        """Render previous-round reviewer issues into a markdown blob.
+        """Render previous-round reviewer issues + hints into a markdown blob.
 
         Returns an empty string when no prior review exists. Pure (DB-only).
+        Phase 5: a forward-looking ``## 下一轮提示`` H2 is appended whenever
+        the previous review persisted a non-empty ``next_round_hints`` array.
+        Output stays byte-identical to Phase 4 when hints are empty/NULL.
         """
         row = await self.db.fetchone(
-            "SELECT score, problem_category, issues_json FROM reviews "
+            "SELECT score, problem_category, issues_json, "
+            "next_round_hints_json FROM reviews "
             "WHERE dev_work_id=? ORDER BY round DESC LIMIT 1",
             (dev_id,),
         )
@@ -800,20 +804,49 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             issues = json.loads(row["issues_json"]) if row["issues_json"] else []
         except (ValueError, TypeError):
             issues = []
+        try:
+            hints = (
+                json.loads(row["next_round_hints_json"])
+                if row["next_round_hints_json"]
+                else []
+            )
+        except (ValueError, TypeError):
+            hints = []
         header = (
             f"上一轮评分 {row['score']}，problem_category="
             f"{row['problem_category']}"
         )
         if not issues:
-            return f"{header}\n(无具体 issue)"
-        lines = [header]
-        for it in issues:
-            if isinstance(it, dict):
-                dim = it.get("dimension") or it.get("kind") or ""
-                msg = it.get("message") or it.get("detail") or ""
-                lines.append(f"- [{dim}] {msg}" if dim else f"- {msg}")
-            else:
-                lines.append(f"- {it}")
+            lines = [header, "(无具体 issue)"]
+        else:
+            lines = [header]
+            for it in issues:
+                if isinstance(it, dict):
+                    dim = it.get("dimension") or it.get("kind") or ""
+                    msg = it.get("message") or it.get("detail") or ""
+                    lines.append(f"- [{dim}] {msg}" if dim else f"- {msg}")
+                else:
+                    lines.append(f"- {it}")
+        # Forward-looking hints get their own H2 so Step2 can scan for them
+        # explicitly and treat them as "next round must address X" inputs.
+        if hints:
+            lines.append("")
+            lines.append("## 下一轮提示")
+            for h in hints:
+                if isinstance(h, dict):
+                    kind = h.get("kind") or ""
+                    msg = h.get("message") or ""
+                    mount = h.get("mount") or ""
+                    tokens = []
+                    if kind:
+                        tokens.append(f"[{kind}]")
+                    if mount:
+                        tokens.append(f"({mount})")
+                    if msg:
+                        tokens.append(msg)
+                    lines.append(f"- {' '.join(tokens)}" if tokens else "-")
+                else:
+                    lines.append(f"- {h}")
         return "\n".join(lines)
 
     async def _write_previous_review_for_round(
@@ -853,9 +886,10 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         await self.db.execute(
             """INSERT INTO reviews
                (id, dev_work_id, design_work_id, dev_iteration_note_id,
-                round, score, issues_json, findings_json, problem_category,
+                round, score, issues_json, findings_json,
+                next_round_hints_json, problem_category,
                 reviewer, created_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 self._review_id(),
                 dw["id"],
@@ -865,6 +899,11 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 outcome.score,
                 json.dumps(outcome.issues, ensure_ascii=False),
                 None,
+                (
+                    json.dumps(outcome.next_round_hints, ensure_ascii=False)
+                    if outcome.next_round_hints
+                    else None
+                ),
                 (
                     outcome.problem_category.value
                     if outcome.problem_category

@@ -215,6 +215,7 @@ CREATE TABLE IF NOT EXISTS reviews (
   score                   INTEGER,
   issues_json             TEXT,
   findings_json           TEXT,
+  next_round_hints_json   TEXT,
   problem_category        TEXT CHECK(problem_category IN ('req_gap','impl_gap','design_hollow') OR problem_category IS NULL),
   reviewer                TEXT,
   created_at              TEXT NOT NULL,

@@ -8,7 +8,13 @@ from src.dev_prompt_composer import (
     Step3Inputs,
     Step4Inputs,
     Step5Inputs,
+    _BOUNDARY_CHECK_RUBRIC,
     _BTRACK_LIMITATION_NOTE,
+    _NEXT_ROUND_HINTS_GUIDE,
+    _STEP_WALL_STEP2,
+    _STEP_WALL_STEP3,
+    _STEP_WALL_STEP4,
+    _STEP_WALL_STEP5,
     compose_iteration_header,
     compose_step2,
     compose_step3,
@@ -16,6 +22,16 @@ from src.dev_prompt_composer import (
     compose_step5,
     extract_rubric_section,
 )
+
+
+def _step5_minimal() -> Step5Inputs:
+    return Step5Inputs(
+        design_doc_path="/d", iteration_note_path="/n",
+        step4_findings_path="/f", context_path="/c.md",
+        mount_table_entries=(),
+        primary_worktree_path=None, rubric_threshold=85,
+        output_json_path="/s",
+    )
 
 
 def test_iteration_header_has_frontmatter_and_h1():
@@ -236,3 +252,73 @@ def test_extract_rubric_section_parses():
 
 def test_extract_rubric_section_missing_returns_empty():
     assert extract_rubric_section("no rubric at all") == ""
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — step responsibility walls + boundary check + next_round_hints
+# ---------------------------------------------------------------------------
+
+
+def test_step2_prompt_carries_step_wall():
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-1", round=1,
+        design_doc_path="/d.md", user_prompt="P",
+        previous_review_path=None, output_path="/o.md",
+    ))
+    assert _STEP_WALL_STEP2 in out
+    assert out.index("## 本步职责墙") < out.index("## 必读路径")
+    assert "boundary_violation" in out
+
+
+def test_step3_prompt_carries_step_wall():
+    out = compose_step3(Step3Inputs(
+        worktree_path="/wt", design_doc_path="/d.md",
+        iteration_note_path="/n.md", output_path="/o.md",
+    ))
+    assert _STEP_WALL_STEP3 in out
+    assert out.index("## 本步职责墙") < out.index("## 参考路径")
+    assert "path/to/file.py:123-145" in out
+    assert "推荐做法" in out
+
+
+def test_step4_prompt_carries_step_wall():
+    out = compose_step4(Step4Inputs(
+        worktree_path="/wt", iteration_note_path="/n.md",
+        context_path="/c.md", findings_output_path="/f.json",
+    ))
+    assert _STEP_WALL_STEP4 in out
+    assert out.index("## 本步职责墙") < out.index("## 工作树")
+    assert "不修改 iteration_note" in out
+    assert "不修改 ctx 文件" in out
+
+
+def test_step5_prompt_carries_step_wall():
+    out = compose_step5(_step5_minimal())
+    assert _STEP_WALL_STEP5 in out
+    assert out.index("## 本步职责墙") < out.index("## 必读顺序")
+    assert "缺失的功能" in out
+    assert "可优化的代码" in out
+
+
+def test_step5_prompt_carries_boundary_check_rubric():
+    out = compose_step5(_step5_minimal())
+    assert _BOUNDARY_CHECK_RUBRIC in out
+    assert (
+        out.index("## 越界检查")
+        > out.index("**最严重的 category 取胜**")
+    )
+    assert out.index("## 越界检查") < out.index("## 输出要求")
+    assert "\"kind\": \"boundary_violation\"" in out
+    assert "\"step\": \"step4\"" in out
+
+
+def test_step5_prompt_carries_next_round_hints_guide():
+    out = compose_step5(_step5_minimal())
+    assert _NEXT_ROUND_HINTS_GUIDE in out
+    # Hints guide must come AFTER boundary check and BEFORE output spec.
+    assert out.index("## 下一轮提示") > out.index("## 越界检查")
+    assert out.index("## 下一轮提示") < out.index("## 输出要求")
+    # JSON example shows the new top-level field.
+    assert "\"next_round_hints\":" in out
+    assert "\"missing_feature\"" in out
+    assert "\"optimization\"" in out

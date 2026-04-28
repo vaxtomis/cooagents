@@ -75,32 +75,38 @@ async def _seed(db: Database):
     # Two dev-side reviews
     await db.execute(
         "INSERT INTO reviews(id,dev_work_id,design_work_id,dev_iteration_note_id,"
-        "round,score,issues_json,findings_json,problem_category,reviewer,created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "round,score,issues_json,findings_json,next_round_hints_json,"
+        "problem_category,reviewer,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         ("rev-d1", "dev-aaa", None, None, 1, 70,
-         json.dumps([{"k": "v"}]), None, None, "claude", _now("00:00:01")),
+         json.dumps([{"k": "v"}]), None,
+         json.dumps([{"kind": "missing_feature", "message": "no /logout"}]),
+         None, "claude", _now("00:00:01")),
     )
     await db.execute(
         "INSERT INTO reviews(id,dev_work_id,design_work_id,dev_iteration_note_id,"
-        "round,score,issues_json,findings_json,problem_category,reviewer,created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "round,score,issues_json,findings_json,next_round_hints_json,"
+        "problem_category,reviewer,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         ("rev-d2", "dev-aaa", None, None, 1, 80,
-         None, json.dumps([{"f": 1}]), None, "claude", _now("00:00:02")),
+         None, json.dumps([{"f": 1}]), None, None, "claude", _now("00:00:02")),
     )
     # Two design-side reviews
     await db.execute(
         "INSERT INTO reviews(id,dev_work_id,design_work_id,dev_iteration_note_id,"
-        "round,score,issues_json,findings_json,problem_category,reviewer,created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "round,score,issues_json,findings_json,next_round_hints_json,"
+        "problem_category,reviewer,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         ("rev-w1", None, "desw-aaa", None, 1, 90,
-         None, None, None, "claude", _now("00:00:03")),
+         None, None, None, None, "claude", _now("00:00:03")),
     )
     await db.execute(
         "INSERT INTO reviews(id,dev_work_id,design_work_id,dev_iteration_note_id,"
-        "round,score,issues_json,findings_json,problem_category,reviewer,created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "round,score,issues_json,findings_json,next_round_hints_json,"
+        "problem_category,reviewer,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         ("rev-w2", None, "desw-aaa", None, 2, 95,
-         None, None, None, "claude", _now("00:00:04")),
+         None, None, None, None, "claude", _now("00:00:04")),
     )
 
 
@@ -160,10 +166,11 @@ async def test_malformed_issues_json_returns_none(client):
     # Inject a row with malformed issues_json + non-list findings_json
     await db.execute(
         "INSERT INTO reviews(id,dev_work_id,design_work_id,dev_iteration_note_id,"
-        "round,score,issues_json,findings_json,problem_category,reviewer,created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "round,score,issues_json,findings_json,next_round_hints_json,"
+        "problem_category,reviewer,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         ("rev-bad", None, "desw-aaa", None, 3, 50,
-         "{not json", json.dumps({"not": "list"}), None, "claude", _now("00:00:99")),
+         "{not json", json.dumps({"not": "list"}), None, None, "claude", _now("00:00:99")),
     )
     r = await client.get(
         "/api/v1/reviews", params={"design_work_id": "desw-aaa"}
@@ -172,6 +179,39 @@ async def test_malformed_issues_json_returns_none(client):
     bad = next(d for d in body if d["id"] == "rev-bad")
     assert bad["issues"] is None
     assert bad["findings"] is None
+
+
+async def test_reviews_route_surfaces_next_round_hints(client):
+    """Phase 5: next_round_hints column projects through the API."""
+    await _seed(client.db)
+    r = await client.get("/api/v1/reviews", params={"dev_work_id": "dev-aaa"})
+    body = r.json()
+    assert body[0]["next_round_hints"] == [
+        {"kind": "missing_feature", "message": "no /logout"}
+    ]
+    # rev-d2 had None for hints — projection returns None.
+    assert body[1]["next_round_hints"] is None
+
+
+async def test_malformed_next_round_hints_returns_none(client):
+    """Phase 5: malformed next_round_hints_json projects as None (graceful)."""
+    db = client.db
+    await _seed(db)
+    await db.execute(
+        "INSERT INTO reviews(id,dev_work_id,design_work_id,dev_iteration_note_id,"
+        "round,score,issues_json,findings_json,next_round_hints_json,"
+        "problem_category,reviewer,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("rev-hbad", None, "desw-aaa", None, 4, 60,
+         None, None, "{not valid json",
+         None, "claude", _now("00:01:00")),
+    )
+    r = await client.get(
+        "/api/v1/reviews", params={"design_work_id": "desw-aaa"}
+    )
+    body = r.json()
+    bad = next(d for d in body if d["id"] == "rev-hbad")
+    assert bad["next_round_hints"] is None
 
 
 async def test_ordering_round_then_created_at(client):

@@ -1,5 +1,7 @@
 # 任务：为 DevWork $dev_work_id 产出 Round $round 的迭代设计
 
+$step_wall
+
 ## 必读路径
 
 1. **设计文档**：`$design_doc_path`

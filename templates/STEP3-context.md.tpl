@@ -1,5 +1,7 @@
 # 任务：为 DevWork Step3 产出浓缩上下文
 
+$step_wall
+
 ## 参考路径
 
 - 代码工作树（worktree）： `$worktree_path`

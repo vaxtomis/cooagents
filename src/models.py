@@ -191,6 +191,7 @@ class Review(BaseModel):
     score: int | None = None
     issues: list[dict] | None = None
     findings: list[dict] | None = None
+    next_round_hints: list[dict] | None = None
     problem_category: ProblemCategory | None = None
     reviewer: str | None = None
     created_at: str

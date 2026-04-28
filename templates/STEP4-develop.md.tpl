@@ -1,5 +1,7 @@
 # 任务：为 DevWork Step4 按迭代设计完成开发与自审
 
+$step_wall
+
 ## 工作树
 
 `$worktree_path`

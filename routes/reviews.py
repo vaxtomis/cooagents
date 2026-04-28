@@ -40,6 +40,7 @@ def _row_to_review(row: dict) -> Review:
         score=row.get("score"),
         issues=_decode_json_list(row.get("issues_json")),
         findings=_decode_json_list(row.get("findings_json")),
+        next_round_hints=_decode_json_list(row.get("next_round_hints_json")),
         problem_category=row.get("problem_category"),
         reviewer=row.get("reviewer"),
         created_at=row["created_at"],

@@ -84,6 +84,13 @@ async def test_design_docs_unique_workspace_slug_version(db):
         )
 
 
+async def test_reviews_table_has_next_round_hints_column(db):
+    """Phase 5: reviews gains next_round_hints_json TEXT (nullable)."""
+    rows = await db.fetchall("PRAGMA table_info(reviews)")
+    names = [r["name"] for r in rows]
+    assert "next_round_hints_json" in names
+
+
 async def test_reviews_xor_constraint(db):
     with pytest.raises(Exception):
         await db.execute(

@@ -1,6 +1,8 @@
 """Phase 4: reviewer JSON parsing unit tests."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src.exceptions import BadRequestError
@@ -113,3 +115,72 @@ def test_problem_category_unchanged_in_phase8():
     assert tuple(c.value for c in ProblemCategory) == (
         "req_gap", "impl_gap", "design_hollow",
     )
+
+
+def test_parse_review_extracts_next_round_hints():
+    out = parse_review_output(json.dumps({
+        "score": 90,
+        "issues": [],
+        "next_round_hints": [
+            {"kind": "missing_feature", "message": "no /logout endpoint"},
+            {"kind": "optimization", "mount": "backend",
+             "message": "auth.py:42-58 can use lru_cache"},
+        ],
+        "problem_category": None,
+    }))
+    assert len(out.next_round_hints) == 2
+    assert out.next_round_hints[0]["kind"] == "missing_feature"
+    assert out.next_round_hints[1]["mount"] == "backend"
+
+
+def test_parse_review_missing_next_round_hints_defaults_empty():
+    out = parse_review_output(json.dumps({
+        "score": 90, "issues": [], "problem_category": None,
+    }))
+    assert out.next_round_hints == []
+
+
+def test_parse_review_rejects_non_list_next_round_hints():
+    with pytest.raises(BadRequestError, match="next_round_hints"):
+        parse_review_output(json.dumps({
+            "score": 90, "issues": [],
+            "next_round_hints": "not-a-list",
+            "problem_category": None,
+        }))
+
+
+def test_parse_review_normalises_non_dict_hint_items():
+    """Mirror of test_non_dict_issue_items_normalised for hints."""
+    out = parse_review_output(json.dumps({
+        "score": 90, "issues": [],
+        "next_round_hints": ["bare hint string"],
+        "problem_category": None,
+    }))
+    assert out.next_round_hints == [{"message": "bare hint string"}]
+
+
+def test_parse_review_rejects_unknown_hint_kind():
+    """Phase 5: kind enum guard catches typos / hallucinated values."""
+    with pytest.raises(BadRequestError, match="next_round_hints"):
+        parse_review_output(json.dumps({
+            "score": 90, "issues": [],
+            "next_round_hints": [
+                {"kind": "refactor", "message": "rename foo"},
+            ],
+            "problem_category": None,
+        }))
+
+
+def test_parse_review_allows_omitted_hint_kind():
+    """``kind`` is optional; missing/empty values pass through unchanged."""
+    out = parse_review_output(json.dumps({
+        "score": 90, "issues": [],
+        "next_round_hints": [
+            {"message": "no kind here"},
+            {"kind": "", "message": "empty kind here"},
+        ],
+        "problem_category": None,
+    }))
+    assert len(out.next_round_hints) == 2
+    assert "kind" not in out.next_round_hints[0]
+    assert out.next_round_hints[1]["kind"] == ""

@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.exceptions import BadRequestError
@@ -27,12 +27,18 @@ logger = logging.getLogger(__name__)
 # newlines; non-greedy ``.*?`` so we don't eat across fences.
 _FENCE_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 
+# Allowed values for ``next_round_hints[].kind``. Mirrors the enum spelled
+# out in ``_NEXT_ROUND_HINTS_GUIDE`` in dev_prompt_composer — extending
+# either side requires updating both in lockstep.
+_NEXT_ROUND_HINT_KINDS = ("missing_feature", "optimization")
+
 
 @dataclass(frozen=True)
 class ReviewOutcome:
     score: int
     issues: list[dict]
     problem_category: ProblemCategory | None
+    next_round_hints: list[dict] = field(default_factory=list)
 
 
 def _coerce(payload: dict) -> ReviewOutcome:
@@ -66,7 +72,38 @@ def _coerce(payload: dict) -> ReviewOutcome:
                 f"{[c.value for c in ProblemCategory]} or null; got {raw_cat!r}"
             ) from exc
 
-    return ReviewOutcome(score=score, issues=issues, problem_category=category)
+    raw_hints = payload.get("next_round_hints")
+    if raw_hints is None:
+        hints: list[dict] = []
+    elif isinstance(raw_hints, list):
+        # Mirror ``issues`` normalisation: non-dict entries become
+        # ``{"message": str(item)}`` so consumers can assume list[dict].
+        hints = [
+            h if isinstance(h, dict) else {"message": str(h)}
+            for h in raw_hints
+        ]
+        # Enum guard on ``kind``: present values must match the documented
+        # set; missing/empty ``kind`` is allowed (rendered without prefix).
+        for h in hints:
+            kind = h.get("kind")
+            if kind in (None, ""):
+                continue
+            if kind not in _NEXT_ROUND_HINT_KINDS:
+                raise BadRequestError(
+                    f"review output 'next_round_hints[].kind' must be one of "
+                    f"{list(_NEXT_ROUND_HINT_KINDS)} or omitted; got {kind!r}"
+                )
+    else:
+        raise BadRequestError(
+            "review output 'next_round_hints' must be a list"
+        )
+
+    return ReviewOutcome(
+        score=score,
+        issues=issues,
+        problem_category=category,
+        next_round_hints=hints,
+    )
 
 
 def _parse_from_text(text: str) -> dict:
