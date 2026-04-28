@@ -35,6 +35,12 @@ _STEP4_TEMPLATE = Template(_STEP4_TPL.read_text(encoding="utf-8"))
 _STEP5_TEMPLATE = Template(_STEP5_TPL.read_text(encoding="utf-8"))
 _NOTE_HEADER_TEMPLATE = Template(_NOTE_HEADER_TPL.read_text(encoding="utf-8"))
 
+# Human-readable placeholders the composer substitutes when an optional
+# input path is missing. Grouped here so all "what-the-LLM-sees-when-empty"
+# strings live in one place.
+_PREV_REVIEW_PLACEHOLDER = "_(首轮，无上轮反馈 — 跳过此步)_"
+_CONTEXT_PATH_PLACEHOLDER = "_(无 ctx 文件 — 本轮 Step3 未产出)_"
+
 
 # ---------------------------------------------------------------------------
 # Iteration note header (SM-owned, LLM-immutable prefix of round markdown)
@@ -65,24 +71,25 @@ def compose_iteration_header(inputs: IterationHeaderInputs) -> str:
 class Step2Inputs:
     dev_work_id: str
     round: int
-    design_doc_text: str
+    # Absolute POSIX path to the published design doc; the LLM Reads it itself.
+    design_doc_path: str
     user_prompt: str
-    # Raw previous-round feedback; empty string for round 1.  The composer
-    # normalises empty strings to a human-readable marker so the LLM never
-    # sees a blank section body.
-    previous_feedback: str
+    # Absolute POSIX path to the previous-round review markdown; None on
+    # round 1 (no prior review). The composer substitutes a placeholder
+    # when None so the LLM never sees an empty path slot.
+    previous_review_path: str | None
     # Absolute path the LLM should append to.
     output_path: str
 
 
 def compose_step2(inputs: Step2Inputs) -> str:
-    prev = inputs.previous_feedback or "(首轮，无上轮反馈)"
+    prev = inputs.previous_review_path or _PREV_REVIEW_PLACEHOLDER
     return _STEP2_TEMPLATE.safe_substitute(
         dev_work_id=inputs.dev_work_id,
         round=str(inputs.round),
-        design_doc_text=inputs.design_doc_text,
+        design_doc_path=inputs.design_doc_path,
         user_prompt=inputs.user_prompt,
-        previous_feedback=prev,
+        previous_review_path=prev,
         output_path=inputs.output_path,
     )
 
@@ -196,6 +203,10 @@ class Step5Inputs:
     design_doc_path: str
     iteration_note_path: str
     step4_findings_path: str
+    # Absolute POSIX path to the round's ctx-round-N.md; reviewer reads it
+    # to verify Step3-raised concerns were addressed in Step4. None falls
+    # back to a human-readable placeholder.
+    context_path: str | None
     mount_table_entries: tuple[MountTableEntry, ...]
     primary_worktree_path: str | None
     rubric_threshold: int
@@ -207,6 +218,7 @@ def compose_step5(inputs: Step5Inputs) -> str:
         design_doc_path=inputs.design_doc_path,
         iteration_note_path=inputs.iteration_note_path,
         step4_findings_path=inputs.step4_findings_path,
+        context_path=(inputs.context_path or _CONTEXT_PATH_PLACEHOLDER),
         mount_table=_render_mount_table(inputs.mount_table_entries),
         primary_worktree_path=(
             inputs.primary_worktree_path or "_(no primary worktree)_"

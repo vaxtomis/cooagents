@@ -784,12 +784,10 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 pass
         return self.config.scoring.default_threshold
 
-    async def _last_review_text(self, dev_id: str) -> str:
+    async def _render_previous_review_markdown(self, dev_id: str) -> str:
         """Render previous-round reviewer issues into a markdown blob.
 
-        Returns an empty string for round 1 (no prior review).  The composer
-        substitutes the explicit 「首轮」 placeholder when it sees an empty
-        string, so we do not need to emit one here.
+        Returns an empty string when no prior review exists. Pure (DB-only).
         """
         row = await self.db.fetchone(
             "SELECT score, problem_category, issues_json FROM reviews "
@@ -817,6 +815,31 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             else:
                 lines.append(f"- {it}")
         return "\n".join(lines)
+
+    async def _write_previous_review_for_round(
+        self,
+        dw: dict[str, Any],
+        ws: dict[str, Any],
+        round_n: int,
+    ) -> str | None:
+        """Materialize previous-round review markdown to a workspace file.
+
+        Returns the workspace-relative path, or None when round_n == 1
+        or no prior review row exists.
+        """
+        if round_n <= 1:
+            return None
+        body = await self._render_previous_review_markdown(dw["id"])
+        if not body:
+            return None
+        rel = (
+            f"devworks/{dw['id']}/feedback/feedback-for-round{round_n}.md"
+        )
+        await self.registry.put_markdown(
+            workspace_row=ws, relative_path=rel,
+            text=body, kind="feedback",
+        )
+        return rel
 
     async def _record_review(
         self,

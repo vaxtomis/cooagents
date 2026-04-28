@@ -29,28 +29,70 @@ def test_iteration_header_has_frontmatter_and_h1():
     assert "# 迭代设计 — Round 1" in out
 
 
-def test_step2_round1_maps_empty_feedback():
+def test_step2_round1_substitutes_prev_review_placeholder():
     out = compose_step2(Step2Inputs(
         dev_work_id="dev-1", round=1,
-        design_doc_text="DESIGN", user_prompt="PROMPT",
-        previous_feedback="", output_path="/tmp/x.md",
+        design_doc_path="/ws/foo/designs/d.md",
+        user_prompt="PROMPT",
+        previous_review_path=None,
+        output_path="/tmp/x.md",
     ))
-    assert "(首轮，无上轮反馈)" in out
-    assert "DESIGN" in out
+    assert "/ws/foo/designs/d.md" in out
     assert "PROMPT" in out
+    assert "首轮，无上轮反馈" in out
+    # Path-based: the design body is NOT inlined.
+    assert "DESIGN" not in out
+
+
+def test_step2_round_n_uses_previous_review_path():
+    prev = "/ws/foo/devworks/dev-x/feedback/feedback-for-round2.md"
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-x", round=2,
+        design_doc_path="/ws/foo/designs/d.md",
+        user_prompt="P",
+        previous_review_path=prev,
+        output_path="/o.md",
+    ))
+    assert prev in out
+    assert "首轮，无上轮反馈" not in out
+
+
+def test_step2_prompt_does_not_embed_design_body():
+    # Realistic-ish path lengths; rendered size must stay small AND the
+    # design-doc body must not be inlined. Sentinel string check guards
+    # against accidental future regressions to body-embedding.
+    design_path = "/ws/myworkspace/designs/some-feature/login-and-oauth.md"
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-abcdef", round=3,
+        design_doc_path=design_path,
+        user_prompt="implement OAuth flow with PKCE",
+        previous_review_path=(
+            "/ws/myworkspace/devworks/dev-abcdef/feedback/"
+            "feedback-for-round3.md"
+        ),
+        output_path=(
+            "/ws/myworkspace/devworks/dev-abcdef/iterations/"
+            "iteration-round-3.md"
+        ),
+    ))
+    assert len(out.encode("utf-8")) <= 3 * 1024
+    # The composer must reference the design doc by path, never by body.
+    assert design_path in out
+    # Markers that would only appear if the design body got inlined.
+    assert "## 评审标准" not in out
+    assert "---\nslug:" not in out
 
 
 def test_step2_preserves_literal_dollar_signs():
     # safe_substitute must not blow up on $ in user content.
     out = compose_step2(Step2Inputs(
         dev_work_id="dev-1", round=2,
-        design_doc_text="has $var literal",
+        design_doc_path="/d.md",
         user_prompt="cost is $5",
-        previous_feedback="issue: $critical",
+        previous_review_path="/p.md",
         output_path="/tmp/x.md",
     ))
     assert "$5" in out
-    assert "$var" in out
 
 
 def test_step3_prompt_includes_paths():
@@ -70,12 +112,14 @@ def test_step4_prompt_includes_findings_path():
 
 
 def test_step5_renders_paths_only():
+    ctx = "/ws/foo/devworks/dev-x/context/ctx-round-1.md"
     out = compose_step5(Step5Inputs(
         design_doc_path="/ws/foo/designs/d.md",
         iteration_note_path="/ws/foo/devworks/dev-x/iteration-round-1.md",
         step4_findings_path=(
             "/ws/foo/devworks/dev-x/artifacts/step4-findings-round1.json"
         ),
+        context_path=ctx,
         mount_table_entries=(
             MountTableEntry(
                 mount_name="backend", repo_id="repo-bbb",
@@ -104,6 +148,7 @@ def test_step5_renders_paths_only():
     assert "/ws/foo/designs/d.md" in out
     assert "iteration-round-1.md" in out
     assert "step4-findings-round1.json" in out
+    assert ctx in out
     # Mount table renders both rows
     assert "| `backend` |" in out
     assert "| `frontend` |" in out
@@ -128,7 +173,8 @@ def test_step5_renders_paths_only():
 def test_step5_with_no_mounts_falls_back_to_marker():
     out = compose_step5(Step5Inputs(
         design_doc_path="/d", iteration_note_path="/n",
-        step4_findings_path="/f", mount_table_entries=(),
+        step4_findings_path="/f", context_path="/c.md",
+        mount_table_entries=(),
         primary_worktree_path=None, rubric_threshold=85,
         output_json_path="/s",
     ))
@@ -137,10 +183,22 @@ def test_step5_with_no_mounts_falls_back_to_marker():
     assert "_(no primary worktree)_" in out
 
 
+def test_step5_context_path_none_uses_placeholder():
+    out = compose_step5(Step5Inputs(
+        design_doc_path="/d", iteration_note_path="/n",
+        step4_findings_path="/f", context_path=None,
+        mount_table_entries=(),
+        primary_worktree_path=None, rubric_threshold=85,
+        output_json_path="/s",
+    ))
+    assert "无 ctx 文件" in out
+
+
 def test_step5_aggregation_priority_order_in_template():
     out = compose_step5(Step5Inputs(
         design_doc_path="/d", iteration_note_path="/n",
-        step4_findings_path="/f", mount_table_entries=(),
+        step4_findings_path="/f", context_path="/c.md",
+        mount_table_entries=(),
         primary_worktree_path=None, rubric_threshold=85,
         output_json_path="/s",
     ))
@@ -156,7 +214,8 @@ def test_step5_no_longer_raises_on_empty_rubric_section():
     """Phase 8: rubric pre-flight moved out of the composer into the SM."""
     out = compose_step5(Step5Inputs(
         design_doc_path="/d", iteration_note_path="/n",
-        step4_findings_path="/f", mount_table_entries=(),
+        step4_findings_path="/f", context_path="/c.md",
+        mount_table_entries=(),
         primary_worktree_path=None, rubric_threshold=80,
         output_json_path="/s",
     ))

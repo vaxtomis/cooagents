@@ -373,6 +373,75 @@ async def test_req_gap_routes_to_step2(env):
     assert final["iteration_rounds"] == 1
 
 
+async def test_step2_writes_feedback_file_on_round_2(env):
+    """Round 2's Step2 must persist feedback-for-round2.md via the registry.
+
+    Phase 4: previous-round review markdown is materialized to a workspace
+    file rather than embedded into the prompt. The path-based prompt
+    references that file by absolute path.
+    """
+    script = [
+        # round 1: req_gap to force a round 2.
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 30, "issues": [{"m": "do better"}],
+                        "problem_category": "req_gap"}),
+        # round 2: pass.
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 95, "issues": [], "problem_category": None}),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor)
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "COMPLETED"
+
+    rows = await env["db"].fetchall(
+        "SELECT relative_path, byte_size, kind FROM workspace_files "
+        "WHERE workspace_id=? AND relative_path LIKE ?",
+        (env["ws"]["id"], f"devworks/{dw['id']}/feedback/%"),
+    )
+    feedback_rows = [
+        r for r in rows
+        if r["relative_path"].endswith("feedback-for-round2.md")
+    ]
+    assert feedback_rows, (
+        f"expected feedback-for-round2.md to be registered; got {rows}"
+    )
+    assert feedback_rows[0]["byte_size"] > 0
+    assert feedback_rows[0]["kind"] == "feedback"
+
+
+async def test_step2_prompt_artifact_under_3kib(env):
+    """Phase 4 size guard: persisted Step2 prompt must stay ≤ 3 KiB."""
+    script = [
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 95, "issues": [], "problem_category": None}),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor)
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "COMPLETED"
+
+    prompt_bytes = await env["registry"].read_bytes(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"devworks/{dw['id']}/prompts/step2-round1.md",
+    )
+    assert len(prompt_bytes) <= 3 * 1024, (
+        f"step2 prompt grew past 3 KiB: {len(prompt_bytes)} bytes"
+    )
+
+
 async def test_impl_gap_routes_to_step2(env):
     script = [
         step2_append_h2, step3_write_ctx, step4_write_findings,

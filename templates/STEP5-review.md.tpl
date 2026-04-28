@@ -10,6 +10,8 @@
    —— Step2 LLM 写的「本轮目标 / 开发计划 / 用例清单」
 3. **Step4 自审 findings**：`$step4_findings_path`
    —— Step4 LLM 写的本轮 lint / typecheck / unittest 自审
+4. **Step3 上下文与疑点**：`$context_path`
+   —— 校验 Step4 是否处理了 Step3 raised 的疑点/风险
 
 ## 多仓改动表
 

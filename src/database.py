@@ -95,6 +95,53 @@ class Database:
                 "ALTER TABLE dev_works ADD COLUMN current_progress_json TEXT"
             )
 
+        # devwork-acpx phase 4: extend workspace_files.kind CHECK to permit
+        # 'feedback'. SQLite cannot ALTER a CHECK constraint in place, so we
+        # rebuild the table when the existing definition pre-dates Phase 4.
+        async with conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type='table' AND name='workspace_files'"
+        ) as cur:
+            row = await cur.fetchone()
+        wf_sql = row[0] if row else ""
+        if wf_sql and "'feedback'" not in wf_sql:
+            # Wrap the rebuild in an explicit transaction so a crash mid-script
+            # cannot leave ``workspace_files_new`` orphaned. The leading
+            # ``DROP IF EXISTS`` further protects against retry after an
+            # interrupted earlier attempt that did commit the CREATE.
+            await conn.executescript(
+                """
+                BEGIN;
+                DROP TABLE IF EXISTS workspace_files_new;
+                CREATE TABLE workspace_files_new (
+                  id                TEXT PRIMARY KEY,
+                  workspace_id      TEXT NOT NULL REFERENCES workspaces(id),
+                  relative_path     TEXT NOT NULL,
+                  kind              TEXT NOT NULL CHECK(kind IN (
+                                        'design_doc','design_input','iteration_note',
+                                        'prompt','image','workspace_md',
+                                        'context','artifact','feedback','other')),
+                  content_hash      TEXT,
+                  byte_size         INTEGER,
+                  local_mtime_ns    INTEGER,
+                  created_at        TEXT NOT NULL,
+                  updated_at        TEXT NOT NULL,
+                  UNIQUE(workspace_id, relative_path)
+                );
+                INSERT INTO workspace_files_new
+                  SELECT id, workspace_id, relative_path, kind, content_hash,
+                         byte_size, local_mtime_ns, created_at, updated_at
+                  FROM workspace_files;
+                DROP TABLE workspace_files;
+                ALTER TABLE workspace_files_new RENAME TO workspace_files;
+                CREATE INDEX IF NOT EXISTS idx_workspace_files_workspace
+                  ON workspace_files(workspace_id);
+                CREATE INDEX IF NOT EXISTS idx_workspace_files_kind
+                  ON workspace_files(kind);
+                COMMIT;
+                """
+            )
+
         await conn.commit()
 
     async def close(self) -> None:

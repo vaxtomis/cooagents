@@ -61,19 +61,17 @@ class DevWorkStepHandlersMixin:
         dd = await self.db.fetchone(
             "SELECT path FROM design_docs WHERE id=?", (dw["design_doc_id"],)
         )
-        try:
-            design_text = await self.registry.read_text(
-                workspace_slug=ws["slug"], relative_path=dd["path"],
-            )
-        except NotFoundError as exc:
+        if dd is None:
             await self._escalate(
                 dw,
-                reason=f"design_doc file unreadable at Step2: {exc}",
+                reason="design_doc row missing at Step2",
                 problem_category=ProblemCategory.design_hollow,
             )
             return
-
-        prev_feedback = await self._last_review_text(dw["id"])
+        # Path-based: the LLM Reads the design doc itself; we no longer
+        # pre-load the bytes here. A missing/unreadable file will surface
+        # via the LLM's own Read failure instead of a Python exception.
+        design_doc_abs = self._abs_for(ws, dd["path"])
 
         # 1) Write the SM-owned header (front-matter + H1) so the LLM can only
         #    append; this locks those lines against prompt-injection rewrites.
@@ -92,14 +90,24 @@ class DevWorkStepHandlersMixin:
             text=header, kind="iteration_note",
         )
 
-        # 2) Compose Step2 prompt and run the LLM.
+        # 2) Materialize previous-round review markdown to a workspace file
+        #    (None for round 1 / no prior review). Path-based: the LLM
+        #    Reads the file rather than receiving the embedded body.
+        prev_review_rel = await self._write_previous_review_for_round(
+            dw, ws, round_n,
+        )
+        prev_review_abs = (
+            self._abs_for(ws, prev_review_rel) if prev_review_rel else None
+        )
+
+        # 3) Compose Step2 prompt and run the LLM.
         prompt_text = compose_step2(
             Step2Inputs(
                 dev_work_id=dw["id"],
                 round=round_n,
-                design_doc_text=design_text,
+                design_doc_path=design_doc_abs,
                 user_prompt=dw["prompt"],
-                previous_feedback=prev_feedback,
+                previous_review_path=prev_review_abs,
                 output_path=note_abs,
             )
         )
@@ -397,6 +405,14 @@ class DevWorkStepHandlersMixin:
 
         mount_entries = await self._load_mount_table_entries(dw)
 
+        # Step3 ctx file path — Step5 reviewer reads it to verify Step4
+        # addressed the疑点/risks Step3 raised. Phase 4 always passes a
+        # concrete path; missing-file failure surfaces via the LLM's Read.
+        ctx_rel = (
+            f"devworks/{dw['id']}/context/ctx-round-{round_n}.md"
+        )
+        ctx_abs = self._abs_for(ws, ctx_rel)
+
         prompt = compose_step5(
             Step5Inputs(
                 design_doc_path=self._abs_for(ws, dd["path"]),
@@ -404,6 +420,7 @@ class DevWorkStepHandlersMixin:
                     ws, note["markdown_path"]
                 ),
                 step4_findings_path=self._abs_for(ws, findings_rel),
+                context_path=ctx_abs,
                 mount_table_entries=mount_entries,
                 primary_worktree_path=dw.get("worktree_path"),
                 rubric_threshold=rubric_threshold,

@@ -1,16 +1,15 @@
 # 任务：为 DevWork $dev_work_id 产出 Round $round 的迭代设计
 
-## 设计文档（只读参考）
+## 必读路径
 
-$design_doc_text
+1. **设计文档**：`$design_doc_path`
+   —— 用 Read 工具自行查阅；不要复述全文，只引用与本轮相关的章节
+2. **上一轮 Step5 反馈**：$previous_review_path
+   —— Round 1 时此项为占位符；Round ≥ 2 必须 Read 此文件并以「上一轮 issues」为本轮规划的输入
 
 ## 用户 prompt
 
 $user_prompt
-
-## 上一轮 Step5 反馈（issues）
-
-$previous_feedback
 
 ## 产出要求
 
