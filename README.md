@@ -42,7 +42,7 @@ cooagents 围绕这四件事构建：
 ### 一键 bootstrap（推荐）
 
 ```bash
-git clone <repo-url> cooagents
+git clone git@github.com:vaxtomis/cooagents.git
 cd cooagents
 ./scripts/bootstrap.sh
 ```
@@ -306,8 +306,8 @@ cooagents/
 │   ├── acpx_executor.py / mockup_renderer.py / reviewer.py / semver.py
 │   ├── webhook_events.py / webhook_notifier.py
 │   ├── skill_deployer.py / file_converter.py / git_utils.py / path_validation.py
-│   ├── agent_hosts/            # Phase 8a — host registry + SSH + probe
-│   ├── agent_worker/           # Phase 8b — cooagents-worker CLI
+│   ├── agent_hosts/            # host registry + SSH + probe
+│   ├── agent_worker/           # cooagents-worker CLI
 │   ├── repos/                  # Repo Registry + fetcher + inspector
 │   └── storage/                # FileStore (local / OSS) + WorkspaceFileRegistry
 ├── routes/                    # FastAPI 路由（auth_required 由 src/app.py 注入）
@@ -322,8 +322,6 @@ cooagents/
 ├── skills/                    # cooagents-setup · cooagents-upgrade
 ├── scripts/                   # bootstrap.sh, generate_password_hash.py, sim_worker.py, audit_filesystem_writes.py
 ├── tests/                     # pytest (asyncio_mode=auto)
-├── docs/CODEMAPS/             # AI-friendly 架构文档
-├── DESIGN.md                  # 视觉设计语言（受 Anthropic Claude 启发）
 └── pyproject.toml requirements.txt
 ```
 
@@ -375,7 +373,7 @@ cd web && npm run dev
 - 把 `.coop/` 与 `WORKSPACES_ROOT` 放到持久化卷。
 - 设置 `acpx.permission_mode: approve-all`（默认）。
 
-### 远端 Agent Host (Phase 8b)
+### 远端 Agent Host
 
 在远端机器：
 
