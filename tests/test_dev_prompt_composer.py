@@ -337,7 +337,7 @@ def test_step3_prompt_carries_step_wall():
         mount_table_entries=(),
     ))
     assert _STEP_WALL_STEP3 in out
-    assert out.index("## 本步职责墙") < out.index("## 参考路径")
+    assert out.index("## 本步职责墙") < out.index("## 必读路径")
     assert "path/to/file.py:123-145" in out
     assert "推荐做法" in out
 
@@ -384,3 +384,103 @@ def test_step5_prompt_carries_next_round_hints_guide():
     assert "\"next_round_hints\":" in out
     assert "\"missing_feature\"" in out
     assert "\"optimization\"" in out
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — template rewrite size budgets + dropped-section sentinels
+# ---------------------------------------------------------------------------
+# Budgets are post-substitution rendered byte sizes on a realistic-but-
+# minimal input. They lock in the Phase-8 compaction so a future edit
+# that re-bloats a template trips a single, well-named test rather than
+# a vague success-metric check at the end of Phase 9.
+
+
+def test_step2_rendered_size_budget():
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-x", round=1,
+        design_doc_path="/ws/foo/designs/d.md",
+        user_prompt="P",
+        previous_review_path=None,
+        output_path="/ws/foo/devworks/dev-x/iterations/iteration-round-1.md",
+    ))
+    # Wall + path-based skeleton + "## 产出要求" — round-1 minimal input.
+    assert len(out.encode("utf-8")) <= 1700
+
+
+def test_step3_rendered_size_budget():
+    out = compose_step3(Step3Inputs(
+        worktree_path="/wt", design_doc_path="/d.md",
+        iteration_note_path="/n.md", output_path="/o.md",
+        mount_table_entries=(),
+    ))
+    assert len(out.encode("utf-8")) <= 1700
+
+
+def test_step4_rendered_size_budget():
+    out = compose_step4(Step4Inputs(
+        worktree_path="/wt", iteration_note_path="/n.md",
+        context_path="/c.md", findings_output_path="/f.json",
+        mount_table_entries=(),
+    ))
+    assert len(out.encode("utf-8")) <= 2000
+
+
+def test_step5_rendered_size_budget():
+    out = compose_step5(_step5_minimal())
+    # Budget covers wall + boundary check + next-round-hints guide +
+    # aggregation rule + tail JSON schema + field rules.
+    assert len(out.encode("utf-8")) <= 5800
+
+
+def test_step3_dropped_reference_paths_heading():
+    """Phase 8: STEP3 standardises on '必读路径' (was '参考路径')."""
+    out = compose_step3(Step3Inputs(
+        worktree_path="/wt", design_doc_path="/d.md",
+        iteration_note_path="/n.md", output_path="/o.md",
+        mount_table_entries=(),
+    ))
+    assert "## 必读路径" in out
+    assert "## 参考路径" not in out
+
+
+def test_step4_dropped_constraints_section():
+    """Phase 8: STEP4 trailing '## 约束' is removed (duplicates wall)."""
+    out = compose_step4(Step4Inputs(
+        worktree_path="/wt", iteration_note_path="/n.md",
+        context_path="/c.md", findings_output_path="/f.json",
+        mount_table_entries=(),
+    ))
+    assert "## 约束" not in out
+
+
+def test_step2_dropped_user_prompt_heading():
+    """Phase 8: STEP2 inlines $user_prompt under '必读路径' item 3."""
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-1", round=1,
+        design_doc_path="/d.md", user_prompt="UNIQUE-MARKER",
+        previous_review_path=None, output_path="/o.md",
+    ))
+    # User-prompt heading is gone; the marker still appears in the body.
+    assert "## 用户 prompt" not in out
+    assert "UNIQUE-MARKER" in out
+
+
+def test_all_step_templates_share_uniform_shape():
+    """Phase 8: every step's prompt opens H1 → wall → 必读路径."""
+    step2 = compose_step2(Step2Inputs(
+        dev_work_id="d", round=1, design_doc_path="/d.md", user_prompt="P",
+        previous_review_path=None, output_path="/o.md",
+    ))
+    step3 = compose_step3(Step3Inputs(
+        worktree_path="/wt", design_doc_path="/d.md",
+        iteration_note_path="/n.md", output_path="/o.md",
+        mount_table_entries=(),
+    ))
+    step4 = compose_step4(Step4Inputs(
+        worktree_path="/wt", iteration_note_path="/n.md",
+        context_path="/c.md", findings_output_path="/f.json",
+        mount_table_entries=(),
+    ))
+    for out in (step2, step3, step4):
+        # Wall is the first H2; 必读路径 is the second H2.
+        assert out.index("## 本步职责墙") < out.index("## 必读路径")
