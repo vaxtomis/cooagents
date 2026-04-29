@@ -118,13 +118,10 @@ class DevWorkStepHandlersMixin:
         )
         prompt_abs = self._abs_for(ws, prompt_rel)
 
-        worktree_cwd = dw["worktree_path"] or self._abs_for(
-            ws, f"devworks/{dw['id']}"
-        )
         rc, _stdout = await self._run_llm(
             dw,
             agent=dw["agent"],
-            worktree=worktree_cwd,
+            worktree=dw["worktree_path"],
             timeout=self.config.devwork.step2_timeout,
             task_file=prompt_abs,
             step_tag="STEP2_ITERATION",
@@ -311,7 +308,7 @@ class DevWorkStepHandlersMixin:
             dw,
             agent=dw["agent"],
             worktree=dw["worktree_path"],
-            timeout=self.config.devwork.step4_timeout,
+            timeout=self.config.devwork.step4_acpx_wall_ceiling_s,
             task_file=self._abs_for(ws, prompt_rel),
             step_tag="STEP4_DEVELOP",
             round_n=round_n,

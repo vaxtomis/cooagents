@@ -60,8 +60,6 @@ class AcpxConfig(BaseModel):
     ttl: int = 600
     json_strict: bool = True
     model: str | None = None
-    allowed_tools_design: str | None = None
-    allowed_tools_dev: str | None = None
 
 
 class TurnsConfig(BaseModel):
@@ -113,12 +111,13 @@ class DevWorkConfig(BaseModel):
     """
 
     max_rounds: int = 5
-    # Per-step LLM timeouts (seconds). Step2 plans the iteration design
-    # (F2=B); Step3 is prompt-side context retrieval; Step4 includes one
-    # self-repair attempt inside the same LLM call; Step5 is rubric scoring.
+    # Per-step LLM wall-clock timeouts (seconds). Step2 plans the
+    # iteration design (F2=B); Step3 is prompt-side context retrieval;
+    # Step5 is rubric scoring. Step4 is intentionally absent here — it
+    # is bounded by ``step4_acpx_wall_ceiling_s`` + ``step_idle_timeout_s``
+    # (Phase 3 design: idle_timeout is the active bound).
     step2_timeout: int = 600
     step3_timeout: int = 600
-    step4_timeout: int = 900
     step5_timeout: int = 600
     # Phase 3 (devwork-acpx-overhaul): how often the heartbeat coroutine ticks
     # while an LLM call is in flight. 15s gives <=30s heartbeat cadence even
@@ -133,8 +132,7 @@ class DevWorkConfig(BaseModel):
     # Phase 3: Step4 only — the wall-clock --timeout argument passed to acpx
     # for STEP4_DEVELOP. PRD "Step4 取消 timeout=900s 硬卡": idle_timeout is
     # the active bound; this 3600s acts as a backstop so acpx itself does
-    # not kill the process before our wrapper does. step4_timeout (900) is
-    # kept for back-compat and slated for Phase 7 cleanup.
+    # not kill the process before our wrapper does.
     step4_acpx_wall_ceiling_s: int = 3600
     # v1 default: Step5 auto-approves when score>=threshold. Phase 5 will
     # flip this to gate on a human confirmation event (PRD L145).

@@ -49,7 +49,6 @@ def _build_config(max_rounds=5, default_threshold=80):
             max_rounds=max_rounds,
             step2_timeout=10,
             step3_timeout=10,
-            step4_timeout=10,
             step5_timeout=10,
             # Phase 3: keep test heartbeats fast and idle window short so a
             # stuck wrapper test doesn't hang the suite.
@@ -981,42 +980,65 @@ async def test_run_llm_idle_timeout_marks_dispatch_timeout(
     assert json.loads(rows[0]["payload_json"])["rc"] == 124
 
 
-async def test_step4_uses_wall_ceiling_not_step4_timeout(env, fake_llm_runner):
-    """Step4 carries --timeout 3600 (ceiling), not the per-step 10."""
-    fake_llm_runner.run_oneshot_return = ("", 0)
+async def test_s4_develop_passes_wall_ceiling_to_run_llm(
+    env, fake_llm_runner
+):
+    """Phase 7 regression: _s4_develop must hand step4_acpx_wall_ceiling_s
+    (3600 in test config) to _run_llm as ``timeout=`` — not a per-step value.
+
+    Replaces the deleted ``test_step4_uses_wall_ceiling_not_step4_timeout``
+    which asserted the same invariant inside ``_run_llm`` before the
+    Phase 7 cleanup moved that wiring up to the caller.
+    """
     sm = _make_phase3_sm(env, fake_llm_runner)
     dw = await _insert_minimal_dev_work(
-        env["db"], dev_id="dev-progress5",
+        env["db"], dev_id="dev-step4-ceiling",
         workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
     )
-    await sm._run_llm(
-        dw, agent="claude", worktree=str(env["ws_root"]),
-        timeout=10, task_file="/tmp/x.md",
-        step_tag="STEP4_DEVELOP", round_n=1,
+    # _s4_develop reads dw["worktree_path"]; populate it.
+    dw = dict(dw)
+    dw["worktree_path"] = str(env["ws_root"])
+
+    # Stub the prerequisites _s4_develop touches before calling _run_llm.
+    async def _fake_latest_for(dev_work_id):
+        return {"markdown_path": "devworks/x/iteration-note.md"}
+
+    async def _fake_load_mounts(_dw):
+        return []
+
+    async def _noop_put_markdown(**_kw):
+        return None
+
+    sm.iteration_notes.latest_for = _fake_latest_for  # type: ignore[assignment]
+    sm._load_mount_table_entries = _fake_load_mounts  # type: ignore[assignment]
+    sm.registry.put_markdown = _noop_put_markdown  # type: ignore[assignment]
+
+    captured: dict[str, object] = {}
+
+    async def _spy_run_llm(_dw, **kwargs):
+        captured.update(kwargs)
+        return (0, "")
+
+    sm._run_llm = _spy_run_llm  # type: ignore[assignment]
+
+    # Short-circuit the post-_run_llm body which expects a real findings file.
+    async def _fake_index_existing(**_kw):
+        return None
+
+    sm.registry.index_existing = _fake_index_existing  # type: ignore[assignment]
+
+    try:
+        await sm._s4_develop(dw)
+    except Exception:
+        # The post-_run_llm flow may raise once it hits the missing
+        # findings JSON; we only care that _run_llm was invoked with the
+        # ceiling, which happens before any of that.
+        pass
+
+    assert captured.get("step_tag") == "STEP4_DEVELOP"
+    assert captured.get("timeout") == 3600, (
+        f"Step4 must use step4_acpx_wall_ceiling_s (3600); "
+        f"got timeout={captured.get('timeout')!r}"
     )
-    cmd = fake_llm_runner.calls[0]["cmd"]
-    assert "--timeout" in cmd
-    timeout_value = cmd[cmd.index("--timeout") + 1]
-    assert timeout_value == "3600"
 
 
-async def test_step2_step3_step5_keep_per_step_timeout(env, fake_llm_runner):
-    """Non-Step4 step_tags keep their per-step timeout (10 in tests)."""
-    fake_llm_runner.run_oneshot_return = ("", 0)
-    sm = _make_phase3_sm(env, fake_llm_runner)
-    dw = await _insert_minimal_dev_work(
-        env["db"], dev_id="dev-progress6",
-        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
-    )
-    for step_tag in ("STEP2_ITERATION", "STEP3_CONTEXT", "STEP5_REVIEW"):
-        fake_llm_runner.calls.clear()
-        await sm._run_llm(
-            dw, agent="claude", worktree=str(env["ws_root"]),
-            timeout=10, task_file="/tmp/x.md",
-            step_tag=step_tag, round_n=1,
-        )
-        cmd = fake_llm_runner.calls[0]["cmd"]
-        timeout_value = cmd[cmd.index("--timeout") + 1]
-        assert timeout_value == "10", (
-            f"{step_tag} should retain per-step timeout, got {timeout_value}"
-        )

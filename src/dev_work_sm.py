@@ -665,16 +665,8 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             correlation_id=dw["id"], correlation_kind="dev_work",
         )
 
-        # Phase 3: STEP4_DEVELOP swaps the per-step wall-clock cap for the
-        # acpx ceiling so the wrapper's idle_timeout becomes the active
-        # bound (PRD "Step4 取消 timeout=900s 硬卡"). Other steps keep their
-        # per-step `step{N}_timeout` value.
-        acpx_timeout = (
-            self.config.devwork.step4_acpx_wall_ceiling_s
-            if step_tag == "STEP4_DEVELOP" else timeout
-        )
         cmd = self.llm_runner._build_oneshot_cmd(
-            agent, worktree, acpx_timeout,
+            agent, worktree, timeout,
             task_file=task_file, prompt=None,
         )
 

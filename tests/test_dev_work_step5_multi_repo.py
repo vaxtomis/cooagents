@@ -50,7 +50,7 @@ def _build_config(max_rounds: int = 5, default_threshold: int = 80):
         devwork=SimpleNamespace(
             max_rounds=max_rounds,
             step2_timeout=10, step3_timeout=10,
-            step4_timeout=10, step5_timeout=10,
+            step5_timeout=10,
             # Phase 3 knobs.
             progress_heartbeat_interval_s=0.01,
             step_idle_timeout_s=0.5,

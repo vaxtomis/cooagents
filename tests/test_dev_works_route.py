@@ -40,7 +40,7 @@ def _build_settings(workspace_root: Path | None = None):
         scoring=SimpleNamespace(default_threshold=80),
         devwork=SimpleNamespace(
             max_rounds=5, step2_timeout=10, step3_timeout=10,
-            step4_timeout=10, step5_timeout=10,
+            step5_timeout=10,
             # Phase 3: keep heartbeats fast and idle window short.
             progress_heartbeat_interval_s=0.01,
             step_idle_timeout_s=0.5,
