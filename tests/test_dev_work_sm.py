@@ -1042,3 +1042,140 @@ async def test_s4_develop_passes_wall_ceiling_to_run_llm(
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 9: session lifecycle (per-round plan/build/review)
+# ---------------------------------------------------------------------------
+
+
+async def test_s0_init_persists_session_anchor_path(env):
+    """Phase 9: _s0_init must populate session_anchor_path on the dev_works row."""
+    script = [
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env), prompt="anchor",
+    )
+    # Drive _s0_init via tick(); anchor must be persisted regardless of
+    # whether the rest of the SM runs to completion.
+    await sm.tick(dw["id"])
+    refreshed = await env["db"].fetchone(
+        "SELECT session_anchor_path FROM dev_works WHERE id=?", (dw["id"],),
+    )
+    anchor = refreshed["session_anchor_path"]
+    assert anchor, "session_anchor_path must be populated by _s0_init"
+    expected_tail = Path("devworks") / dw["id"]
+    assert Path(anchor).match(f"*/{expected_tail.as_posix()}") or \
+        Path(anchor).parts[-2:] == ("devworks", dw["id"]), (
+            f"anchor should end at devworks/<dev_id>; got {anchor!r}"
+        )
+
+
+async def test_round_uses_three_session_names(env):
+    """Phase 9: a single round opens plan + build + review sessions."""
+    script = [
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 92, "issues": [], "problem_category": None}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env), prompt="phase 9 sessions",
+    )
+    await sm.run_to_completion(dw["id"])
+    dev_id = dw["id"]
+    expected = [
+        f"dw-{dev_id}-r1-plan",
+        f"dw-{dev_id}-r1-build",
+        f"dw-{dev_id}-r1-review",
+    ]
+    assert sm.llm_runner.created_sessions == expected
+
+
+async def test_round_transition_deletes_prior_round_sessions(env):
+    """Phase 9: round 1 sessions are torn down before round 2 opens its own."""
+    script = [
+        # round 1 fails req_gap → loop
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 50, "issues": [],
+                       "problem_category": "req_gap"}),
+        # round 2 passes
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 92, "issues": [],
+                       "problem_category": None}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env), prompt="round-transition",
+    )
+    await sm.run_to_completion(dw["id"])
+    deleted = sm.llm_runner.deleted_sessions
+    dev_id = dw["id"]
+    # All three r1 sessions must appear in the delete log; same for r2.
+    for role in ("plan", "build", "review"):
+        assert f"dw-{dev_id}-r1-{role}" in deleted
+        assert f"dw-{dev_id}-r2-{role}" in deleted
+    # Strict ordering: every r1 delete precedes every r2 delete.
+    r1_indices = [
+        deleted.index(f"dw-{dev_id}-r1-{role}")
+        for role in ("plan", "build", "review")
+    ]
+    r2_indices = [
+        deleted.index(f"dw-{dev_id}-r2-{role}")
+        for role in ("plan", "build", "review")
+    ]
+    assert max(r1_indices) < min(r2_indices)
+
+
+async def test_terminal_completed_deletes_all_sessions(env):
+    """Phase 9: COMPLETED branch leaves zero live sessions."""
+    script = [
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 92, "issues": [],
+                       "problem_category": None}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env), prompt="completed",
+    )
+    await sm.run_to_completion(dw["id"])
+    dev_id = dw["id"]
+    deleted = sm.llm_runner.deleted_sessions
+    for role in ("plan", "build", "review"):
+        assert f"dw-{dev_id}-r1-{role}" in deleted
+    # Cache is empty after COMPLETED.
+    assert sm._active_sessions.get(dev_id, {}) == {}
+
+
+async def test_terminal_escalated_deletes_all_sessions(env):
+    """Phase 9: ESCALATED branch leaves zero live sessions.
+
+    Force escalation by configuring max_rounds=1 and feeding a req_gap
+    scoring outcome — the second round attempt trips _escalate.
+    """
+    script = [
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 30, "issues": [],
+                       "problem_category": "req_gap"}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script), cfg=_build_config(max_rounds=1))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env), prompt="escalated",
+    )
+    await sm.run_to_completion(dw["id"])
+    final = await env["db"].fetchone(
+        "SELECT current_step FROM dev_works WHERE id=?", (dw["id"],),
+    )
+    assert final["current_step"] == "ESCALATED"
+    dev_id = dw["id"]
+    deleted = sm.llm_runner.deleted_sessions
+    # All three r1 sessions are torn down even on the escalate path.
+    for role in ("plan", "build", "review"):
+        assert f"dw-{dev_id}-r1-{role}" in deleted
+    assert sm._active_sessions.get(dev_id, {}) == {}
+

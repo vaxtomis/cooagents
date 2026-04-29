@@ -95,6 +95,14 @@ class Database:
                 "ALTER TABLE dev_works ADD COLUMN current_progress_json TEXT"
             )
 
+        # devwork-acpx phase 9: add ``session_anchor_path`` to dev_works.
+        # Idempotent: PRAGMA gate before ALTER. Existing rows stay NULL —
+        # _s0_init backfills the column on the next tick for in-flight DevWorks.
+        if "session_anchor_path" not in dw_cols:
+            await conn.execute(
+                "ALTER TABLE dev_works ADD COLUMN session_anchor_path TEXT"
+            )
+
         # devwork-acpx phase 6: add per-mount ``worktree_path`` to
         # dev_work_repos. Idempotent: PRAGMA gate before ALTER. Existing
         # rows stay NULL — _s0_init backfills the primary row's path on

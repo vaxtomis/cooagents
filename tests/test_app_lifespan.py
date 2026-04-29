@@ -54,3 +54,32 @@ async def test_local_host_always_present(configured_env, monkeypatch, tmp_path):
             assert r.status_code == 200, r.text
             ids = [h["id"] for h in r.json()]
             assert "local" in ids
+
+
+async def test_lifespan_runs_orphan_sweep_at_boot(
+    configured_env, monkeypatch, tmp_path,
+):
+    """Phase 9: lifespan reaps orphan acpx sessions before any SM dispatches."""
+    from src.config import load_settings
+    real = load_settings()
+    real.database.path = str(tmp_path / "state.db")
+    real.security.workspace_root = str(tmp_path / "ws")
+    real.health_check.interval = 36000
+    monkeypatch.setattr("src.app.load_settings", lambda: real)
+
+    captured: dict = {}
+
+    async def _fake_sweep(self, *, name_prefixes):
+        captured["prefixes"] = name_prefixes
+        return []
+
+    monkeypatch.setattr(
+        "src.llm_runner.LLMRunner.orphan_sweep_at_boot", _fake_sweep,
+    )
+
+    from src.app import app
+
+    async with app.router.lifespan_context(app):
+        pass
+
+    assert captured.get("prefixes") == ("dw-", "design-")

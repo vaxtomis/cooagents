@@ -251,6 +251,10 @@ stateDiagram-v2
 
 两条状态机的 step handler 都是 **幂等的**：通过 `gates_json` 记录已完成动作，重启后从断点继续；后台 task 由 `asyncio.create_task(run_to_completion(id))` 驱动，前端通过 `POST /{kind}/{id}/tick` 触发单步推进。
 
+#### DevWork 每 round 三会话（Phase 9+）
+
+每个 DevWork round 启动 3 个 acpx session：`dw-<id>-r<N>-plan`（Step2，cold）、`dw-<id>-r<N>-build`（Step3+Step4 共享，warm 复用 worktree-scan cache）、`dw-<id>-r<N>-review`（Step5，cold，独立 judge 视角避免 LLM-as-judge bias）。Round 收尾或 DevWork 终止时 SM 通过 `LLMRunner.delete_session` 回收；启动时 `orphan_sweep_at_boot` 清理上次进程崩溃残留。每个 session 锚定在 `<workspaces_root>/<slug>/devworks/<dev_id>/`（持久化到 `dev_works.session_anchor_path`），LLM 通过 prompt 中的 mount table 切到具体 mount worktree。默认 `permission_mode=approve-all`，避免每步交互阻塞。
+
 ---
 
 ## 数据模型

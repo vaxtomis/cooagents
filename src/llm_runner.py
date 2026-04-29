@@ -432,6 +432,39 @@ class LLMRunner:
         stdout, _stderr, rc = await self._run_local(cmd, session.anchor_cwd)
         return stdout, rc
 
+    async def prompt_session_with_progress(
+        self,
+        session: Session,
+        *,
+        task_file: str | None = None,
+        text: str | None = None,
+        timeout_sec: int,
+        heartbeat: HeartbeatCallback,
+        heartbeat_interval_s: float,
+        idle_timeout_s: float,
+        step_tag: str,
+    ) -> tuple[str, int, list[ProgressTick]]:
+        """Run ``prompt --session`` with the same heartbeat machinery as
+        :meth:`run_with_progress`.
+
+        Phase 9: the SM-level wrapper that turns "session-mode dispatch"
+        into a drop-in replacement for the oneshot heartbeat path.
+        Builds the same ``prompt --session`` cmd as :meth:`prompt_session`
+        then delegates to :meth:`run_with_progress` so heartbeat /
+        idle-timeout semantics stay identical to oneshot.
+        """
+        cmd = self._build_prompt_cmd(
+            session, text=text, task_file=task_file, timeout_sec=timeout_sec,
+        )
+        return await self.run_with_progress(
+            cmd=cmd,
+            cwd=session.anchor_cwd,
+            heartbeat=heartbeat,
+            heartbeat_interval_s=heartbeat_interval_s,
+            idle_timeout_s=idle_timeout_s,
+            step_tag=step_tag,
+        )
+
     async def status_session(self, session: Session) -> dict[str, str]:
         """Parse ``status --session`` ``key: value`` lines into a dict.
 

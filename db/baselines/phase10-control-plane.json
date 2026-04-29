@@ -1,0 +1,21 @@
+{
+  "_comment": "Frozen baselines for Phase 10 acceptance harness. Re-derive via 'git show <baseline_loc_commit>:<file> | wc -l'; do not edit at harness runtime.",
+  "metric_loc_definition_pre": "PRD literal: src/acpx_executor.py + src/dev_work_steps.py",
+  "metric_loc_definition_post_reframe": "Pre + src/llm_runner.py (Phase 2 abstraction added net code)",
+  "baseline_loc_commit": "c582fe8",
+  "baseline_loc_commit_full": "c582fe89e8854384cd79967aa44c9fd001c6afbd",
+  "baseline_loc": {
+    "src/acpx_executor.py": 165,
+    "src/dev_work_steps.py": 560,
+    "src/dev_work_sm.py": 886,
+    "src/llm_runner.py": 0
+  },
+  "baseline_loc_pre_total": 725,
+  "metric_loc_target_pct_decrease": 25,
+  "metric_loc_target_pre_total": 544,
+  "metric_prompt_bytes_method": "synthesized",
+  "metric_prompt_bytes_baseline": 60000,
+  "metric_prompt_bytes_target_pct_decrease": 40,
+  "metric_prompt_bytes_target_max": 36000,
+  "_synthesized_baseline_rationale": "Pre-Phase-2 prompt rendering used Step2-embedded design_doc + Step5 full diff. PRD evidence (8-15 KiB per prompt artifact * 5 steps + iteration_note copy * N rounds) places a single-round baseline at 50-70 KiB. We pick 60 KiB as the midpoint. Harness measures current; PASS if current <= 60_000 * 0.60 = 36_000 bytes."
+}

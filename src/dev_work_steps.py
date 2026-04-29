@@ -57,6 +57,16 @@ class DevWorkStepHandlersMixin:
     async def _s2_iteration(self, dw: dict[str, Any]) -> None:
         """Step2 (F2=B): SM writes header -> LLM appends three H2 sections."""
         round_n = dw["iteration_rounds"] + 1
+        try:
+            await self._s2_iteration_body(dw, round_n)
+        finally:
+            # Phase 9: cold reviewer is freed after the iteration note is
+            # appended; the next step opens its own (build) session.
+            await self._delete_role_session(dw["id"], round_n, "plan")
+
+    async def _s2_iteration_body(
+        self, dw: dict[str, Any], round_n: int,
+    ) -> None:
         ws = await self.workspaces.get(dw["workspace_id"])
         dd = await self.db.fetchone(
             "SELECT path FROM design_docs WHERE id=?", (dw["design_doc_id"],)
@@ -126,6 +136,7 @@ class DevWorkStepHandlersMixin:
             task_file=prompt_abs,
             step_tag="STEP2_ITERATION",
             round_n=round_n,
+            session_role="plan",
         )
         if rc != 0:
             await self._loop_or_escalate(
@@ -238,6 +249,7 @@ class DevWorkStepHandlersMixin:
             task_file=self._abs_for(ws, prompt_rel),
             step_tag="STEP3_CONTEXT",
             round_n=round_n,
+            session_role="build",
         )
 
         if rc == 0:
@@ -312,6 +324,7 @@ class DevWorkStepHandlersMixin:
             task_file=self._abs_for(ws, prompt_rel),
             step_tag="STEP4_DEVELOP",
             round_n=round_n,
+            session_role="build",
         )
 
         if rc != 0:
@@ -363,8 +376,24 @@ class DevWorkStepHandlersMixin:
         iteration note / Step4 findings itself, and Bashes ``git diff HEAD``
         in the primary worktree. The SM only does the rubric pre-flight
         (so an empty rubric escalates without spinning up a Step5 round).
+
+        Phase 9: at entry, delete the build session that survived the
+        Step3 → Step4 boundary (cold reviewer policy — the reviewer must
+        not share state with the process that wrote the code). The review
+        session is opened on the LLM call and torn down in the finally
+        block; on retry, the cache's stale-name check forces a fresh
+        ensure for the next attempt.
         """
         round_n = dw["iteration_rounds"] + 1
+        await self._delete_role_session(dw["id"], round_n, "build")
+        try:
+            await self._s5_review_body(dw, round_n)
+        finally:
+            await self._delete_role_session(dw["id"], round_n, "review")
+
+    async def _s5_review_body(
+        self, dw: dict[str, Any], round_n: int,
+    ) -> None:
         rubric_threshold = await self._resolve_rubric_threshold(dw)
 
         ws = await self.workspaces.get(dw["workspace_id"])
@@ -448,6 +477,7 @@ class DevWorkStepHandlersMixin:
             task_file=self._abs_for(ws, prompt_rel),
             step_tag="STEP5_REVIEW",
             round_n=round_n,
+            session_role="review",
         )
 
         retry_key = f"step5_retry_round{round_n}"
@@ -521,6 +551,12 @@ class DevWorkStepHandlersMixin:
         )
 
         if outcome.score >= rubric_threshold:
+            # Phase 9: by the time we reach the COMPLETED branch, the plan
+            # session was deleted in Step2's finally, the build session in
+            # Step5's entry, and the review session will be deleted by
+            # ``_s5_review``'s outer finally — so the cache is already
+            # empty here. Terminal cleanup is therefore implicit; the
+            # boot-time orphan sweep covers anything that escaped.
             fps = 1 if dw["iteration_rounds"] == 0 else 0
             await self.db.execute(
                 "UPDATE dev_works SET current_step=?, first_pass_success=?, "

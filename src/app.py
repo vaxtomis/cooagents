@@ -190,6 +190,21 @@ async def lifespan(app: FastAPI):
         ssh_dispatcher=ssh_dispatcher,
     )
     llm_runner = LLMRunner(executor=executor, config=settings)
+    # Phase 9 (devwork-acpx-overhaul): reap any acpx sessions left over
+    # from a prior process. Best-effort — a flaky list/close path must not
+    # block startup; a future round's start_session will reopen anything
+    # that legitimately needs to be reopened.
+    try:
+        cleaned = await llm_runner.orphan_sweep_at_boot(
+            name_prefixes=("dw-", "design-"),
+        )
+        logging.getLogger(__name__).info(
+            "llm_runner orphan_sweep: cleaned=%d", len(cleaned),
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "llm_runner orphan_sweep_at_boot failed; continuing startup"
+        )
     design_docs = DesignDocManager(db, registry=registry)
     design_work_sm = DesignWorkStateMachine(
         db=db,

@@ -30,7 +30,7 @@ from src.dev_prompt_composer import MountTableEntry
 from src.dev_work_steps import DevWorkStepHandlersMixin
 from src.exceptions import BadRequestError, NotFoundError
 from src.git_utils import DEVWORK_BRANCH_FMT, ensure_worktree
-from src.llm_runner import IdleTimeoutError, ProgressTick
+from src.llm_runner import IdleTimeoutError, ProgressTick, dw_session_name
 from src.models import (
     REPO_ROLE_PRIMARY_PRIORITY,
     AgentKind,
@@ -111,6 +111,12 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         # (absolute paths embedded in LLM prompts).
         self.workspaces_root = Path(workspaces.workspaces_root).resolve()
         self._running: dict[str, asyncio.Task] = {}
+        # Phase 9: in-memory cache of active acpx sessions per dev_work_id.
+        # Map: dev_id -> {role: Session}. Cleared on round transition or
+        # terminal state. SM crash mid-round leaves stale acpx sessions on
+        # disk; the next boot's :meth:`LLMRunner.orphan_sweep_at_boot` reaps
+        # them, so this cache is purely a process-local mirror.
+        self._active_sessions: dict[str, dict[str, Any]] = {}
 
     def _abs_for(self, ws: dict[str, Any], relative_path: str) -> str:
         """Compose an absolute POSIX path under ``<root>/<slug>/`` for LLM use."""
@@ -435,6 +441,24 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             raise NotFoundError(
                 f"dev_work {dev_id!r} not found or already terminal"
             )
+        # Phase 9: cancel the driver task FIRST and let it unwind so any
+        # in-flight ``prompt_session_with_progress`` finishes (or errors)
+        # cleanly before we tear down the session it is holding. Calling
+        # ``delete_session`` while another task is still awaiting on the
+        # same ``Session`` object risks a torn-down acpx process under a
+        # live caller.
+        task = self._running.pop(dev_id, None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                # Driver task may surface CancelledError or any exception
+                # raised while unwinding; we don't care which — the row is
+                # already CANCELLED and we just need the task to have
+                # released its session references.
+                pass
+        await self._delete_all_sessions(dev_id)
         dw = await self._get(dev_id)
         await emit_and_deliver(
             self.db,
@@ -443,9 +467,6 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             workspace_id=dw["workspace_id"],
             correlation_id=dev_id,
         )
-        task = self._running.pop(dev_id, None)
-        if task is not None:
-            task.cancel()
 
     # ---- step handlers ----
 
@@ -584,13 +605,39 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 primary_wt_path = wt_path
                 primary_branch = branch
 
+        # Phase 9: anchor every acpx session for this DevWork at the
+        # devworks dir. The LLM cd's to mount worktrees via the mount-table
+        # prompt block; the anchor itself is a stable, per-DevWork dir
+        # outside any worktree so session bookkeeping survives worktree
+        # churn.
+        ws = await self.workspaces.get(dw["workspace_id"])
+        anchor_path_obj = (
+            self.workspaces_root / ws["slug"] / "devworks" / dw["id"]
+        ).resolve()
+        try:
+            anchor_path_obj.relative_to(self.workspaces_root)
+        except ValueError:
+            await self._escalate(
+                dw,
+                reason=(
+                    f"session anchor path escapes workspaces_root: "
+                    f"{anchor_path_obj}"
+                ),
+                problem_category=None,
+            )
+            return
+        anchor_path_obj.mkdir(parents=True, exist_ok=True)
+        session_anchor = str(anchor_path_obj)
+
         # Mirror primary's path onto the deprecated dev_works column for
         # back-compat reads. Conditional UPDATE preserves the CAS guard so
         # a re-tick after a partial _s0_init doesn't clobber the row.
         await self.db.execute(
             "UPDATE dev_works SET worktree_path=?, worktree_branch=?, "
-            "updated_at=? WHERE id=? AND worktree_path IS NULL",
-            (primary_wt_path, primary_branch, self._now(), dw["id"]),
+            "session_anchor_path=?, updated_at=? "
+            "WHERE id=? AND worktree_path IS NULL",
+            (primary_wt_path, primary_branch, session_anchor,
+             self._now(), dw["id"]),
         )
         # Re-fetch since we UPDATEd out-of-band, so _transition's CAS sees
         # the right pre-image.
@@ -653,12 +700,25 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         task_file: str,
         step_tag: str,
         round_n: int,
+        session_role: str | None = None,
     ) -> tuple[int, str]:
         """Wrapper around ``executor.run_once`` with uniform event emission.
 
         Phase 8a: opens an ``agent_dispatches`` row and routes to the host
         recorded on the dev_works row (defaults to ``"local"``).
+
+        Phase 9: when ``session_role`` is provided (one of
+        ``{"plan", "build", "review"}``), routes to
+        :meth:`_run_llm_session` which uses ``prompt --session`` against a
+        warm acpx session instead of one-shot ``acpx exec``. Lifecycle of
+        the session (open / reuse / delete) is owned by the calling step
+        handler.
         """
+        if session_role is not None:
+            return await self._run_llm_session(
+                dw, agent=agent, role=session_role, round_n=round_n,
+                step_tag=step_tag, task_file=task_file, timeout=timeout,
+            )
         host_id = dw.get("agent_host_id") or "local"
         ad_id = await self._open_dispatch(
             host_id=host_id, workspace_id=dw["workspace_id"],
@@ -761,6 +821,244 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             payload={"step": step_tag, "round": round_n, "rc": rc},
         )
         return rc, stdout or ""
+
+    # ---- Phase 9 session-mode dispatch -----------------------------------
+
+    async def _run_llm_session(
+        self,
+        dw: dict[str, Any],
+        *,
+        agent: str,
+        role: str,
+        round_n: int,
+        step_tag: str,
+        task_file: str,
+        timeout: int,
+    ) -> tuple[int, str]:
+        """Session-mode LLM dispatch — Phase 9.
+
+        Looks up the active session for ``(dev_id, round_n, role)``;
+        creates it if absent. Runs ``prompt --session`` with the same
+        heartbeat + idle_timeout machinery as oneshot. Does NOT delete the
+        session — lifecycle is owned by the calling step handler:
+
+          * Step2 deletes the plan session in its finally block.
+          * Step3 / Step4 share the build session; Step5 entry deletes it.
+          * Step5 deletes the review session in its finally block; round
+            transition / terminal cleanup catches anything that slipped.
+        """
+        anchor = dw.get("session_anchor_path")
+        if not anchor:
+            # Defensive: _s0_init should always populate this. If a legacy
+            # in-flight DevWork is missing the column, fall back to the
+            # worktree_path so we never crash mid-round.
+            anchor = dw["worktree_path"]
+            logger.warning(
+                "dev_work %s missing session_anchor_path; falling back "
+                "to worktree_path=%r", dw["id"], anchor,
+            )
+        # Re-validate every read: even though _s0_init checks ``relative_to``
+        # on write, a tampered DB row or migration bug could surface a path
+        # outside the sandbox. Refusing to dispatch is safer than handing
+        # an arbitrary cwd to ``acpx --cwd``.
+        try:
+            Path(anchor).resolve().relative_to(self.workspaces_root)
+        except (ValueError, OSError):
+            raise BadRequestError(
+                f"dev_work {dw['id']} session anchor escapes "
+                f"workspaces_root: {anchor!r}"
+            )
+        resolved_agent = self.llm_runner._resolve_agent(agent)
+        name = dw_session_name(dw["id"], round_n, role)
+        per_dw = self._active_sessions.setdefault(dw["id"], {})
+        session = per_dw.get(role)
+        if session is None or session.name != name:
+            # Stale cache (round changed) — close any prior role binding
+            # before reopening so process count never drifts upward.
+            if session is not None:
+                try:
+                    await self.llm_runner.delete_session(session)
+                except Exception:
+                    logger.warning(
+                        "stale session cleanup failed for %s",
+                        session.name, exc_info=True,
+                    )
+            session = await self.llm_runner.start_session(
+                name=name, anchor_cwd=anchor, agent=resolved_agent,
+            )
+            per_dw[role] = session
+
+        host_id = dw.get("agent_host_id") or "local"
+        ad_id = await self._open_dispatch(
+            host_id=host_id, workspace_id=dw["workspace_id"],
+            correlation_id=dw["id"], correlation_kind="dev_work",
+        )
+
+        async def heartbeat(tick: ProgressTick) -> None:
+            payload = {
+                "step": step_tag,
+                "round": round_n,
+                "elapsed_s": tick.elapsed_s,
+                "last_heartbeat_at": tick.ts,
+                "dispatch_id": ad_id,
+            }
+            try:
+                await emit_workspace_event(
+                    self.db,
+                    event_name="dev_work.progress",
+                    workspace_id=dw["workspace_id"],
+                    correlation_id=dw["id"],
+                    payload=payload,
+                )
+            except Exception:
+                logger.warning(
+                    "emit_workspace_event(dev_work.progress) failed",
+                    exc_info=True,
+                )
+            try:
+                await self.db.execute(
+                    "UPDATE dev_works SET current_progress_json=?, "
+                    "updated_at=? WHERE id=?",
+                    (
+                        json.dumps(payload, ensure_ascii=False),
+                        self._now(),
+                        dw["id"],
+                    ),
+                )
+            except Exception:
+                logger.warning(
+                    "UPDATE dev_works.current_progress_json failed",
+                    exc_info=True,
+                )
+
+        try:
+            stdout, rc, _progress = (
+                await self.llm_runner.prompt_session_with_progress(
+                    session,
+                    task_file=task_file,
+                    timeout_sec=timeout,
+                    heartbeat=heartbeat,
+                    heartbeat_interval_s=(
+                        self.config.devwork.progress_heartbeat_interval_s
+                    ),
+                    idle_timeout_s=self.config.devwork.step_idle_timeout_s,
+                    step_tag=step_tag,
+                )
+            )
+            dispatch_state = "succeeded" if rc == 0 else "failed"
+        except IdleTimeoutError as exc:
+            logger.warning(
+                "dev_work %s idle_timeout at %s round=%s after %ss",
+                dw["id"], step_tag, round_n, exc.idle_window_s,
+            )
+            rc, stdout, dispatch_state = 124, "", "timeout"
+        except Exception:
+            logger.exception(
+                "dev_work %s session LLM call failed at %s round=%s",
+                dw["id"], step_tag, round_n,
+            )
+            rc, stdout, dispatch_state = 1, "", "failed"
+
+        try:
+            await self.db.execute(
+                "UPDATE dev_works SET current_progress_json=NULL, "
+                "updated_at=? WHERE id=?",
+                (self._now(), dw["id"]),
+            )
+        except Exception:
+            logger.warning(
+                "clear current_progress_json failed", exc_info=True,
+            )
+
+        await self._close_dispatch(
+            ad_id, state=dispatch_state, exit_code=rc,
+        )
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="dev_work.step_completed",
+            workspace_id=dw["workspace_id"],
+            correlation_id=dw["id"],
+            payload={"step": step_tag, "round": round_n, "rc": rc},
+        )
+        return rc, stdout or ""
+
+    async def _delete_role_session(
+        self, dev_id: str, round_n: int, role: str,
+    ) -> None:
+        """Phase 9: delete one (round, role) session from the cache.
+
+        Best-effort — failures are logged but never raised; the next boot's
+        :meth:`LLMRunner.orphan_sweep_at_boot` reaps anything that slipped.
+        """
+        per_dw = self._active_sessions.get(dev_id)
+        if not per_dw:
+            return
+        target_name = dw_session_name(dev_id, round_n, role)
+        session = per_dw.get(role)
+        if session is None or session.name != target_name:
+            return
+        try:
+            await self.llm_runner.delete_session(session)
+        except Exception:
+            logger.warning(
+                "delete_role_session failed for %s", session.name,
+                exc_info=True,
+            )
+        per_dw.pop(role, None)
+        if not per_dw:
+            self._active_sessions.pop(dev_id, None)
+
+    async def _delete_round_sessions(
+        self, dev_id: str, round_n: int,
+    ) -> None:
+        """Phase 9: delete every active session whose name encodes ``round_n``.
+
+        Called on round transition (``_loop_or_escalate`` loop branch) so
+        the previous round's sessions die before the new round's plan
+        session is opened.
+        """
+        per_dw = self._active_sessions.get(dev_id)
+        if not per_dw:
+            return
+        marker = f"-r{round_n}-"
+        stale_roles = [
+            role for role, s in per_dw.items()
+            if marker in s.name
+        ]
+        for role in stale_roles:
+            session = per_dw.get(role)
+            if session is None:
+                continue
+            try:
+                await self.llm_runner.delete_session(session)
+            except Exception:
+                logger.warning(
+                    "delete_round_session failed for %s", session.name,
+                    exc_info=True,
+                )
+            per_dw.pop(role, None)
+        if not per_dw:
+            self._active_sessions.pop(dev_id, None)
+
+    async def _delete_all_sessions(self, dev_id: str) -> None:
+        """Phase 9: delete every active session for ``dev_id``.
+
+        Wired into terminal handlers (``_escalate``, COMPLETED branch in
+        ``_s5_review``, ``cancel``) so the SM never returns control with
+        live acpx sessions on disk.
+        """
+        per_dw = self._active_sessions.pop(dev_id, None)
+        if not per_dw:
+            return
+        for role, session in list(per_dw.items()):
+            try:
+                await self.llm_runner.delete_session(session)
+            except Exception:
+                logger.warning(
+                    "delete_all_sessions failed for %s", session.name,
+                    exc_info=True,
+                )
 
     async def _load_mount_table_entries(
         self, dw: dict[str, Any],
@@ -977,6 +1275,14 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 dw, reason=reason, problem_category=problem_category
             )
             return
+        # Phase 9: drop the just-finished round's sessions before the DB
+        # row's ``iteration_rounds`` is incremented to ``next_round``.
+        # Step handlers compute ``round_n = dw["iteration_rounds"] + 1``
+        # when they open sessions, which equals ``next_round`` here —
+        # i.e. ``next_round`` is the *just-completed* round number, not a
+        # forward-looking one. Names mirror that intent.
+        completed_round = next_round
+        await self._delete_round_sessions(dw["id"], completed_round)
         now = self._now()
         category_value = (
             problem_category.value if problem_category else None
@@ -1019,6 +1325,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         reason: str,
         problem_category: ProblemCategory | None,
     ) -> None:
+        # Phase 9: terminal cleanup before flipping current_step. Best-effort;
+        # the boot-time sweep covers anything that fails here.
+        await self._delete_all_sessions(dw["id"])
         now = self._now()
         category_value = (
             problem_category.value if problem_category else None

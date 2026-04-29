@@ -102,13 +102,36 @@ def make_test_llm_runner(executor):
     zero times (matches the empty ``progress_log`` semantics — tests that
     care about ticks use ``_FakeLLMRunner`` directly).
     """
-    from src.llm_runner import LLMRunner
+    from src.llm_runner import LLMRunner, Session
 
     class _TestLLMRunner(LLMRunner):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # Phase 9: per-instance trackers for session lifecycle assertions.
+            # Tests read these to verify session names and ordering without
+            # spawning a real acpx subprocess.
+            self.created_sessions: list[str] = []
+            self.deleted_sessions: list[str] = []
+            # Phase 10: counters for the acceptance harness. Increment
+            # before the delegate call so a raising executor still bumps
+            # the count (matches PRD intent — count acpx invocations
+            # regardless of success).
+            self.prompt_call_count: int = 0
+            self.oneshot_call_count: int = 0
+
+        def _resolve_agent(self, agent_type):
+            # Phase 9: ScriptedExecutor / FakeOSSStore-shaped fixtures may
+            # not implement ``_resolve_agent``. The production passthrough
+            # in :class:`AcpxExecutor` is identity-ish ("claude" -> "claude",
+            # everything else -> "codex"); mirror that here so tests can
+            # inject any executor without a no-op shim.
+            return "claude" if agent_type == "claude" else "codex"
+
         async def run_with_progress(
             self, *, cmd, cwd, heartbeat, heartbeat_interval_s,
             idle_timeout_s, step_tag,
         ):
+            self.oneshot_call_count += 1   # Phase 10
             # Parse by sentinel rather than positional index so the test
             # adapter survives flag additions to ``_build_acpx_exec_cmd``
             # (e.g. --model, --json-strict). The agent token is the one
@@ -136,6 +159,32 @@ def make_test_llm_runner(executor):
                 task_file=task_file, prompt=prompt,
             )
             return stdout, rc, []
+
+        async def prompt_session_with_progress(
+            self, session, *, task_file=None, text=None, timeout_sec,
+            heartbeat, heartbeat_interval_s, idle_timeout_s, step_tag,
+        ):
+            self.prompt_call_count += 1   # Phase 10
+            # Phase 9: session-mode in test mode delegates to the same
+            # scripted ``run_once`` as oneshot. The scripted Step2/3/4/5
+            # actions parse the prompt body to find their output paths,
+            # not the cwd, so anchoring at ``session.anchor_cwd`` (the
+            # devworks dir) keeps every existing scripted helper working.
+            stdout, rc = await self._executor.run_once(
+                session.agent, session.anchor_cwd, timeout_sec,
+                task_file=task_file, prompt=text,
+            )
+            return stdout, rc, []
+
+        async def start_session(self, *, name, anchor_cwd, agent):
+            self.created_sessions.append(name)
+            return Session(
+                name=name, anchor_cwd=anchor_cwd, agent=agent,
+                created_at="t",
+            )
+
+        async def delete_session(self, session):
+            self.deleted_sessions.append(session.name)
 
     return _TestLLMRunner(executor=executor)
 
@@ -210,6 +259,44 @@ class _FakeLLMRunner:
         if prompt is not None:
             cmd += ["--prompt", prompt]
         return cmd
+
+    # Phase 9: session-mode call-shape stubs. Tests that drive the SM
+    # through ``session_role=`` paths read ``calls`` (kind="session" or
+    # "session-prompt") to assert the session name / role / ordering.
+    def _resolve_agent(self, agent_type):
+        return "claude" if agent_type == "claude" else "codex"
+
+    async def start_session(self, *, name, anchor_cwd, agent):
+        from src.llm_runner import Session
+
+        self.calls.append(dict(
+            kind="start_session", name=name, anchor_cwd=anchor_cwd,
+            agent=agent,
+        ))
+        return Session(
+            name=name, anchor_cwd=anchor_cwd, agent=agent, created_at="t",
+        )
+
+    async def delete_session(self, session):
+        self.calls.append(dict(kind="delete_session", name=session.name))
+
+    async def prompt_session_with_progress(
+        self, session, *, task_file=None, text=None, timeout_sec,
+        heartbeat, heartbeat_interval_s, idle_timeout_s, step_tag,
+    ):
+        self.calls.append(dict(
+            kind="session-prompt", session_name=session.name,
+            task_file=task_file, text=text, timeout_sec=timeout_sec,
+            step_tag=step_tag,
+        ))
+        for tick in self.progress_ticks:
+            await heartbeat(tick)
+        if self.next_idle_timeout is not None:
+            exc = self.next_idle_timeout
+            self.next_idle_timeout = None
+            raise exc
+        stdout, rc = self.run_oneshot_return
+        return stdout, rc, list(self.progress_ticks)
 
 
 @pytest.fixture

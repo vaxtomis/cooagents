@@ -501,6 +501,67 @@ async def test_orphan_sweep_skips_when_list_rc_nonzero(monkeypatch, runner):
     assert cleaned == []
 
 
+# ---- prompt_session_with_progress (Phase 9) -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_prompt_session_with_progress_delegates_to_run_with_progress():
+    """Phase 9: session-mode dispatch fires the same heartbeat machinery."""
+
+    class _FakeExecutor:
+        def _resolve_agent(self, t):
+            return t
+
+    runner = LLMRunner(executor=_FakeExecutor(), config=None)
+    session = Session(
+        name="dw-x-r1-plan", anchor_cwd="/anchor",
+        agent="claude", created_at=FIXED_CLOCK,
+    )
+
+    captured: dict = {}
+
+    async def _fake_rwp(
+        *, cmd, cwd, heartbeat, heartbeat_interval_s,
+        idle_timeout_s, step_tag,
+    ):
+        captured["cmd"] = list(cmd)
+        captured["cwd"] = cwd
+        captured["step_tag"] = step_tag
+        captured["heartbeat_interval_s"] = heartbeat_interval_s
+        captured["idle_timeout_s"] = idle_timeout_s
+        await heartbeat(ProgressTick(ts=FIXED_CLOCK, elapsed_s=1))
+        return "ok", 0, [ProgressTick(ts=FIXED_CLOCK, elapsed_s=1)]
+
+    runner.run_with_progress = _fake_rwp  # type: ignore[method-assign]
+
+    ticks: list[ProgressTick] = []
+
+    async def hb(t: ProgressTick) -> None:
+        ticks.append(t)
+
+    stdout, rc, log = await runner.prompt_session_with_progress(
+        session,
+        task_file="/tmp/p.md",
+        timeout_sec=30,
+        heartbeat=hb,
+        heartbeat_interval_s=0.5,
+        idle_timeout_s=10.0,
+        step_tag="STEP2_ITERATION",
+    )
+
+    assert (stdout, rc) == ("ok", 0)
+    assert len(log) == 1
+    assert len(ticks) == 1
+    assert "prompt" in captured["cmd"]
+    assert "--session" in captured["cmd"]
+    assert "dw-x-r1-plan" in captured["cmd"]
+    assert "--file" in captured["cmd"]
+    assert captured["cwd"] == "/anchor"
+    assert captured["step_tag"] == "STEP2_ITERATION"
+    assert captured["heartbeat_interval_s"] == 0.5
+    assert captured["idle_timeout_s"] == 10.0
+
+
 # ---- run_with_progress (Phase 3) ----------------------------------------
 
 class _SlowFakeProc:

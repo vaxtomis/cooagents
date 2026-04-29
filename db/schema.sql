@@ -193,6 +193,11 @@ CREATE TABLE IF NOT EXISTS dev_works (
   -- recent heartbeat tick from LLMRunner.run_with_progress. NULL means no
   -- LLM call is in flight; the SM clears it on dispatch close.
   current_progress_json       TEXT,
+  -- Phase 9 (devwork-acpx-overhaul): the cwd that every acpx session for
+  -- this DevWork anchors at. Computed at _s0_init from
+  -- <workspaces_root>/<slug>/devworks/<id>/. Persisted so a SM resume after
+  -- restart can re-derive session names without re-walking the FS.
+  session_anchor_path         TEXT,
   escalated_at                TEXT,
   completed_at                TEXT,
   created_at                  TEXT NOT NULL,
