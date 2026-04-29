@@ -479,16 +479,29 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         )
 
     async def _s0_init(self, dw: dict[str, Any]) -> None:
-        """Resolve the primary ref and materialize a worktree for it.
+        """Materialize one git worktree per mount.
+
+        Phase 6 (devwork-acpx-overhaul): every ``dev_work_repos`` row gets
+        its own worktree under
+        ``<workspaces_root>/.coop/worktrees/<branch_safe>/<mount_name>/``
+        so multi-mount tasks can read/write each repo independently. The
+        primary mount's path is mirrored onto the deprecated
+        ``dev_works.worktree_path`` column for back-compat (callers that
+        still read ``dw["worktree_path"]`` see the primary's path; new
+        callers should read ``dev_work_repos.worktree_path`` per row).
 
         Phase 4 transition: ``git worktree add`` runs against the
-        control-plane bare clone at
+        control-plane bare clones at
         ``<workspaces_root>/.coop/registry/repos/<repo_id>.git``. This
         intentionally pollutes the bare's reflog and ``worktrees/``
-        metadata; Phase 5 cleans up via ``git worktree prune --expire=now``
-        once the worker takes over execution. See
-        ``.claude/PRPs/plans/repo-registry-phase4-...`` (Method A) for the
-        decision and the Method B/C alternatives that were rejected.
+        metadata; cleanup via ``git worktree prune --expire=now`` is
+        deferred to the worker handoff PRD.
+
+        Failure mode: any per-mount ``ensure_worktree`` exception escalates
+        the whole DevWork (terminal — no automatic retry). Already-created
+        worktrees on healthy mounts are left on disk; ``ensure_worktree`` is
+        idempotent so a manually re-created DevWork on the same branch will
+        reuse them rather than fail.
         """
         refs = await self.db.fetchall(
             "SELECT dwr.*, r.role AS repo_role "
@@ -507,48 +520,77 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             return
 
         primary = self._select_primary_ref(refs)
-        bare = (
-            self.workspaces_root / ".coop" / "registry" / "repos"
-            / f"{primary['repo_id']}.git"
-        )
-        branch = primary["devwork_branch"]
-        branch_safe = branch.replace("/", "-")
         worktrees_root = (
             self.workspaces_root / ".coop" / "worktrees"
         ).resolve()
-        wt_path_obj = (worktrees_root / branch_safe).resolve()
-        # Defense-in-depth: slug regex prevents '..' in branch_safe today,
-        # but assert the resolved path stays under .coop/worktrees so a
-        # future relaxation can't escape the sandbox.
-        try:
-            wt_path_obj.relative_to(worktrees_root)
-        except ValueError:
-            await self._escalate(
-                dw,
-                reason=(
-                    f"worktree path escapes .coop/worktrees: {wt_path_obj}"
-                ),
-                problem_category=None,
+        primary_wt_path: str | None = None
+        primary_branch: str | None = None
+
+        for ref in refs:
+            bare = (
+                self.workspaces_root / ".coop" / "registry" / "repos"
+                / f"{ref['repo_id']}.git"
             )
-            return
-        wt_path = str(wt_path_obj)
-        try:
-            # TODO(phase5): worktree creation moves to the worker on the
-            # agent host; until then we add to the control-plane bare clone
-            # and accept the reflog noise.
-            _, wt_path = await ensure_worktree(str(bare), branch, wt_path)
-        except Exception as exc:
-            logger.exception("dev_work %s ensure_worktree failed", dw["id"])
-            await self._escalate(
-                dw,
-                reason=f"ensure_worktree failed: {exc}",
-                problem_category=None,
+            branch = ref["devwork_branch"]
+            branch_safe = branch.replace("/", "-")
+            mount_name = ref["mount_name"]
+            wt_path_obj = (
+                worktrees_root / branch_safe / mount_name
+            ).resolve()
+            # Defense-in-depth: slug + mount regex prevents '..' today, but
+            # assert the resolved path stays under .coop/worktrees so a
+            # future relaxation can't escape the sandbox.
+            try:
+                wt_path_obj.relative_to(worktrees_root)
+            except ValueError:
+                await self._escalate(
+                    dw,
+                    reason=(
+                        f"worktree path escapes .coop/worktrees: "
+                        f"{wt_path_obj}"
+                    ),
+                    problem_category=None,
+                )
+                return
+            wt_path = str(wt_path_obj)
+            try:
+                _, wt_path = await ensure_worktree(
+                    str(bare), branch, wt_path
+                )
+            except Exception as exc:
+                logger.exception(
+                    "dev_work %s ensure_worktree failed (mount=%s)",
+                    dw["id"], mount_name,
+                )
+                await self._escalate(
+                    dw,
+                    reason=(
+                        f"ensure_worktree failed for mount "
+                        f"{mount_name!r}: {exc}"
+                    ),
+                    problem_category=None,
+                )
+                return
+            # No CAS guard on this per-row UPDATE: ``ensure_worktree`` is
+            # idempotent and ``wt_path`` is deterministic in
+            # (workspaces_root, branch_safe, mount_name), so re-entering the
+            # loop after a partial _s0_init writes the same value back.
+            await self.db.execute(
+                "UPDATE dev_work_repos SET worktree_path=?, updated_at=? "
+                "WHERE dev_work_id=? AND repo_id=?",
+                (wt_path, self._now(), dw["id"], ref["repo_id"]),
             )
-            return
+            if ref["repo_id"] == primary["repo_id"]:
+                primary_wt_path = wt_path
+                primary_branch = branch
+
+        # Mirror primary's path onto the deprecated dev_works column for
+        # back-compat reads. Conditional UPDATE preserves the CAS guard so
+        # a re-tick after a partial _s0_init doesn't clobber the row.
         await self.db.execute(
             "UPDATE dev_works SET worktree_path=?, worktree_branch=?, "
             "updated_at=? WHERE id=? AND worktree_path IS NULL",
-            (wt_path, branch, self._now(), dw["id"]),
+            (primary_wt_path, primary_branch, self._now(), dw["id"]),
         )
         # Re-fetch since we UPDATEd out-of-band, so _transition's CAS sees
         # the right pre-image.
@@ -731,19 +773,24 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
     async def _load_mount_table_entries(
         self, dw: dict[str, Any],
     ) -> tuple[MountTableEntry, ...]:
-        """Build the Step5 mount-table input ordered primary-first.
+        """Build the mount-table input ordered primary-first.
 
-        Phase 8 (B-track): only the primary mount carries a populated
-        ``worktree_path`` — non-primary mounts have no local worktree until
-        the multi-mount worker (a future PRD) ships. Sort key intentionally
-        bypasses :meth:`_select_primary_ref` because that helper would re-run
-        the auto-selection rule, which can disagree with the explicit
-        ``is_primary`` bit recorded by ``_s0_init`` if ``repos.role`` was
-        edited between create and review.
+        Phase 6: every mount carries its own ``worktree_path`` populated by
+        :meth:`_s0_init`. Legacy in-flight rows created before Phase 6 may
+        have ``worktree_path IS NULL`` on non-primary mounts — the composer
+        renders a placeholder for those (callers are expected to either
+        re-run the DevWork or accept the legacy view).
+
+        Sort key intentionally bypasses :meth:`_select_primary_ref` because
+        that helper would re-run the auto-selection rule, which can
+        disagree with the explicit ``is_primary`` bit recorded by
+        ``_s0_init`` if ``repos.role`` was edited between create and
+        review.
         """
         rows = await self.db.fetchall(
             "SELECT dwr.repo_id, dwr.mount_name, dwr.base_branch, "
-            "dwr.devwork_branch, dwr.is_primary, r.role AS repo_role "
+            "dwr.devwork_branch, dwr.is_primary, dwr.worktree_path, "
+            "r.role AS repo_role "
             "FROM dev_work_repos dwr "
             "JOIN repos r ON r.id = dwr.repo_id "
             "WHERE dwr.dev_work_id=? "
@@ -755,7 +802,6 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         ordered = sorted(
             rows, key=lambda r: (not r["is_primary"], r["mount_name"])
         )
-        primary_wt = dw.get("worktree_path")
         return tuple(
             MountTableEntry(
                 mount_name=r["mount_name"],
@@ -764,7 +810,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 is_primary=bool(r["is_primary"]),
                 base_branch=r["base_branch"],
                 devwork_branch=r["devwork_branch"],
-                worktree_path=primary_wt if r["is_primary"] else None,
+                worktree_path=r["worktree_path"],
             )
             for r in ordered
         )

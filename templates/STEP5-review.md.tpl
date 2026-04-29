@@ -19,16 +19,19 @@ $step_wall
 
 $mount_table
 
-$btrack_limitation
-
 ## 必做的诊断（Bash 工具）
 
 - 进 primary worktree 看本轮代码改动：
   ```bash
   cd $primary_worktree_path && git diff HEAD
   ```
-- **不要**对非 primary mount 跑 git 命令（worktree 不存在）；
-  那些仓只读 Step4 findings 中带该 `mount_name` 的条目。
+- 对**每个**非 primary mount，进入其 `worktree_path` 后同样跑：
+  ```bash
+  cd <mount.worktree_path> && git diff HEAD
+  ```
+  并把该 mount 的代码改动纳入评分（Phase 6 起所有 mount 都有本机 worktree）。
+- 同时交叉验证 Step4 findings 中带该 `mount_name` 的条目，确认其与 git diff
+  反映的改动一致。
 
 ## 打分聚合规则（多仓）
 

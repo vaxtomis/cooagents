@@ -645,6 +645,10 @@ class DevRepoRefView(BaseModel):
 
     Phase 4 progress contract — this is *not* the Phase 5 worker handoff
     payload (which adds url / ssh_key_path bits).
+
+    Phase 6: ``worktree_path`` is the per-mount git worktree absolute path
+    populated by ``_s0_init``. ``None`` only on legacy in-flight rows
+    created before Phase 6.
     """
     repo_id: str
     mount_name: str
@@ -653,6 +657,7 @@ class DevRepoRefView(BaseModel):
     devwork_branch: str
     push_state: str
     is_primary: bool = False
+    worktree_path: str | None = None
 
 
 class WorkerRepoHandoff(DevRepoRefView):

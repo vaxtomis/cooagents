@@ -9,7 +9,6 @@ from src.dev_prompt_composer import (
     Step4Inputs,
     Step5Inputs,
     _BOUNDARY_CHECK_RUBRIC,
-    _BTRACK_LIMITATION_NOTE,
     _NEXT_ROUND_HINTS_GUIDE,
     _STEP_WALL_STEP2,
     _STEP_WALL_STEP3,
@@ -111,20 +110,68 @@ def test_step2_preserves_literal_dollar_signs():
     assert "$5" in out
 
 
+def _two_mount_entries() -> tuple[MountTableEntry, ...]:
+    """Phase 6: shared two-mount fixture for Step3/Step4/Step5 tests."""
+    return (
+        MountTableEntry(
+            mount_name="backend", repo_id="repo-bbb",
+            role="backend", is_primary=True,
+            base_branch="main",
+            devwork_branch="devwork/ws-foo/aaa111111111",
+            worktree_path="/ws/foo/.coop/worktrees/devwork-ws-foo-aaa/backend",
+        ),
+        MountTableEntry(
+            mount_name="frontend", repo_id="repo-aaa",
+            role="frontend", is_primary=False,
+            base_branch="main",
+            devwork_branch="devwork/ws-foo/aaa111111111",
+            worktree_path="/ws/foo/.coop/worktrees/devwork-ws-foo-aaa/frontend",
+        ),
+    )
+
+
 def test_step3_prompt_includes_paths():
     out = compose_step3(Step3Inputs(
         worktree_path="/wt", design_doc_path="/d.md",
         iteration_note_path="/n.md", output_path="/o.md",
+        mount_table_entries=(),
     ))
     assert "/wt" in out and "/d.md" in out and "/n.md" in out and "/o.md" in out
+
+
+def test_step3_prompt_includes_mount_table():
+    out = compose_step3(Step3Inputs(
+        worktree_path="/wt", design_doc_path="/d.md",
+        iteration_note_path="/n.md", output_path="/o.md",
+        mount_table_entries=_two_mount_entries(),
+    ))
+    assert "## 多仓改动表" in out
+    assert "| `backend` |" in out
+    assert "| `frontend` |" in out
+    assert "/ws/foo/.coop/worktrees/devwork-ws-foo-aaa/backend" in out
+    assert "/ws/foo/.coop/worktrees/devwork-ws-foo-aaa/frontend" in out
 
 
 def test_step4_prompt_includes_findings_path():
     out = compose_step4(Step4Inputs(
         worktree_path="/wt", iteration_note_path="/n.md",
         context_path="/c.md", findings_output_path="/f.json",
+        mount_table_entries=(),
     ))
     assert "/f.json" in out
+
+
+def test_step4_prompt_includes_mount_table():
+    out = compose_step4(Step4Inputs(
+        worktree_path="/wt", iteration_note_path="/n.md",
+        context_path="/c.md", findings_output_path="/f.json",
+        mount_table_entries=_two_mount_entries(),
+    ))
+    assert "## 多仓改动表" in out
+    assert "| `backend` |" in out
+    assert "| `frontend` |" in out
+    assert "/ws/foo/.coop/worktrees/devwork-ws-foo-aaa/backend" in out
+    assert "/ws/foo/.coop/worktrees/devwork-ws-foo-aaa/frontend" in out
 
 
 def test_step5_renders_paths_only():
@@ -136,24 +183,9 @@ def test_step5_renders_paths_only():
             "/ws/foo/devworks/dev-x/artifacts/step4-findings-round1.json"
         ),
         context_path=ctx,
-        mount_table_entries=(
-            MountTableEntry(
-                mount_name="backend", repo_id="repo-bbb",
-                role="backend", is_primary=True,
-                base_branch="main",
-                devwork_branch="devwork/ws-foo/aaa111111111",
-                worktree_path="/ws/foo/.coop/worktrees/devwork-ws-foo-aaa",
-            ),
-            MountTableEntry(
-                mount_name="frontend", repo_id="repo-aaa",
-                role="frontend", is_primary=False,
-                base_branch="main",
-                devwork_branch="devwork/ws-foo/aaa111111111",
-                worktree_path=None,
-            ),
-        ),
+        mount_table_entries=_two_mount_entries(),
         primary_worktree_path=(
-            "/ws/foo/.coop/worktrees/devwork-ws-foo-aaa"
+            "/ws/foo/.coop/worktrees/devwork-ws-foo-aaa/backend"
         ),
         rubric_threshold=85,
         output_json_path=(
@@ -165,14 +197,15 @@ def test_step5_renders_paths_only():
     assert "iteration-round-1.md" in out
     assert "step4-findings-round1.json" in out
     assert ctx in out
-    # Mount table renders both rows
+    # Mount table renders both rows with their per-mount paths (Phase 6).
     assert "| `backend` |" in out
     assert "| `frontend` |" in out
     assert "✅" in out  # primary marked
-    # frontend B-track marker (no local worktree)
-    assert "_(无本地 worktree — 多仓 worker 待上线)_" in out
-    # Limitation note + aggregation rule + threshold
-    assert _BTRACK_LIMITATION_NOTE in out
+    assert "/ws/foo/.coop/worktrees/devwork-ws-foo-aaa/backend" in out
+    assert "/ws/foo/.coop/worktrees/devwork-ws-foo-aaa/frontend" in out
+    # Phase 6: B-track placeholder + limitation note are gone.
+    assert "_(无本地 worktree — 多仓 worker 待上线)_" not in out
+    assert "B-track" not in out
     # Aggregation rule wording is asserted by a stable substring (the
     # constant interpolates ``$rubric_threshold`` at compose time, so
     # asserting on the raw constant would not match the rendered output).
@@ -184,6 +217,33 @@ def test_step5_renders_paths_only():
     # No embedded content from the previous embed-everything layout.
     assert "## 设计文档" not in out
     assert "## 本轮 diff" not in out
+
+
+def test_step5_no_btrack_limitation_note():
+    """Phase 6: B-track limitation note + per-mount placeholder are gone."""
+    out = compose_step5(_step5_minimal())
+    assert "B-track" not in out
+    assert "多仓 worker 待上线" not in out
+    assert "btrack_limitation" not in out  # template variable not leaked
+
+
+def test_step5_legacy_in_flight_row_renders_placeholder():
+    """Phase 6: rows with worktree_path=None still render gracefully."""
+    out = compose_step5(Step5Inputs(
+        design_doc_path="/d", iteration_note_path="/n",
+        step4_findings_path="/f", context_path="/c.md",
+        mount_table_entries=(
+            MountTableEntry(
+                mount_name="backend", repo_id="repo-x", role="backend",
+                is_primary=True, base_branch="main",
+                devwork_branch="devwork/legacy/aaa",
+                worktree_path=None,
+            ),
+        ),
+        primary_worktree_path=None, rubric_threshold=85,
+        output_json_path="/s",
+    ))
+    assert "历史 DevWork — Phase 6 之前创建" in out
 
 
 def test_step5_with_no_mounts_falls_back_to_marker():
@@ -274,6 +334,7 @@ def test_step3_prompt_carries_step_wall():
     out = compose_step3(Step3Inputs(
         worktree_path="/wt", design_doc_path="/d.md",
         iteration_note_path="/n.md", output_path="/o.md",
+        mount_table_entries=(),
     ))
     assert _STEP_WALL_STEP3 in out
     assert out.index("## 本步职责墙") < out.index("## 参考路径")
@@ -285,6 +346,7 @@ def test_step4_prompt_carries_step_wall():
     out = compose_step4(Step4Inputs(
         worktree_path="/wt", iteration_note_path="/n.md",
         context_path="/c.md", findings_output_path="/f.json",
+        mount_table_entries=(),
     ))
     assert _STEP_WALL_STEP4 in out
     assert out.index("## 本步职责墙") < out.index("## 工作树")

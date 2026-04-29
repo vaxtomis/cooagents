@@ -335,16 +335,27 @@ async def test_two_mount_devwork_review_picks_impl_gap(env):
     body = prompt_path.read_text(encoding="utf-8")
     assert "| `backend` |" in body
     assert "| `frontend` |" in body
-    assert "B-track" in body
+    # Phase 6: B-track limitation note + per-mount placeholder are gone.
+    assert "B-track" not in body
+    assert "_(无本地 worktree — 多仓 worker 待上线)_" not in body
     # aggregation rule present (priority order: design_hollow > req_gap > impl_gap)
     assert (
         body.index("design_hollow")
         < body.index("req_gap")
         < body.index("impl_gap")
     )
-    # primary marked, non-primary carries the no-worktree marker
+    # primary marked
     assert "✅" in body
-    assert "_(无本地 worktree — 多仓 worker 待上线)_" in body
+    # Phase 6: every mount's worktree path is rendered (no placeholder).
+    # Normalize Windows backslashes once so the assertions stay readable.
+    body_norm = body.replace("\\", "/")
+    worktrees_root = str(env["ws_root"] / ".coop" / "worktrees").replace(
+        "\\", "/"
+    )
+    assert worktrees_root in body_norm
+    # Both mounts' subdirectories appear in the table.
+    assert "/backend |" in body_norm
+    assert "/frontend |" in body_norm
 
 
 async def test_two_mount_devwork_all_clean_completes(env):
@@ -426,8 +437,8 @@ async def test_load_mount_table_entries_orders_primary_first(env):
     assert entries[1].is_primary is False
 
 
-async def test_load_mount_table_entries_only_primary_has_worktree_path(env):
-    """Non-primary entries carry worktree_path=None even when dw has one."""
+async def test_load_mount_table_entries_returns_per_mount_worktree_path(env):
+    """Phase 6: every mount surfaces its own dev_work_repos.worktree_path."""
     sm = _make_sm(env, ScriptedExecutor([]))
     dw = await sm.create(
         workspace_id=env["ws"]["id"],
@@ -435,20 +446,45 @@ async def test_load_mount_table_entries_only_primary_has_worktree_path(env):
         repo_refs=_two_mount_refs(env),
         prompt="worktree gating",
     )
-    # Pretend _s0_init populated worktree_path (the actual ensure_worktree
-    # call is not exercised here — we only need the field set on dw).
+    # Set per-row worktree_path directly (avoid running _s0_init's real
+    # ensure_worktree here — that path is exercised by the integration
+    # test below).
     await env["db"].execute(
-        "UPDATE dev_works SET worktree_path=? WHERE id=?",
-        ("/some/where", dw["id"]),
+        "UPDATE dev_work_repos SET worktree_path=? WHERE dev_work_id=? "
+        "AND mount_name=?",
+        ("/wt/backend", dw["id"], "backend"),
+    )
+    await env["db"].execute(
+        "UPDATE dev_work_repos SET worktree_path=? WHERE dev_work_id=? "
+        "AND mount_name=?",
+        ("/wt/frontend", dw["id"], "frontend"),
     )
     dw = await env["db"].fetchone(
         "SELECT * FROM dev_works WHERE id=?", (dw["id"],)
     )
     entries = await sm._load_mount_table_entries(dw)
-    primary = [e for e in entries if e.is_primary][0]
-    non_primary = [e for e in entries if not e.is_primary][0]
-    assert primary.worktree_path == "/some/where"
-    assert non_primary.worktree_path is None
+    by_mount = {e.mount_name: e for e in entries}
+    assert by_mount["backend"].worktree_path == "/wt/backend"
+    assert by_mount["frontend"].worktree_path == "/wt/frontend"
+
+
+async def test_load_mount_table_entries_legacy_row_keeps_none(env):
+    """Pre-Phase-6 in-flight rows keep worktree_path=None gracefully."""
+    sm = _make_sm(env, ScriptedExecutor([]))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_two_mount_refs(env),
+        prompt="legacy row",
+    )
+    # Don't populate dev_work_repos.worktree_path — simulate a row created
+    # before the Phase 6 migration.
+    dw = await env["db"].fetchone(
+        "SELECT * FROM dev_works WHERE id=?", (dw["id"],)
+    )
+    entries = await sm._load_mount_table_entries(dw)
+    for e in entries:
+        assert e.worktree_path is None
 
 
 async def test_load_mount_table_entries_returns_empty_tuple_for_no_refs(env):
@@ -476,6 +512,48 @@ async def test_load_mount_table_entries_returns_empty_tuple_for_no_refs(env):
     )
     entries = await sm._load_mount_table_entries(dw)
     assert entries == ()
+
+
+async def test_s0_init_creates_worktree_per_mount(env):
+    """Phase 6: every mount gets its own git worktree at INIT."""
+    sm = _make_sm(env, ScriptedExecutor([]))
+    sm.workspaces_root = env["ws_root"].resolve()
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_two_mount_refs(env),
+        prompt="multi-mount init",
+    )
+    # First tick runs _s0_init.
+    await sm.tick(dw["id"])
+    rows = await env["db"].fetchall(
+        "SELECT mount_name, worktree_path FROM dev_work_repos "
+        "WHERE dev_work_id=? ORDER BY mount_name",
+        (dw["id"],),
+    )
+    paths = {r["mount_name"]: r["worktree_path"] for r in rows}
+    # Both mounts populated with distinct paths.
+    assert paths["backend"] is not None
+    assert paths["frontend"] is not None
+    assert paths["backend"] != paths["frontend"]
+    # Layout: <ws>/.coop/worktrees/<branch_safe>/<mount_name>/
+    for mount, p in paths.items():
+        path_obj = Path(p)
+        assert path_obj.exists(), f"{mount} worktree missing on disk: {p}"
+        # ``.git`` is a file in a worktree (gitlink), not a directory.
+        assert (path_obj / ".git").exists(), (
+            f"{mount} worktree has no .git entry: {p}"
+        )
+        # Path must be under .coop/worktrees and end in the mount name.
+        norm = str(path_obj).replace("\\", "/")
+        assert "/.coop/worktrees/" in norm, norm
+        assert norm.rstrip("/").endswith(f"/{mount}"), norm
+    # Back-compat: dev_works.worktree_path mirrors primary (backend) path.
+    refreshed = await env["db"].fetchone(
+        "SELECT * FROM dev_works WHERE id=?", (dw["id"],)
+    )
+    assert refreshed["worktree_path"] == paths["backend"]
+    assert refreshed["current_step"] == "STEP1_VALIDATE"
 
 
 async def test_s5_review_pre_flight_escalates_on_empty_rubric(env):

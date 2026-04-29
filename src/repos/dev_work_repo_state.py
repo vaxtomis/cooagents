@@ -63,7 +63,7 @@ class DevWorkRepoStateRepo:
         rows = await self.db.fetchall(
             "SELECT dwr.repo_id, dwr.mount_name, dwr.base_branch, "
             "dwr.base_rev, dwr.devwork_branch, dwr.push_state, "
-            "dwr.push_err, dwr.is_primary, "
+            "dwr.push_err, dwr.is_primary, dwr.worktree_path, "
             "r.url AS url, r.ssh_key_path AS ssh_key_path "
             "FROM dev_work_repos dwr "
             "JOIN repos r ON r.id = dwr.repo_id "
@@ -88,6 +88,7 @@ class DevWorkRepoStateRepo:
             f"SELECT dwr.dev_work_id, dwr.repo_id, dwr.mount_name, "
             f"dwr.base_branch, dwr.base_rev, dwr.devwork_branch, "
             f"dwr.push_state, dwr.push_err, dwr.is_primary, "
+            f"dwr.worktree_path, "
             f"r.url AS url, r.ssh_key_path AS ssh_key_path "
             f"FROM dev_work_repos dwr "
             f"JOIN repos r ON r.id = dwr.repo_id "

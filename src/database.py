@@ -95,6 +95,18 @@ class Database:
                 "ALTER TABLE dev_works ADD COLUMN current_progress_json TEXT"
             )
 
+        # devwork-acpx phase 6: add per-mount ``worktree_path`` to
+        # dev_work_repos. Idempotent: PRAGMA gate before ALTER. Existing
+        # rows stay NULL — _s0_init backfills the primary row's path on
+        # the next tick for in-flight DevWorks; non-primary in-flight rows
+        # remain NULL (mount table renders the legacy placeholder).
+        async with conn.execute("PRAGMA table_info(dev_work_repos)") as cur:
+            dwr_cols = {row[1] for row in await cur.fetchall()}
+        if "worktree_path" not in dwr_cols:
+            await conn.execute(
+                "ALTER TABLE dev_work_repos ADD COLUMN worktree_path TEXT"
+            )
+
         # devwork-acpx phase 4: extend workspace_files.kind CHECK to permit
         # 'feedback'. SQLite cannot ALTER a CHECK constraint in place, so we
         # rebuild the table when the existing definition pre-dates Phase 4.

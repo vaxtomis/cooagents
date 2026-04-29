@@ -126,6 +126,12 @@ CREATE TABLE IF NOT EXISTS dev_work_repos (
   -- The boundary CreateDevWorkRequest validator rejects >1 row marked
   -- is_primary; the partial UNIQUE index below enforces the same at DB level.
   is_primary       INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0,1)),
+  -- Phase 6 (devwork-acpx-overhaul): per-mount git worktree path.
+  -- Populated by ``_s0_init`` for new DevWorks (one worktree per mount).
+  -- NULL on legacy in-flight rows created before Phase 6 — only the primary
+  -- row's path is mirrored onto the deprecated ``dev_works.worktree_path``
+  -- column for back-compat.
+  worktree_path    TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL,
   PRIMARY KEY (dev_work_id, repo_id),

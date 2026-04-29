@@ -217,6 +217,47 @@ def compose_step2(inputs: Step2Inputs) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Mount table — shared across Step3 / Step4 / Step5 prompts (Phase 6)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class MountTableEntry:
+    mount_name: str
+    repo_id: str
+    role: str            # repos.role value, e.g. "backend"; "other" for NULL
+    is_primary: bool
+    base_branch: str
+    devwork_branch: str
+    # Phase 6: every mount carries its own worktree_path. ``None`` only for
+    # legacy in-flight rows created before Phase 6 (see
+    # :meth:`DevWorkStateMachine._load_mount_table_entries` docstring).
+    worktree_path: str | None
+
+
+def _render_mount_table(entries: tuple[MountTableEntry, ...]) -> str:
+    if not entries:
+        return "_(no repo_refs registered for this DevWork)_"
+    header = (
+        "| mount | repo_id | role | primary | base_branch | "
+        "devwork_branch | worktree_path |\n"
+        "|---|---|---|---|---|---|---|"
+    )
+    rows: list[str] = [header]
+    for e in entries:
+        primary_cell = "✅" if e.is_primary else ""
+        loc = (
+            e.worktree_path
+            or "_(历史 DevWork — Phase 6 之前创建，无 per-mount worktree)_"
+        )
+        rows.append(
+            f"| `{e.mount_name}` | `{e.repo_id}` | {e.role} | "
+            f"{primary_cell} | `{e.base_branch}` | "
+            f"`{e.devwork_branch}` | {loc} |"
+        )
+    return "\n".join(rows)
+
+
+# ---------------------------------------------------------------------------
 # Step3 — Context retrieval prompt
 # ---------------------------------------------------------------------------
 
@@ -226,6 +267,10 @@ class Step3Inputs:
     design_doc_path: str
     iteration_note_path: str
     output_path: str
+    # Phase 6: full mount table so Step3 LLM sees every mount's worktree
+    # (it may scan non-primary mounts for context, even though it only
+    # writes ctx-round-N.md against the primary worktree).
+    mount_table_entries: tuple[MountTableEntry, ...]
 
 
 def compose_step3(inputs: Step3Inputs) -> str:
@@ -234,6 +279,7 @@ def compose_step3(inputs: Step3Inputs) -> str:
         design_doc_path=inputs.design_doc_path,
         iteration_note_path=inputs.iteration_note_path,
         output_path=inputs.output_path,
+        mount_table=_render_mount_table(inputs.mount_table_entries),
         step_wall=_STEP_WALL_STEP3,
     )
 
@@ -248,6 +294,10 @@ class Step4Inputs:
     iteration_note_path: str
     context_path: str
     findings_output_path: str
+    # Phase 6: full mount table — Step4 LLM may write code into any mount's
+    # worktree (multi-mount tasks). The primary ``worktree_path`` above is
+    # only the default landing pad referenced in the prompt header.
+    mount_table_entries: tuple[MountTableEntry, ...]
 
 
 def compose_step4(inputs: Step4Inputs) -> str:
@@ -256,6 +306,7 @@ def compose_step4(inputs: Step4Inputs) -> str:
         iteration_note_path=inputs.iteration_note_path,
         context_path=inputs.context_path,
         findings_output_path=inputs.findings_output_path,
+        mount_table=_render_mount_table(inputs.mount_table_entries),
         step_wall=_STEP_WALL_STEP4,
     )
 
@@ -263,19 +314,6 @@ def compose_step4(inputs: Step4Inputs) -> str:
 # ---------------------------------------------------------------------------
 # Step5 — Review / scoring prompt (Phase 8: path-based, multi-repo aware)
 # ---------------------------------------------------------------------------
-
-# Honest description of the current execution gap: only the primary mount has
-# a local worktree on this server (the multi-mount worker described by the
-# repo-registry PRD is not yet built). Embedded as the single source of truth
-# so tests and template render the exact same wording.
-_BTRACK_LIMITATION_NOTE = (
-    "⚠️ 当前实现限制（B-track）：仅 primary mount 在本机有 git "
-    "worktree；非 primary mount 暂未在本机产生代码改动（多仓 worker "
-    "由后续 PRD 上线）。"
-    "评分时 — primary mount 在其 worktree_path 下 `git diff HEAD` "
-    "查看本轮改动；非 primary mount 仅基于 Step4 findings 中该 mount "
-    "的条目判断；无相关 finding 视为本轮该仓无问题。"
-)
 
 # Aggregation rule order (`design_hollow > req_gap > impl_gap > null`) is
 # load-bearing: it matches how the SM routes those categories
@@ -289,37 +327,6 @@ _AGGREGATION_RULE = """\
 3. 否则**任一仓**存在实现/测试/代码回归（lint 失败、测试失败、代码与计划不符） → `problem_category="impl_gap"`
 4. 否则全部通过阈值 → `problem_category=null` 且 `score >= $rubric_threshold`
 """
-
-
-@dataclass(frozen=True)
-class MountTableEntry:
-    mount_name: str
-    repo_id: str
-    role: str            # repos.role value, e.g. "backend"; "other" for NULL
-    is_primary: bool
-    base_branch: str
-    devwork_branch: str
-    worktree_path: str | None  # set only for primary; None for others
-
-
-def _render_mount_table(entries: tuple[MountTableEntry, ...]) -> str:
-    if not entries:
-        return "_(no repo_refs registered for this DevWork)_"
-    header = (
-        "| mount | repo_id | role | primary | base_branch | "
-        "devwork_branch | worktree_path / 备注 |\n"
-        "|---|---|---|---|---|---|---|"
-    )
-    rows: list[str] = [header]
-    for e in entries:
-        primary_cell = "✅" if e.is_primary else ""
-        loc = e.worktree_path or "_(无本地 worktree — 多仓 worker 待上线)_"
-        rows.append(
-            f"| `{e.mount_name}` | `{e.repo_id}` | {e.role} | "
-            f"{primary_cell} | `{e.base_branch}` | "
-            f"`{e.devwork_branch}` | {loc} |"
-        )
-    return "\n".join(rows)
 
 
 @dataclass(frozen=True)
@@ -347,7 +354,6 @@ def compose_step5(inputs: Step5Inputs) -> str:
         primary_worktree_path=(
             inputs.primary_worktree_path or "_(no primary worktree)_"
         ),
-        btrack_limitation=_BTRACK_LIMITATION_NOTE,
         aggregation_rule=_AGGREGATION_RULE,
         rubric_threshold=str(inputs.rubric_threshold),
         output_json_path=inputs.output_json_path,

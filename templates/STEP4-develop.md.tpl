@@ -6,6 +6,13 @@ $step_wall
 
 `$worktree_path`
 
+## 多仓改动表
+
+$mount_table
+
+> 如本轮需要修改非 primary mount，请直接 `cd <mount.worktree_path>` 后落盘；
+> 所有 mount 均为本机 git worktree，可独立 `git status` / `git diff`。
+
 ## 参考输入（只读）
 
 - 本轮迭代设计： `$iteration_note_path`

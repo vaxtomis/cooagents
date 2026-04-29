@@ -211,12 +211,16 @@ class DevWorkStepHandlersMixin:
         )
         ctx_rel = f"devworks/{dw['id']}/context/ctx-round-{round_n}.md"
         ctx_abs = self._abs_for(ws, ctx_rel)
+        # Phase 6: Step3 sees every mount's worktree (multi-mount tasks
+        # may need to scan non-primary mounts for context).
+        mount_entries = await self._load_mount_table_entries(dw)
         prompt = compose_step3(
             Step3Inputs(
                 worktree_path=dw["worktree_path"],
                 design_doc_path=self._abs_for(ws, dd["path"]),
                 iteration_note_path=self._abs_for(ws, note["markdown_path"]),
                 output_path=ctx_abs,
+                mount_table_entries=mount_entries,
             )
         )
         prompt_rel = f"devworks/{dw['id']}/prompts/step3-round{round_n}.md"
@@ -283,12 +287,18 @@ class DevWorkStepHandlersMixin:
             f"devworks/{dw['id']}/artifacts/step4-findings-round{round_n}.json"
         )
 
+        # Phase 6: per-mount worktrees are surfaced via mount_table_entries
+        # (multi-mount tasks may write code into any mount). The scalar
+        # ``worktree_path`` below remains the primary's path, used as the
+        # prompt's default landing pad.
+        mount_entries = await self._load_mount_table_entries(dw)
         prompt = compose_step4(
             Step4Inputs(
                 worktree_path=dw["worktree_path"],
                 iteration_note_path=self._abs_for(ws, note["markdown_path"]),
                 context_path=self._abs_for(ws, ctx_rel),
                 findings_output_path=self._abs_for(ws, findings_rel),
+                mount_table_entries=mount_entries,
             )
         )
         prompt_rel = f"devworks/{dw['id']}/prompts/step4-round{round_n}.md"
