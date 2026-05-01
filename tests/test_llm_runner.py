@@ -145,19 +145,13 @@ def test_build_prompt_cmd_rejects_neither_text_nor_file(runner):
 
 
 def test_build_close_cmd_includes_anchor_cwd(runner):
+    """Phase 11: close uses positional name (acpx 0.6.x), not --name."""
     s = Session(name="n", anchor_cwd="/anchor", agent="claude", created_at=FIXED_CLOCK)
     cmd = runner._build_close_cmd(s)
     assert "--cwd" in cmd
     assert cmd[cmd.index("--cwd") + 1] == "/anchor"
-    assert cmd[-5:] == ["claude", "sessions", "close", "--name", "n"]
-
-
-def test_build_prune_cmd_uses_before_iso_not_older_than(runner):
-    cmd = runner._build_prune_cmd("claude", "2026-04-28T00:00:01+00:00", "/A")
-    assert "--before" in cmd
-    assert cmd[cmd.index("--before") + 1] == "2026-04-28T00:00:01+00:00"
-    assert "--include-history" in cmd
-    assert "--older-than" not in cmd
+    assert cmd[-4:] == ["claude", "sessions", "close", "n"]
+    assert "--name" not in cmd
 
 
 def test_build_list_cmd_uses_format_json(runner):
@@ -297,19 +291,19 @@ async def test_delete_session_close_with_anchor_cwd(monkeypatch, runner):
         return _FakeProc(b"", b"", 0)
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    # Skip the deferred prune to keep the test deterministic.
-    monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() or None)
 
     s = Session(name="n", anchor_cwd="/anchor", agent="claude", created_at=FIXED_CLOCK)
     await runner.delete_session(s)
-    # cancel + close = 2 subprocess calls; both anchored.
+    # Phase 11: cancel + close = 2 subprocess calls (no deferred prune).
     assert len(seen_cwds) == 2
     assert all(c == "/anchor" for c in seen_cwds)
-    # The second call must be the close subcommand.
     close_cmd = seen_cmds[1]
     assert "sessions" in close_cmd and "close" in close_cmd
     assert "--cwd" in close_cmd
     assert close_cmd[close_cmd.index("--cwd") + 1] == "/anchor"
+    # Phase 11: positional name, not --name.
+    assert close_cmd[-1] == "n"
+    assert "--name" not in close_cmd
 
 
 @pytest.mark.asyncio
@@ -326,20 +320,9 @@ async def test_delete_session_swallows_no_named_session_close_error(monkeypatch,
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
 
-    scheduled: list = []
-
-    def fake_create_task(coro):
-        scheduled.append(coro)
-        coro.close()
-        return None
-
-    monkeypatch.setattr("asyncio.create_task", fake_create_task)
-
     s = Session(name="missing", anchor_cwd="/A", agent="claude", created_at=FIXED_CLOCK)
     # Should NOT raise.
     await runner.delete_session(s)
-    # Session was already gone — no prune needed.
-    assert scheduled == []
 
 
 @pytest.mark.asyncio
@@ -353,33 +336,11 @@ async def test_delete_session_raises_on_other_close_failure(monkeypatch, runner)
         return _FakeProc(b"", b"boom", 1)
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() or None)
 
     s = Session(name="n", anchor_cwd="/A", agent="claude", created_at=FIXED_CLOCK)
     with pytest.raises(SessionLifecycleError) as excinfo:
         await runner.delete_session(s)
     assert excinfo.value.op == "close"
-
-
-@pytest.mark.asyncio
-async def test_delete_session_schedules_deferred_prune(monkeypatch, runner):
-    async def fake_exec(*args, **kwargs):
-        return _FakeProc(b"", b"", 0)
-
-    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-
-    scheduled: list = []
-
-    def fake_create_task(coro):
-        scheduled.append(coro)
-        coro.close()
-        return None
-
-    monkeypatch.setattr("asyncio.create_task", fake_create_task)
-
-    s = Session(name="n", anchor_cwd="/A", agent="claude", created_at=FIXED_CLOCK)
-    await runner.delete_session(s)
-    assert len(scheduled) == 1
 
 
 # ---- orphan_sweep_at_boot ------------------------------------------------
@@ -403,7 +364,6 @@ async def test_orphan_sweep_filters_by_prefix(monkeypatch, runner):
         return _FakeProc(b"", b"", 0)
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() or None)
 
     cleaned = await runner.orphan_sweep_at_boot(
         name_prefixes=("dw-", "design-"),
@@ -431,16 +391,11 @@ async def test_orphan_sweep_skips_closed_entries(monkeypatch, runner):
         if "list" in argv and "sessions" in argv:
             return _FakeProc(list_payload, b"", 0)
         if "close" in argv:
-            # Capture the --name argument
-            try:
-                idx = argv.index("--name")
-                deletes.append(argv[idx + 1])
-            except ValueError:
-                pass
+            # Phase 11: close uses positional name (last argv).
+            deletes.append(argv[-1])
         return _FakeProc(b"", b"", 0)
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() or None)
 
     await runner.orphan_sweep_at_boot(name_prefixes=("dw-",))
     assert "dw-closed" not in deletes
@@ -459,17 +414,13 @@ async def test_orphan_sweep_logs_and_continues_on_per_session_failure(monkeypatc
         if "list" in argv and "sessions" in argv:
             return _FakeProc(list_payload, b"", 0)
         if "close" in argv:
-            try:
-                idx = argv.index("--name")
-                if argv[idx + 1] == "dw-bad":
-                    # Simulate an unexpected close failure → SessionLifecycleError.
-                    return _FakeProc(b"", b"unexpected boom", 1)
-            except ValueError:
-                pass
+            # Phase 11: close uses positional name (last argv).
+            if argv[-1] == "dw-bad":
+                # Simulate an unexpected close failure → SessionLifecycleError.
+                return _FakeProc(b"", b"unexpected boom", 1)
         return _FakeProc(b"", b"", 0)
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() or None)
 
     cleaned = await runner.orphan_sweep_at_boot(name_prefixes=("dw-",))
     cleaned_names = {s.name for s in cleaned}
@@ -483,7 +434,6 @@ async def test_orphan_sweep_handles_malformed_json(monkeypatch, runner):
         return _FakeProc(b"not json at all", b"", 0)
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() or None)
 
     cleaned = await runner.orphan_sweep_at_boot(name_prefixes=("dw-",))
     assert cleaned == []
@@ -495,7 +445,6 @@ async def test_orphan_sweep_skips_when_list_rc_nonzero(monkeypatch, runner):
         return _FakeProc(b"", b"list failed", 1)
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() or None)
 
     cleaned = await runner.orphan_sweep_at_boot(name_prefixes=("dw-",))
     assert cleaned == []

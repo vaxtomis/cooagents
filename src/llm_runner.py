@@ -32,7 +32,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
@@ -150,9 +150,6 @@ class LLMRunner:
         # Phase 3: injectable monotonic clock so heartbeat tests can advance
         # wall-time deterministically without sleeping.
         self._monotonic = monotonic or time.monotonic
-        # asyncio.create_task only weakly refs tasks; without a strong ref the
-        # GC can drop a deferred prune mid-run. Keep them alive here.
-        self._pending_tasks: set[asyncio.Task] = set()
 
     # ---- helpers (mirror AcpxExecutor) -----------------------------------
 
@@ -245,18 +242,14 @@ class LLMRunner:
 
     def _build_close_cmd(self, session: Session) -> list[str]:
         # spike Q(c): close MUST run from the anchor cwd.
+        # Phase 11: acpx 0.6.x takes the session name as a positional
+        # argument, not --name. Verified live on host (acpx 0.6.1):
+        #   $ acpx codex sessions close --help
+        #   Usage: acpx codex sessions close [options] [name]
+        # Passing --name returns rc=1 with empty stderr (silent failure).
         return [
             *self._common_flags(session.anchor_cwd),
-            session.agent, "sessions", "close", "--name", session.name,
-        ]
-
-    def _build_prune_cmd(self, agent: str, before_iso: str, anchor_cwd: str) -> list[str]:
-        # spike Q(c) Implication: --older-than 0 is invalid; --before <iso> works.
-        # PRD architecture-notes line 215: --include-history clears closed-session bookkeeping too.
-        return [
-            *self._common_flags(anchor_cwd),
-            agent, "sessions", "prune",
-            "--before", before_iso, "--include-history",
+            session.agent, "sessions", "close", session.name,
         ]
 
     def _build_list_cmd(self, agent: str, cwd: str) -> list[str]:
@@ -265,12 +258,21 @@ class LLMRunner:
     # ---- subprocess plumbing --------------------------------------------
 
     async def _run_local(
-        self, cmd: list[str], cwd: str
+        self, cmd: list[str], cwd: str, *, timeout: float | None = 30.0,
     ) -> tuple[str, str, int]:
         """Run ``cmd`` locally; return ``(stdout, stderr, returncode)``.
 
         Mirrors :meth:`AcpxExecutor._run_local` but also captures stderr so
         :class:`SessionLifecycleError` can attach a tail.
+
+        Phase 11: ``timeout`` (seconds) bounds wall-clock time. On timeout
+        the subprocess (and any session-leader children) get SIGKILL and
+        :class:`TimeoutError` is raised. ``None`` keeps the legacy unbounded
+        behavior for callers that genuinely need it.
+
+        ``start_new_session=True`` puts the child in its own process group
+        so a daemonized grandchild (e.g. codex-acp) cannot hold cooagents'
+        stdout/stderr pipe open after ``proc.kill()``.
         """
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -278,8 +280,25 @@ class LLMRunner:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            if timeout is None:
+                stdout, stderr = await proc.communicate()
+            else:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout,
+                )
+        except asyncio.TimeoutError:
+            proc.kill()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pass
+            raise TimeoutError(
+                f"acpx subprocess timed out after {timeout}s; "
+                f"cmd[0..2]={cmd[:3]!r}"
+            )
         return (
             stdout.decode("utf-8", errors="replace").strip(),
             stderr.decode("utf-8", errors="replace").strip(),
@@ -341,6 +360,7 @@ class LLMRunner:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         start = self._monotonic()
         progress_log: list[ProgressTick] = []
@@ -407,7 +427,9 @@ class LLMRunner:
         """
         resolved = self._resolve_agent(agent)
         cmd = self._build_ensure_cmd(name, anchor_cwd, resolved)
-        _stdout, stderr, rc = await self._run_local(cmd, anchor_cwd)
+        _stdout, stderr, rc = await self._run_local(
+            cmd, anchor_cwd, timeout=30.0,
+        )
         if rc != 0:
             raise SessionLifecycleError("ensure", rc, stderr[-512:])
         return Session(
@@ -429,7 +451,9 @@ class LLMRunner:
         cmd = self._build_prompt_cmd(
             session, text=text, task_file=task_file, timeout_sec=timeout_sec,
         )
-        stdout, _stderr, rc = await self._run_local(cmd, session.anchor_cwd)
+        stdout, _stderr, rc = await self._run_local(
+            cmd, session.anchor_cwd, timeout=30.0,
+        )
         return stdout, rc
 
     async def prompt_session_with_progress(
@@ -472,7 +496,9 @@ class LLMRunner:
         for an unknown session is rc=0 and is returned as-is (spike Q(b)).
         """
         cmd = self._build_status_cmd(session)
-        stdout, _stderr, rc = await self._run_local(cmd, session.anchor_cwd)
+        stdout, _stderr, rc = await self._run_local(
+            cmd, session.anchor_cwd, timeout=30.0,
+        )
         if rc != 0:
             return {}
         parsed: dict[str, str] = {}
@@ -489,7 +515,9 @@ class LLMRunner:
         Cancel of an already-stopped session is a no-op success in acpx.
         """
         cmd = self._build_cancel_cmd(session)
-        _stdout, stderr, rc = await self._run_local(cmd, session.anchor_cwd)
+        _stdout, stderr, rc = await self._run_local(
+            cmd, session.anchor_cwd, timeout=30.0,
+        )
         if rc != 0:
             logger.warning(
                 "llm_runner: cancel session %r at cwd=%r rc=%d stderr=%r",
@@ -497,45 +525,23 @@ class LLMRunner:
             )
 
     async def delete_session(self, session: Session) -> None:
-        """Two-step destroy: cancel (best-effort) → close → deferred prune.
+        """Two-step destroy: cancel (best-effort) → close.
 
         Raises :class:`SessionLifecycleError` if ``close`` fails for any
         reason other than ``no named session`` (already-closed / unknown).
+
+        Phase 11: acpx 0.6.x has no ``sessions prune`` subcommand. ``close``
+        is the entire teardown story; the next boot's
+        :meth:`orphan_sweep_at_boot` covers anything missed.
         """
         await self.cancel_session(session)
         cmd = self._build_close_cmd(session)
-        _stdout, stderr, rc = await self._run_local(cmd, session.anchor_cwd)
+        _stdout, stderr, rc = await self._run_local(
+            cmd, session.anchor_cwd, timeout=30.0,
+        )
         if rc != 0:
             if "no named session" not in stderr.lower():
                 raise SessionLifecycleError("close", rc, stderr[-512:])
-            # Session was already gone — nothing to prune.
-            return
-        # Schedule a deferred prune so closed-session bookkeeping is cleared.
-        before = (
-            datetime.now(timezone.utc) + timedelta(seconds=1)
-        ).isoformat()
-        task = asyncio.create_task(
-            self._deferred_prune(session.agent, before, session.anchor_cwd)
-        )
-        if task is not None:  # tests monkeypatch create_task to return None
-            self._pending_tasks.add(task)
-            task.add_done_callback(self._pending_tasks.discard)
-
-    async def _deferred_prune(self, agent: str, before_iso: str, anchor_cwd: str) -> None:
-        """Background prune; failures are logged but never raised.
-
-        The next boot's :meth:`orphan_sweep_at_boot` covers anything missed.
-        """
-        try:
-            cmd = self._build_prune_cmd(agent, before_iso, anchor_cwd)
-            _stdout, stderr, rc = await self._run_local(cmd, anchor_cwd)
-            if rc != 0:
-                logger.warning(
-                    "llm_runner: deferred prune rc=%d stderr=%r",
-                    rc, stderr[-256:],
-                )
-        except Exception:
-            logger.exception("llm_runner: deferred prune raised; ignoring")
 
     # ---- fleet ops -------------------------------------------------------
 
@@ -551,7 +557,9 @@ class LLMRunner:
         sweep_cwd = str(getattr(self._executor, "project_root", "."))
         for agent in _SWEEP_AGENTS:
             cmd = self._build_list_cmd(agent, sweep_cwd)
-            stdout, stderr, rc = await self._run_local(cmd, sweep_cwd)
+            stdout, stderr, rc = await self._run_local(
+                cmd, sweep_cwd, timeout=60.0,
+            )
             if rc != 0:
                 logger.warning(
                     "orphan_sweep: list rc=%d for agent=%s stderr=%r",

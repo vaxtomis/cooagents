@@ -667,10 +667,18 @@ def _run_local_mode(report_path: Path) -> int:
 # -- Real mode ------------------------------------------------------------
 
 def _curl_get_json(url: str, *, phase: str) -> dict[str, Any] | None:
-    rc, out, _err = _run(
-        ["curl", "-fsS", "--max-time", "10", url],
-        phase=phase, timeout=15,
-    )
+    """GET <url> via curl; auto-attaches X-Agent-Token from env when set.
+
+    Reads ``PHASE10_AGENT_TOKEN`` so the harness can talk to a cooagents
+    instance running with auth enabled (production-like config). Empty
+    or unset env → no header (back-compat with auth-disabled deployments).
+    """
+    cmd = ["curl", "-fsS", "--max-time", "10"]
+    token = os.environ.get("PHASE10_AGENT_TOKEN", "").strip()
+    if token:
+        cmd += ["-H", f"X-Agent-Token: {token}"]
+    cmd.append(url)
+    rc, out, _err = _run(cmd, phase=phase, timeout=15)
     if rc != 0 or not out.strip():
         return None
     try:
@@ -698,23 +706,33 @@ def _acpx_sessions_list(agent: str) -> list[dict[str, Any]]:
 
 
 def _pgrep_acpx_count() -> int:
+    """Count live agent processes per round.
+
+    `acpx` 0.6.x is a spawner CLI — it forks `npx @zed-industries/codex-acp`
+    or `claude-acp` and exits, so `pgrep -af "acpx "` returns 0 even
+    mid-DevWork. The persistent processes are the agent backends
+    (codex-acp / claude-acp). We count both so the signal is
+    meaningful regardless of agent shape.
+    """
     rc, out, _err = _run(
-        ["pgrep", "-afc", "acpx "], phase="real-pgrep", timeout=5,
+        ["pgrep", "-afc", "acpx |codex-acp|claude-acp"],
+        phase="real-pgrep", timeout=5,
     )
-    if rc not in (0, 1):
-        # Fall back to ps + grep counting.
-        rc2, out2, _err2 = _run(
-            ["sh", "-c", "ps -ef | grep -c '[a]cpx '"],
-            phase="real-pgrep-fallback", timeout=5,
-        )
-        if rc2 != 0:
-            return -1
+    if rc in (0, 1):
         try:
-            return int(out2.strip())
+            return int(out.strip() or "0")
         except (ValueError, TypeError):
-            return -1
+            pass
+    # Fall back to ps + grep counting.
+    rc2, out2, _err2 = _run(
+        ["sh", "-c",
+         "ps -ef | grep -E '[a]cpx |[c]odex-acp|[c]laude-acp' | wc -l"],
+        phase="real-pgrep-fallback", timeout=5,
+    )
+    if rc2 != 0:
+        return -1
     try:
-        return int(out.strip() or "0")
+        return int(out2.strip())
     except (ValueError, TypeError):
         return -1
 
@@ -741,7 +759,7 @@ def _run_real_mode(
         )
         return 2
     health = _curl_get_json(
-        f"{base_url}/api/v1/health", phase="real-preflight",
+        f"{base_url}/health", phase="real-preflight",
     )
     if health is None:
         sys.stderr.write(
