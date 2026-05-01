@@ -290,10 +290,17 @@ class LLMRunner:
                     proc.communicate(), timeout=timeout,
                 )
         except asyncio.TimeoutError:
-            proc.kill()
+            # Phase 11.1: ``proc.kill()`` raises ``ProcessLookupError`` when
+            # the subprocess already exited (acpx 0.6.x exits cleanly while
+            # leaving codex-acp grandchild holding the pipe — exact shape
+            # Phase 10 hit). Swallow it; the kill is best-effort cleanup.
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
             try:
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except (asyncio.TimeoutError, ProcessLookupError):
                 pass
             raise TimeoutError(
                 f"acpx subprocess timed out after {timeout}s; "
