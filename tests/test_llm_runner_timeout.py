@@ -1,9 +1,13 @@
-"""Phase 11 regression: _run_local times out instead of hanging.
+"""Phase 11 regression: _run_local returns on child exit, not pipe EOF.
 
-Two timeout-shape tests reproduce the Phase 10 real-mode hang shape using
-a Python-only POSIX double-fork helper (no acpx dependency). Four CLI-shape
-regression seams guard against re-introducing the Phase 2 ``--name`` bug
-or the dead ``sessions prune`` machinery.
+The real bug behind the server hang is uvloop waiting forever in
+``proc.communicate()`` after the direct ``acpx`` child exits 0 and flushes
+JSON if a detached descendant still holds the stdout/stderr pipe fd open.
+These tests lock the intended behavior:
+
+1. Parent exits quickly but grandchild holds the pipe -> return normally.
+2. Direct child never exits -> timeout still fires.
+3. CLI-shape seams stay aligned with acpx 0.6.x.
 """
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ import pytest
 from src.llm_runner import LLMRunner, Session
 
 
-HANG_HELPER = """
+PIPE_HOLDER_HELPER = """
 import os, sys, time
 # Double-fork a grandchild that holds parent's stdout/stderr open.
 if os.fork() == 0:
@@ -26,6 +30,11 @@ if os.fork() == 0:
 os.wait()
 print("ack", flush=True)
 sys.exit(0)
+"""
+
+NEVER_EXIT_HELPER = """
+import time
+time.sleep(9999)
 """
 
 HAPPY_HELPER = """
@@ -62,19 +71,31 @@ def _make_session(
     sys.platform == "win32",
     reason="double-fork shape is POSIX; Windows has no os.fork()",
 )
-async def test_run_local_times_out_when_grandchild_holds_pipe(tmp_path):
+async def test_run_local_returns_when_parent_exits_but_grandchild_holds_pipe(
+    tmp_path,
+):
+    runner = _make_runner()
+    stdout, stderr, rc = await runner._run_local(
+        [sys.executable, "-c", PIPE_HOLDER_HELPER],
+        str(tmp_path),
+        timeout=10.0,
+    )
+    assert rc == 0
+    assert stdout == "ack"
+    assert stderr == ""
+
+
+async def test_run_local_times_out_when_child_never_exits(tmp_path):
     runner = _make_runner()
     t0 = time.monotonic()
     with pytest.raises(TimeoutError) as excinfo:
         await runner._run_local(
-            [sys.executable, "-c", HANG_HELPER],
+            [sys.executable, "-c", NEVER_EXIT_HELPER],
             str(tmp_path),
             timeout=2.0,
         )
     elapsed = time.monotonic() - t0
     assert "timed out after 2.0s" in str(excinfo.value)
-    # Must not take much longer than the timeout (kill+reap bounded at +2s
-    # — total ≤ 5s gives a safe ceiling on slow CI).
     assert elapsed < 5.0, f"timeout enforcement is too slow: {elapsed:.2f}s"
 
 

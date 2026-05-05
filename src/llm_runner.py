@@ -273,6 +273,11 @@ class LLMRunner:
         ``start_new_session=True`` puts the child in its own process group
         so a daemonized grandchild (e.g. codex-acp) cannot hold cooagents'
         stdout/stderr pipe open after ``proc.kill()``.
+
+        Phase 11.2: on uvloop, ``proc.communicate()`` can still hang forever
+        after the direct ``acpx`` child exits 0 and flushes its JSON result if
+        a detached descendant keeps the pipe fd open. Pump stdout/stderr in
+        background tasks and wait on ``proc.wait()`` instead of EOF.
         """
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -282,13 +287,37 @@ class LLMRunner:
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+
+        async def _pump_stream(
+            reader: asyncio.StreamReader | None, sink: list[bytes],
+        ) -> None:
+            if reader is None:
+                return
+            try:
+                while True:
+                    chunk = await reader.read(65536)
+                    if not chunk:
+                        return
+                    sink.append(chunk)
+            except asyncio.CancelledError:
+                # Expected when the direct child exits but a detached
+                # descendant keeps the pipe open. Preserve bytes collected so
+                # far and let the caller continue.
+                return
+
+        stdout_task = asyncio.create_task(_pump_stream(proc.stdout, stdout_chunks))
+        stderr_task = asyncio.create_task(_pump_stream(proc.stderr, stderr_chunks))
         try:
             if timeout is None:
-                stdout, stderr = await proc.communicate()
+                await proc.wait()
             else:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout,
-                )
+                await asyncio.wait_for(proc.wait(), timeout=timeout)
+            # Let the pump tasks drain bytes that arrived before process exit
+            # before we cancel them. This is especially important for tests
+            # and for uvloop, where exit notification can beat the reader task.
+            await asyncio.sleep(0)
         except asyncio.TimeoutError:
             # Phase 11.1: ``proc.kill()`` raises ``ProcessLookupError`` when
             # the subprocess already exited (acpx 0.6.x exits cleanly while
@@ -306,9 +335,13 @@ class LLMRunner:
                 f"acpx subprocess timed out after {timeout}s; "
                 f"cmd[0..2]={cmd[:3]!r}"
             )
+        finally:
+            for task in (stdout_task, stderr_task):
+                task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
         return (
-            stdout.decode("utf-8", errors="replace").strip(),
-            stderr.decode("utf-8", errors="replace").strip(),
+            b"".join(stdout_chunks).decode("utf-8", errors="replace").strip(),
+            b"".join(stderr_chunks).decode("utf-8", errors="replace").strip(),
             proc.returncode,
         )
 
@@ -371,6 +404,22 @@ class LLMRunner:
         )
         start = self._monotonic()
         progress_log: list[ProgressTick] = []
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+
+        async def _pump_stream(
+            reader: asyncio.StreamReader | None, sink: list[bytes],
+        ) -> None:
+            if reader is None:
+                return
+            try:
+                while True:
+                    chunk = await reader.read(65536)
+                    if not chunk:
+                        return
+                    sink.append(chunk)
+            except asyncio.CancelledError:
+                return
 
         async def ticker() -> None:
             last_advance = start
@@ -403,10 +452,13 @@ class LLMRunner:
                         idle_window_s=int(idle_timeout_s),
                     )
 
+        stdout_task = asyncio.create_task(_pump_stream(proc.stdout, stdout_chunks))
+        stderr_task = asyncio.create_task(_pump_stream(proc.stderr, stderr_chunks))
         ticker_task = asyncio.create_task(ticker())
         idle_exc: IdleTimeoutError | None = None
         try:
-            stdout, _stderr = await proc.communicate()
+            await proc.wait()
+            await asyncio.sleep(0)
         finally:
             ticker_task.cancel()
             try:
@@ -415,10 +467,13 @@ class LLMRunner:
                 pass
             except IdleTimeoutError as exc:
                 idle_exc = exc
+            for task in (stdout_task, stderr_task):
+                task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
         if idle_exc is not None:
             raise idle_exc
         return (
-            stdout.decode("utf-8", errors="replace").strip(),
+            b"".join(stdout_chunks).decode("utf-8", errors="replace").strip(),
             proc.returncode if proc.returncode is not None else -1,
             progress_log,
         )

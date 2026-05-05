@@ -8,6 +8,7 @@ via ``monkeypatch.setattr("asyncio.create_subprocess_exec", ...)`` mirroring
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 
@@ -34,12 +35,19 @@ FIXED_CLOCK = "2026-04-28T00:00:00+00:00"
 
 class _FakeProc:
     def __init__(self, stdout: bytes = b"", stderr: bytes = b"", rc: int = 0):
-        self._stdout = stdout
-        self._stderr = stderr
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.stdout.feed_data(stdout)
+        self.stdout.feed_eof()
+        self.stderr.feed_data(stderr)
+        self.stderr.feed_eof()
         self.returncode = rc
+        self._waited = asyncio.Event()
+        self._waited.set()
 
-    async def communicate(self):
-        return self._stdout, self._stderr
+    async def wait(self):
+        await self._waited.wait()
+        return self.returncode
 
 
 def _capture_subprocess(monkeypatch, *, stdout=b"", stderr=b"", rc=0):
@@ -514,7 +522,7 @@ async def test_prompt_session_with_progress_delegates_to_run_with_progress():
 # ---- run_with_progress (Phase 3) ----------------------------------------
 
 class _SlowFakeProc:
-    """Subprocess fake whose ``communicate`` sleeps before returning.
+    """Subprocess fake whose process exits after ``sleep_s``.
 
     Lets the heartbeat ticker fire several ticks against a deterministic
     asyncio sleep without spawning a real process.
@@ -531,44 +539,71 @@ class _SlowFakeProc:
         self._sleep_s = sleep_s
         self._stdout = stdout
         self._stderr = stderr
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
         self.returncode: int | None = None
         self._rc_on_exit = rc
         self.killed = 0
+        self._done = asyncio.Event()
 
-    async def communicate(self):
-        import asyncio
+    async def wait(self):
         await asyncio.sleep(self._sleep_s)
         self.returncode = self._rc_on_exit
-        return self._stdout, self._stderr
+        self.stdout.feed_data(self._stdout)
+        self.stdout.feed_eof()
+        self.stderr.feed_data(self._stderr)
+        self.stderr.feed_eof()
+        self._done.set()
+        return self.returncode
 
     def kill(self) -> None:
         self.killed += 1
-        # Simulate a killed proc: communicate() will still wake up but
-        # returncode is now set by the runner-side branch logic.
         self.returncode = -9
+        self.stdout.feed_eof()
+        self.stderr.feed_eof()
+        self._done.set()
 
 
 class _NeverFinishingProc:
-    """Subprocess fake whose ``communicate`` never returns until killed."""
+    """Subprocess fake whose direct child never exits until killed."""
 
     def __init__(self) -> None:
         self.returncode: int | None = None
         self.killed = 0
-        self._wake = None
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
 
-    async def communicate(self):
-        import asyncio
-        # Block forever; ticker_task.cancel() will interrupt the outer
-        # await proc.communicate() via run_with_progress's finally block
-        # only if the kill() side-effect sets returncode. We resolve when
-        # killed by checking returncode in a tight poll loop.
+    async def wait(self):
         while self.returncode is None:
             await asyncio.sleep(0.005)
-        return b"", b""
+        self.stdout.feed_eof()
+        self.stderr.feed_eof()
+        return self.returncode
 
     def kill(self) -> None:
         self.killed += 1
         self.returncode = -9
+
+
+class _PipeHolderExitedProc:
+    """Direct child exits, but descendant keeps the pipe fd open.
+
+    ``wait()`` returns quickly with rc=0, stdout already contains bytes,
+    but EOF never arrives unless the runner cancels the reader task.
+    """
+
+    def __init__(self, *, stdout: bytes = b"ack\n", stderr: bytes = b"", rc: int = 0):
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.stdout.feed_data(stdout)
+        self.stderr.feed_data(stderr)
+        self.returncode: int | None = None
+        self._rc_on_exit = rc
+
+    async def wait(self):
+        await asyncio.sleep(0.005)
+        self.returncode = self._rc_on_exit
+        return self.returncode
 
 
 @pytest.mark.asyncio
@@ -626,58 +661,30 @@ async def test_run_with_progress_returns_stdout_rc_and_log(monkeypatch, runner):
 
 
 @pytest.mark.asyncio
-async def test_run_with_progress_idle_timeout_kills_proc(monkeypatch):
-    """Phase 3: when last_advance never moves past start, raise + kill.
-
-    Idle detection uses ``proc.returncode is None`` to gate "advance".
-    Stub the ticker's predicate by returning a proc whose returncode is
-    always set to a non-None sentinel BEFORE the first tick — the ticker
-    sees no advance and trips the idle window.
-    """
-    import asyncio
-
-    class _AlreadyExitedProc:
-        def __init__(self) -> None:
-            # returncode pre-set to 0 means the ticker NEVER updates
-            # last_advance, so the idle window must trip on the next tick.
-            self.returncode: int | None = 0
-            self.killed = 0
-            self._done = asyncio.Event()
-
-        async def communicate(self):
-            # Wait until something kills us OR we're released by the test.
-            await self._done.wait()
-            return b"", b""
-
-        def kill(self) -> None:
-            self.killed += 1
-            self._done.set()
-
-    proc = _AlreadyExitedProc()
+async def test_run_with_progress_returns_when_child_exits_but_pipe_stays_open(
+    monkeypatch, runner
+):
+    proc = _PipeHolderExitedProc(stdout=b"ack\n", rc=0)
 
     async def fake_exec(*args, **kwargs):
         return proc
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
 
-    async def heartbeat(_t: ProgressTick) -> None:
-        return
+    ticks: list[ProgressTick] = []
 
-    runner = LLMRunner(
-        executor=AcpxExecutor(db=None, webhook_notifier=None),
-        clock=lambda: FIXED_CLOCK,
+    async def heartbeat(t: ProgressTick) -> None:
+        ticks.append(t)
+
+    stdout, rc, log = await runner.run_with_progress(
+        cmd=["acpx"], cwd=".",
+        heartbeat=heartbeat,
+        heartbeat_interval_s=0.01,
+        idle_timeout_s=5.0,
+        step_tag="STEP2_ITERATION",
     )
-
-    with pytest.raises(IdleTimeoutError) as exc_info:
-        await runner.run_with_progress(
-            cmd=["acpx"], cwd=".",
-            heartbeat=heartbeat,
-            heartbeat_interval_s=0.01,
-            idle_timeout_s=0.02,
-            step_tag="STEP4_DEVELOP",
-        )
-    assert exc_info.value.step_tag == "STEP4_DEVELOP"
-    assert proc.killed >= 1
+    assert (stdout, rc) == ("ack", 0)
+    assert log == ticks
 
 
 @pytest.mark.asyncio
