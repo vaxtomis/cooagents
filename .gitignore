@@ -22,6 +22,10 @@ docs
 .idea
 pencil
 AGENTS.md
-.trellis
 .codex
 .agents
+
+# Trellis project assets are versioned, but keep active task WIP out of git.
+.trellis/tasks/*
+!.trellis/tasks/archive/
+!.trellis/tasks/archive/**
