@@ -1,6 +1,8 @@
 import pytest
 from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
+import sys
 
 from src.config import (
     HermesConfig,
@@ -104,22 +106,44 @@ async def test_deploy_disabled(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_deploy_ssh_not_implemented(tmp_path):
+async def test_deploy_ssh_target_uses_asyncssh_copy(tmp_path):
     src_skills = tmp_path / "skills"
     src_skills.mkdir()
     _make_skill(src_skills, "my-skill")
+
+    calls: list[tuple] = []
+
+    class _FakeConn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def run(self, cmd, check=False):
+            calls.append(("run", cmd, check))
+            return SimpleNamespace(exit_status=0, stdout="", stderr="")
+
+    class _FakeAsyncSSH:
+        def connect(self, **kwargs):
+            calls.append(("connect", kwargs))
+            return _FakeConn()
+
+        async def scp(self, src, dest, recurse=False):
+            calls.append(("scp", src, dest, recurse))
 
     settings = Settings(openclaw=OpenclawConfig(
         deploy_skills=True,
         targets=[OpenclawTarget(type="ssh", host="remote", skills_dir="/remote/skills")],
     ))
 
-    with patch("src.skill_deployer.ROOT", tmp_path):
+    with patch("src.skill_deployer.ROOT", tmp_path), patch.dict(sys.modules, {"asyncssh": _FakeAsyncSSH()}):
         results = await deploy_skills(settings)
 
     assert len(results) == 1
-    assert results[0].ok is False
-    assert "not yet implemented" in results[0].error.lower()
+    assert results[0].ok is True
+    assert any(call[0] == "connect" for call in calls)
+    assert any(call[0] == "scp" for call in calls)
 
 
 @pytest.mark.asyncio

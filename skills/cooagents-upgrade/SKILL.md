@@ -1,17 +1,17 @@
 ---
 name: cooagents-upgrade
-description: 升级 cooagents 服务，拉取最新代码、更新依赖、重新构建 Dashboard、重启服务并验证状态。当用户提及升级、更新 cooagents 时触发。
+description: Upgrade an existing cooagents repo by calling the unified deployment CLI. Use when the user wants upgrade, update, or repair after changing repo contents.
 user-invocable: true
 required_environment_variables:
   - name: AGENT_API_TOKEN
-    prompt: "cooagents 服务令牌（由 cooagents-setup 阶段 ③ 生成）"
-    help: "/api/v1/runs?status=running 查询运行中任务时需要。"
+    prompt: "Existing cooagents service token"
+    help: "Used only when the operator wants to inspect live API state separately. The upgrade command itself does not require interactive login."
     required_for: "cooagents-upgrade"
 metadata:
   {
     "openclaw":
       {
-        "emoji": "🔄",
+        "emoji": "upgrade",
         "always": false,
         "requires": { "bins": ["curl"] }
       },
@@ -22,178 +22,67 @@ metadata:
   }
 ---
 
-## A. 角色定义
+## Role
 
-你是 cooagents 的升级助手。你通过 `exec` 工具执行 shell 命令，将已运行的 cooagents 服务升级到最新版本。
+You are the upgrade wrapper for cooagents.
+Do not manually replay the old multi-stage shell flow when the unified deployment CLI can do it directly.
 
-**前提条件：** cooagents 服务已在运行（`http://127.0.0.1:8321/health` 可达）。如果服务未运行，引导用户使用 `/cooagents-setup` 进行首次安装。
+## Input
 
-遇到问题时参考 `references/troubleshooting.md`（使用 Read 工具读取）。
+Collect:
 
-## B. 升级前准备
+- `repo_path`: local path to the existing cooagents repo
 
-向用户确认 **repo_path**（cooagents 代码的本地路径）。如果用户未提供，询问用户。
+If the repo path is missing, ask for it.
 
-## C. 升级流程（5 阶段）
+## Flow
 
-### 阶段 ① 检查当前状态
-
-**1a. 确认服务运行中：**
-
-```bash
-exec curl -s http://127.0.0.1:8321/health
-```
-
-如果不可达，告知用户服务未运行，建议使用 `/cooagents-setup`。
-
-**1b. 检查是否有运行中的任务：**
+Run the unified upgrade command:
 
 ```bash
-exec curl -s -H "X-Agent-Token: $AGENT_API_TOKEN" "http://127.0.0.1:8321/api/v1/runs?status=running"
+exec cd {repo_path} && python scripts/deploy.py upgrade
 ```
 
-如果有运行中的任务，**警告用户**：升级会重启服务，运行中的任务将中断。等待用户确认后再继续。
+The CLI is responsible for:
 
-**1c. 记录当前版本：**
+- optional `git pull origin main`
+- dependency refresh
+- web rebuild
+- database re-initialization / migration path
+- service restart
+- health and dashboard validation
+
+Do not duplicate those steps in this Skill unless the CLI fails and you are diagnosing.
+
+## Success Criteria
+
+Treat upgrade as successful only when the CLI completes successfully.
+The command itself validates:
+
+- `/health` returns status `ok`
+- `/` returns HTML
+
+## Follow-up
+
+If the user also changed local notifier/runtime integration after the upgrade:
 
 ```bash
-exec cd {repo_path} && git log --oneline -1
+exec cd {repo_path} && python scripts/deploy.py integrate-runtime --runtime {runtime} --restart-service
 ```
 
-### 阶段 ② 拉取最新代码
+If the user wants an explicit skill sync without waiting for the next service startup:
 
 ```bash
-exec cd {repo_path} && git pull origin main
+exec cd {repo_path} && python scripts/deploy.py sync-skills
 ```
 
-- **Already up to date**：告知用户已是最新版本，无需升级，流程结束
-- **成功拉取**：继续下一阶段
-- **冲突**：告知用户存在本地修改冲突，需要手动解决后重试
+## Troubleshooting
 
-### 阶段 ③ 更新依赖、数据库和 Dashboard
+Read only when needed:
 
-```bash
-exec cd {repo_path} && bash scripts/bootstrap.sh
-```
+- `references/troubleshooting.md`
 
-bootstrap.sh 会自动完成：
-- 依赖更新
-- `web/` 目录下的 `npm ci` 与 `npm run build`
-- `web/dist/index.html` 校验
-- 数据库初始化 / 迁移（含备份）
+## Notes
 
-- **退出码 0**：继续下一阶段
-- **非 0**：参考 troubleshooting.md 排查
-
-**记住脚本输出：**
-- 关注 venv 状态（`venv + deps` 或 `deps (global)`）
-- 确认输出包含 `web dashboard`，表示 Dashboard 已完成重建
-
-阶段 ④ 的重启命令取决于 venv 状态。
-
-### 阶段 ④ 重启服务
-
-**4a. 停止当前进程：**
-
-```bash
-# Linux / macOS
-exec pkill -f "uvicorn src.app:app" || true
-
-# Windows（Git Bash）
-exec taskkill //F //FI "WINDOWTITLE eq cooagents*" 2>/dev/null || true
-```
-
-等待 3 秒让进程完全退出：
-
-```bash
-exec sleep 3
-```
-
-**4b. 启动新进程：**
-
-先检测平台：
-
-```bash
-exec uname -s 2>/dev/null || echo Windows
-```
-
-**venv 创建成功时（启动前必须 source `.env` 加载 auth 环境变量）：**
-
-- **Linux / Darwin（macOS）：**
-  ```bash
-  exec cd {repo_path} && set -a && . ./.env && set +a && nohup .venv/bin/uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &
-  ```
-- **Windows（Git Bash）：**
-  ```bash
-  exec cd {repo_path} && (set -a && . ./.env && set +a && .venv/Scripts/python -m uvicorn src.app:app --host 127.0.0.1 --port 8321 > cooagents.log 2>&1 &)
-  ```
-
-如果使用 systemd,启动由单位文件管理,跳过本步骤的手动启动,改为 `sudo systemctl restart cooagents`。
-
-**venv 未创建时：**
-- 将 `.venv/bin/uvicorn` 替换为 `uvicorn`
-- 将 `.venv/Scripts/python` 替换为 `python3`
-
-### 阶段 ⑤ 验证升级
-
-**5a. 健康检查（最多 30 秒，每 3 秒一次）：**
-
-```bash
-exec curl -s http://127.0.0.1:8321/health
-```
-
-成功判定：返回 `"status": "ok"`。
-
-**5b. 验证 Dashboard 根路径：**
-
-```bash
-exec curl -s http://127.0.0.1:8321/
-```
-
-成功判定：响应内容包含 `<html`。如果 `/health` 正常但根路径没有返回 HTML，视为升级失败。
-
-**5c. 确认版本已更新：**
-
-```bash
-exec cd {repo_path} && git log --oneline -1
-```
-
-对比阶段 ① 记录的版本，确认 commit 已变更。
-
-如果健康检查或 Dashboard 校验失败，检查日志：
-
-```bash
-exec cat {repo_path}/cooagents.log
-```
-
-参考 troubleshooting.md 排查。
-
-## D. 完成确认
-
-升级完成后，回复用户：
-
-```
-✅ cooagents 已升级
-- 服务地址：http://127.0.0.1:8321（公网访问经反向代理）
-- 健康状态：ok
-- Dashboard：http://127.0.0.1:8321/（返回 HTML）
-- 旧版本：{old_commit}
-- 新版本：{new_commit}
-- Skills：已随启动自动重新部署到所有启用的宿主（OpenClaw `~/.openclaw/skills/`、Hermes `~/.hermes/skills/`）
-
-如有运行中的任务中断，可使用 /cooagents-workflow 查看状态并恢复。
-```
-
-## E. 参考文档
-
-遇到问题时使用 Read 工具按需读取：
-- 常见问题排查 → `references/troubleshooting.md`
-
-## F. 操作原则
-
-- **顺序执行**：必须按 ①→⑤ 顺序，每阶段成功后才进入下一阶段
-- **状态追踪**：记住阶段 ① 的旧版本、阶段 ③ 的 venv 状态，以及 Dashboard 是否完成重建
-- **运行中任务警告**：有活跃任务时必须警告用户并等待确认
-- **无变更即停**：`git pull` 无新内容时直接告知用户，不执行后续操作
-- **幂等安全**：重复执行不会破坏数据（DB 备份、bootstrap 幂等）
-- **最少交互**：仅在有运行中任务或遇到错误时询问用户
+- This Skill is now a thin wrapper over `python scripts/deploy.py upgrade`.
+- The canonical flow is repo-first and CLI-first.

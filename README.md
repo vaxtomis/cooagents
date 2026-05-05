@@ -44,7 +44,7 @@ cooagents 围绕这四件事构建：
 ```bash
 git clone git@github.com:vaxtomis/cooagents.git
 cd cooagents
-./scripts/bootstrap.sh
+python scripts/deploy.py setup --admin-password 'replace-me'
 ```
 
 `bootstrap.sh` 会：
@@ -57,8 +57,10 @@ cd cooagents
 
 启动：
 
+Low-level bootstrap only:
+
 ```bash
-uvicorn src.app:app --host 0.0.0.0 --port 8321
+./scripts/bootstrap.sh
 ```
 
 打开 <http://127.0.0.1:8321/>，使用 `admin` 账号登录（密码哈希通过 `scripts/generate_password_hash.py` 生成并写入 `.env`）。
@@ -70,6 +72,8 @@ uvicorn src.app:app --host 0.0.0.0 --port 8321
 ```text
 /cooagents-setup
 ```
+
+The Skill is now a thin wrapper over `python scripts/deploy.py setup` and `python scripts/deploy.py integrate-runtime`.
 
 Skill 会识别 runtime、收集 `repo_path` / `admin_password`、运行 `bootstrap.sh`、起服务、注册本地 Agent 主机并回写 `AGENT_API_TOKEN`。
 
