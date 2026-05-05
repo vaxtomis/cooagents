@@ -264,8 +264,6 @@ flowchart LR
 stateDiagram-v2
   [*] --> INIT
   INIT --> MODE_BRANCH
-  MODE_BRANCH --> PRE_VALIDATE: mode=new
-  MODE_BRANCH --> ESCALATED: mode=optimize 且未启用
   PRE_VALIDATE --> PROMPT_COMPOSE
   PROMPT_COMPOSE --> LLM_GENERATE
   LLM_GENERATE --> MOCKUP: needs_frontend_mockup
@@ -274,6 +272,8 @@ stateDiagram-v2
   POST_VALIDATE --> PROMPT_COMPOSE: 缺节/文件缺失且 loop < max_loops
   POST_VALIDATE --> ESCALATED: 校验失败且 loop >= max_loops
   POST_VALIDATE --> PERSIST: 校验通过
+  MODE_BRANCH --> PRE_VALIDATE: mode=new
+  MODE_BRANCH --> ESCALATED: mode=optimize 且未启用
   PERSIST --> COMPLETED
   COMPLETED --> [*]
   ESCALATED --> [*]
