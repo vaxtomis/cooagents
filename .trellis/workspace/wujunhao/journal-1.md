@@ -39,3 +39,37 @@ Introduced a unified repo-local deployment CLI, converted bootstrap/setup flows 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Tighten DesignDoc contract
+
+**Date**: 2026-05-05
+**Task**: Tighten DesignDoc contract
+**Branch**: `main`
+
+### Summary
+
+Tightened the DesignWork DesignDoc contract, updated prompt/validator/templates/fixtures, added backend code-spec, and verified affected backend plus frontend tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9b199a4` | (see git log) |
+| `47c7393` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

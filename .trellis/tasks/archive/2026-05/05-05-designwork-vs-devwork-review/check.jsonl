@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/index.md","reason":"Entry point for backend check expectations and layer rules for DesignWork contract changes."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Needed to verify implementation stays in the correct route/service/state-machine/template layers."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Primary verification guide for tests, invariant coverage, and API contract quality."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Needed to verify tightened validation still maps to the correct exception and response contracts."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Needed to verify any changed degraded-path handling still logs correctly without leaking sensitive data."}
+{"file":".trellis/spec/guides/index.md","reason":"Shared thinking-guide entry point required before quality checks."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Needed to review whether new contract logic was extracted rather than duplicated across prompt and validation paths."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Needed to verify the final data contract remains aligned across prompt, validator, persistence, and frontend display layers."}
