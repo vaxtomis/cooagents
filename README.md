@@ -435,17 +435,6 @@ cd web && npm run build
 | `scripts/sim_worker.py` | 模拟 cooagents-worker 行为，用于无远端机器时调试 SSH 链路 |
 | `scripts/audit_filesystem_writes.py` | 审计哪些代码路径绕过 `WorkspaceFileRegistry`，回归"单写者"不变量 |
 
----
-
-## 文档
-
-- [docs/CODEMAPS/architecture.md](docs/CODEMAPS/architecture.md) — 系统拓扑、模块图
-- [docs/CODEMAPS/backend.md](docs/CODEMAPS/backend.md) — 路由表 / 中间件 / 服务依赖
-- [docs/CODEMAPS/frontend.md](docs/CODEMAPS/frontend.md) — 页面树 / 组件 / hooks
-- [docs/CODEMAPS/data.md](docs/CODEMAPS/data.md) — Schema 详解 / 不变量
-- [docs/CODEMAPS/dependencies.md](docs/CODEMAPS/dependencies.md) — Python / Node 依赖、外部服务
-- [docs/design/](docs/design/) — DES / ADR 模板
-- [docs/dev/](docs/dev/) — PLAN / TEST-REPORT 模板
 
 ---
 
