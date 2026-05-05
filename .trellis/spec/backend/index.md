@@ -21,6 +21,7 @@ The conventions below describe how the code works today. Follow them before addi
 
 | Guide | Description | Status |
 |-------|-------------|--------|
+| [DesignDoc Contracts](./design-doc-contracts.md) | Executable Markdown contract shared by DesignWork output and DevWork Step1 revalidation | Complete |
 | [Directory Structure](./directory-structure.md) | Module ownership, placement rules, naming | Complete |
 | [Database Guidelines](./database-guidelines.md) | SQLite, raw SQL, migrations, invariants | Complete |
 | [Error Handling](./error-handling.md) | Domain exceptions, HTTP mapping, validation layers | Complete |
@@ -36,10 +37,11 @@ Read these before writing backend code:
 
 1. Always read [Directory Structure](./directory-structure.md)
 2. Always read [Quality Guidelines](./quality-guidelines.md)
-3. If you touch `db/schema.sql`, repo classes, migrations, or SQL queries, read [Database Guidelines](./database-guidelines.md)
-4. If you touch a route, auth flow, validation rule, or error response, read [Error Handling](./error-handling.md)
-5. If you touch background loops, retry paths, worker code, or any secret-bearing integration, read [Logging Guidelines](./logging-guidelines.md)
-6. If you touch setup/bootstrap/upgrade/service commands, skill deployment, or OpenClaw/Hermes integration, read [Deployment & Runtime Integration](./deployment-runtime-integration.md)
+3. If you touch DesignWork prompt composition, DesignDoc Markdown shape, or DevWork Step1 design-doc ingestion, read [DesignDoc Contracts](./design-doc-contracts.md)
+4. If you touch `db/schema.sql`, repo classes, migrations, or SQL queries, read [Database Guidelines](./database-guidelines.md)
+5. If you touch a route, auth flow, validation rule, or error response, read [Error Handling](./error-handling.md)
+6. If you touch background loops, retry paths, worker code, or any secret-bearing integration, read [Logging Guidelines](./logging-guidelines.md)
+7. If you touch setup/bootstrap/upgrade/service commands, skill deployment, or OpenClaw/Hermes integration, read [Deployment & Runtime Integration](./deployment-runtime-integration.md)
 
 Also read the shared thinking guides from `.trellis/spec/guides/`.
 
