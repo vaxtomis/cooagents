@@ -14,9 +14,17 @@ created_at: $created_at
 
 $user_story
 
-## 用户案例
+## 场景案例
 
-$user_cases
+### SC-01 主场景
+
+- Actor: $scenario_actor
+- Trigger: $scenario_trigger
+- Preconditions: $scenario_preconditions
+- Main Flow:
+  1. $scenario_step_1
+  2. $scenario_step_2
+- Expected Result: $scenario_expected_result
 
 ## 详细操作流程
 
@@ -24,17 +32,16 @@ $operation_flow
 
 ## 验收标准
 
-$acceptance_criteria
+- [ ] AC-01: $acceptance_criterion_1
+- [ ] AC-02: $acceptance_criterion_2
 
 ## 打分 rubric
 
-| 评分项 | 权重 | 说明 |
-|---|---|---|
-| 设计文档完整度 | 20 | 章节全、front-matter 齐、无空洞 |
-| 用户故事与验收映射 | 30 | 故事与验收一一对应 |
-| 操作流程可实现性 | 30 | 给定流程可直接指导开发 |
-| 边界与异常 | 20 | 覆盖主要异常分支 |
-
-总分阈值：$rubric_threshold / 100
+| 维度 | 权重 | 判定标准 |
+|---|---:|---|
+| 完整性 | 20 | $rubric_completeness |
+| 对齐度 | 30 | $rubric_alignment |
+| 可实现性 | 30 | $rubric_implementability |
+| 边界覆盖 | 20 | $rubric_edge_coverage |
 
 $mockup_section

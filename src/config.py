@@ -91,7 +91,7 @@ class DesignConfig(BaseModel):
     required_sections: list[str] = Field(
         default_factory=lambda: [
             "用户故事",
-            "用户案例",
+            "场景案例",
             "详细操作流程",
             "验收标准",
             "打分 rubric",

@@ -15,13 +15,38 @@ $user_input
 - `rubric_threshold`: 默认 80，可根据重要程度上调（整数，1-100）
 - `needs_frontend_mockup`: $needs_frontend_mockup
 
-主体必须**按顺序**包含以下 H2 章节，缺一不可：
+主体必须按顺序包含以下 H2 章节，缺一不可：
 
 1. `## 用户故事`
-2. `## 用户案例`
+2. `## 场景案例`
 3. `## 详细操作流程`
 4. `## 验收标准`
-5. `## 打分 rubric` — 评分项表格，含"设计文档完整度"
+5. `## 打分 rubric`
+
+### `## 场景案例` 格式要求
+
+- 至少包含一个子案例
+- 每个子案例必须以 `### SC-xx <标题>` 开头
+- 每个子案例必须包含以下字段：
+  - `Actor:`
+  - `Main Flow:`
+  - `Expected Result:`
+- 推荐补充：
+  - `Trigger:`
+  - `Preconditions:`
+
+### `## 验收标准` 格式要求
+
+- 使用 checklist
+- 每条使用 `- [ ] AC-xx: ...`
+- 每条必须可测试、可观察
+
+### `## 打分 rubric` 格式要求
+
+- 使用 markdown table
+- 至少包含列：`维度 | 权重 | 判定标准`
+- `权重` 使用整数
+- 推荐总权重为 100
 
 $mockup_instruction
 

@@ -39,7 +39,7 @@ def _build_config(max_rounds=5, default_threshold=80):
     return SimpleNamespace(
         design=SimpleNamespace(
             required_sections=[
-                "用户故事", "用户案例", "详细操作流程", "验收标准", "打分 rubric",
+                "用户故事", "场景案例", "详细操作流程", "验收标准", "打分 rubric",
             ],
             mockup_sections=["页面结构"],
             allow_optimize_mode=False,
