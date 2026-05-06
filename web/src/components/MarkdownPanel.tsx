@@ -11,7 +11,7 @@ type Props = {
 export function MarkdownPanel({ content, emptyText = "暂无内容。", className = "" }: Props) {
   if (!content) {
     return (
-      <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+      <p className="rounded-[22px] border border-dashed border-border bg-panel-deep/72 px-4 py-6 text-sm text-muted">
         {emptyText}
       </p>
     );
@@ -19,7 +19,7 @@ export function MarkdownPanel({ content, emptyText = "暂无内容。", classNam
 
   return (
     <div
-      className={`md-prose max-h-[520px] overflow-y-auto rounded-2xl border border-border bg-panel-strong/40 p-5 ${className}`.trim()}
+      className={`md-prose max-h-[520px] overflow-y-auto rounded-[24px] border border-border bg-panel-deep/86 p-5 shadow-panel ${className}`.trim()}
     >
       <Markdown rehypePlugins={[rehypeSanitize]} remarkPlugins={[remarkGfm]}>
         {content}

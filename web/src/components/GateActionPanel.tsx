@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { actOnGate } from "../api/gates";
 import { ApiError } from "../api/client";
+import { actOnGate } from "../api/gates";
 import type { GateInfo } from "../types";
 import { StatusBadge } from "./StatusBadge";
 
@@ -17,7 +17,7 @@ export function GateActionPanel({ gateId, gateInfo, onAction }: Props) {
 
   if (!gateInfo) {
     return (
-      <div className="rounded-2xl border border-border bg-panel-strong/80 p-4 text-sm text-muted">
+      <div className="rounded-[22px] border border-border bg-panel-strong/80 p-4 text-sm text-muted shadow-panel">
         当前未进入闸门。
       </div>
     );
@@ -45,54 +45,54 @@ export function GateActionPanel({ gateId, gateInfo, onAction }: Props) {
   }
 
   return (
-    <div className="space-y-3 rounded-2xl border border-border bg-panel-strong/80 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-copy">闸门 {gateInfo.gate_key ?? gateId}</p>
-          {gateInfo.actor ? (
-            <p className="mt-1 text-xs text-muted">操作人 {gateInfo.actor}</p>
-          ) : null}
-          {gateInfo.acted_at ? (
-            <p className="mt-1 text-xs text-muted">{gateInfo.acted_at}</p>
-          ) : null}
+    <div className="relative overflow-hidden rounded-[24px] border border-border bg-panel-strong/82 p-4 shadow-panel">
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.55),transparent)]" />
+
+      <div className="relative space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-copy">闸门 {gateInfo.gate_key ?? gateId}</p>
+            {gateInfo.actor ? <p className="mt-1 text-xs text-muted">操作人：{gateInfo.actor}</p> : null}
+            {gateInfo.acted_at ? <p className="mt-1 text-xs text-muted">{gateInfo.acted_at}</p> : null}
+          </div>
+          <StatusBadge status={gateInfo.status} />
         </div>
-        <StatusBadge status={gateInfo.status} />
+
+        {gateInfo.note ? <p className="text-xs text-muted">备注：{gateInfo.note}</p> : null}
+
+        {waiting ? (
+          <label className="block space-y-1 text-xs text-muted">
+            <span>备注（可选）</span>
+            <textarea
+              className="w-full rounded-[16px] border border-border bg-panel-deep px-3 py-2 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(139,188,255,0.18)]"
+              onChange={(event) => setNote(event.target.value)}
+              rows={2}
+              value={note}
+            />
+          </label>
+        ) : null}
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="rounded-[12px] border border-[rgba(125,190,122,0.34)] bg-[linear-gradient(180deg,rgba(125,190,122,0.2),rgba(125,190,122,0.1))] px-3 py-1.5 text-xs font-medium text-[#e4ffe1] shadow-[0_10px_22px_rgba(0,0,0,0.2)] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!waiting || pending !== null}
+            onClick={() => void runAction("approve")}
+            type="button"
+          >
+            {pending === "approve" ? "批准中..." : "批准"}
+          </button>
+          <button
+            className="rounded-[12px] border border-[rgba(210,113,89,0.34)] bg-[linear-gradient(180deg,rgba(210,113,89,0.2),rgba(210,113,89,0.1))] px-3 py-1.5 text-xs font-medium text-[#ffe3db] shadow-[0_10px_22px_rgba(0,0,0,0.2)] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!waiting || pending !== null}
+            onClick={() => void runAction("reject")}
+            type="button"
+          >
+            {pending === "reject" ? "驳回中..." : "驳回"}
+          </button>
+        </div>
+
+        {error ? <p className="text-xs text-danger">{error}</p> : null}
       </div>
-
-      {gateInfo.note ? <p className="text-xs text-muted">备注：{gateInfo.note}</p> : null}
-
-      {waiting ? (
-        <label className="block space-y-1 text-xs text-muted">
-          <span>备注（可选）</span>
-          <textarea
-            className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-            onChange={(event) => setNote(event.target.value)}
-            rows={2}
-            value={note}
-          />
-        </label>
-      ) : null}
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          className="rounded-lg bg-success px-3 py-1.5 text-xs font-medium text-ink-invert disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={!waiting || pending !== null}
-          onClick={() => void runAction("approve")}
-          type="button"
-        >
-          {pending === "approve" ? "批准中..." : "批准"}
-        </button>
-        <button
-          className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={!waiting || pending !== null}
-          onClick={() => void runAction("reject")}
-          type="button"
-        >
-          {pending === "reject" ? "驳回中..." : "驳回"}
-        </button>
-      </div>
-
-      {error ? <p className="text-xs text-danger">{error}</p> : null}
     </div>
   );
 }

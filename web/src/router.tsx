@@ -50,7 +50,7 @@ type PageMeta = {
 const DESKTOP_SIDEBAR_STORAGE_KEY = "cooagents.desktopSidebarCollapsed";
 
 const primaryNavItems: NavItem[] = [
-  { to: "/", label: "总览", icon: LayoutDashboard, end: true },
+  { to: "/", label: "概览", icon: LayoutDashboard, end: true },
   { to: "/workspaces", label: "Workspace", icon: FolderKanban },
 ];
 
@@ -70,9 +70,8 @@ function resolvePageMeta(pathname: string): PageMeta {
   if (pathname === "/") {
     return {
       title: "运行总览",
-      eyebrow: "Workspace 脉搏",
-      description:
-        "集中查看活跃 Workspace、人工介入、一次性准出率和迭代深度。",
+      eyebrow: "Workspace 脉冲",
+      description: "集中查看活跃 Workspace、人工介入、一次性准出率和迭代深度。",
     };
   }
 
@@ -80,8 +79,7 @@ function resolvePageMeta(pathname: string): PageMeta {
     return {
       title: "Workspace 目录",
       eyebrow: "主工作区",
-      description:
-        "创建、筛选和重新进入 Workspace。",
+      description: "创建、筛选和重新进入 Workspace。",
     };
   }
 
@@ -89,8 +87,7 @@ function resolvePageMeta(pathname: string): PageMeta {
     return {
       title: "DesignWork 详情",
       eyebrow: "Workspace 执行",
-      description:
-        "查看状态推进、设计文档产物、校验缺口和审核历史。",
+      description: "查看状态推进、设计文档产物、校验缺口和审核历史。",
     };
   }
 
@@ -98,8 +95,7 @@ function resolvePageMeta(pathname: string): PageMeta {
     return {
       title: "DevWork 详情",
       eyebrow: "Workspace 执行",
-      description:
-        "查看开发进度、迭代文档、评审记录和闸门动作。",
+      description: "查看开发进度、迭代文档、评审记录和闸门动作。",
     };
   }
 
@@ -107,8 +103,7 @@ function resolvePageMeta(pathname: string): PageMeta {
     return {
       title: "Workspace 工作台",
       eyebrow: "设计 / 开发 / 事件",
-      description:
-        "在一个 Workspace 内处理设计工作、开发工作和事件流。",
+      description: "在单个 Workspace 内处理设计工作、开发工作和事件流。",
     };
   }
 
@@ -116,8 +111,7 @@ function resolvePageMeta(pathname: string): PageMeta {
     return {
       title: "跨 Workspace DevWork",
       eyebrow: "全局视图",
-      description:
-        "跨活跃 Workspace 扫描开发工作状态。",
+      description: "跨活跃 Workspace 扫描开发工作状态。",
     };
   }
 
@@ -125,8 +119,7 @@ function resolvePageMeta(pathname: string): PageMeta {
     return {
       title: "Agent Host 管理",
       eyebrow: "执行基础设施",
-      description:
-        "登记执行节点、查看健康状态，并维护远端 Agent Host 配置。",
+      description: "登记执行节点、查看健康状态，并维护远端 Agent Host 配置。",
     };
   }
 
@@ -134,17 +127,15 @@ function resolvePageMeta(pathname: string): PageMeta {
     return {
       title: "仓库注册表",
       eyebrow: "共享基础设施",
-      description:
-        "管理仓库登记、fetch 健康度和仓库元数据。",
+      description: "管理仓库登记、fetch 健康度和仓库元数据。",
     };
   }
 
   if (/^\/repos\/[^/]+$/.test(pathname)) {
     return {
       title: "仓库详情",
-      eyebrow: "代码检查器",
-      description:
-        "浏览分支、目录树、文件内容和提交历史。",
+      eyebrow: "代码侦测器",
+      description: "浏览分支、目录树、文件内容和提交历史。",
     };
   }
 
@@ -166,17 +157,17 @@ function ShellNavLink({
     <NavLink
       aria-label={item.label}
       end={item.end}
-      to={item.to}
       title={collapsed ? item.label : undefined}
+      to={item.to}
       className={({ isActive }) => {
         const base = compact
-          ? "inline-flex min-w-fit items-center gap-2 rounded-full border px-3 py-2 text-sm transition"
+          ? "inline-flex min-w-fit items-center gap-2 rounded-[14px] border px-3 py-2 text-xs font-medium transition"
           : collapsed
-            ? "flex size-11 items-center justify-center rounded-xl border text-sm transition"
-            : "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition";
+            ? "flex size-11 items-center justify-center rounded-[16px] border text-sm transition"
+            : "flex items-center gap-3 rounded-[16px] border px-3 py-2.5 text-sm font-medium transition";
         const state = isActive
-          ? "border-[color:var(--color-ring-warm)] bg-panel text-copy shadow-[0_0_0_1px_var(--color-ring-warm)]"
-          : "border-transparent text-muted hover:border-border hover:bg-panel-strong/60 hover:text-copy";
+          ? "border-[color:var(--color-border-dark)] bg-[linear-gradient(180deg,rgba(201,154,84,0.22),rgba(201,154,84,0.12))] text-copy shadow-[0_14px_28px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.08)]"
+          : "border-transparent text-muted hover:border-border hover:bg-panel-strong/65 hover:text-copy";
         return `${base} ${state}`;
       }}
     >
@@ -189,6 +180,7 @@ function ShellNavLink({
 function RequireAuth({ children }: { children: ReactNode }) {
   const { status } = useAuth();
   const location = useLocation();
+
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-void text-muted">
@@ -196,9 +188,11 @@ function RequireAuth({ children }: { children: ReactNode }) {
       </div>
     );
   }
+
   if (status === "unauthenticated") {
-    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+    return <Navigate replace state={{ from: location.pathname + location.search }} to="/login" />;
   }
+
   return <>{children}</>;
 }
 
@@ -213,185 +207,188 @@ function ShellLayout() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(
-        DESKTOP_SIDEBAR_STORAGE_KEY,
-        sidebarCollapsed ? "1" : "0",
-      );
+      window.localStorage.setItem(DESKTOP_SIDEBAR_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
     }
   }, [sidebarCollapsed]);
 
   return (
-    <div className="min-h-screen bg-void text-copy">
-      <div className="flex min-h-screen w-full gap-4 px-3 py-3 md:px-4 md:py-4">
+    <div className="relative min-h-screen text-copy" data-shell-tone="console">
+      <div className="mx-auto flex min-h-screen max-w-[1640px] gap-4 px-3 py-3 md:px-5 md:py-5">
         <aside
-          className={`hidden shrink-0 flex-col rounded-2xl border border-border bg-panel shadow-whisper md:flex ${
-            sidebarCollapsed
-              ? "w-[88px] items-center px-3 py-4"
-              : "w-[232px] p-4"
+          className={`relative hidden shrink-0 overflow-hidden rounded-[30px] border border-border-strong bg-panel/95 shadow-shell md:flex ${
+            sidebarCollapsed ? "w-[92px] items-center px-3 py-4" : "w-[260px] p-4"
           }`}
+          data-console-chrome="sidebar"
         >
-          <div
-            className={`flex w-full px-1 pb-2 ${
-              sidebarCollapsed
-                ? "flex-col items-center gap-3"
-                : "items-start justify-between gap-3"
-            }`}
-          >
-            <div className={`flex items-center ${sidebarCollapsed ? "justify-center" : "gap-3"}`}>
-              <div className="flex size-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
-                <Bot className="size-5" strokeWidth={1.9} />
+          <div className="pointer-events-none absolute inset-[1px] rounded-[29px] border border-white/4" />
+          <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.78),transparent)]" />
+
+          <div className="relative flex h-full w-full flex-col">
+            <div
+              className={`flex w-full px-1 pb-3 ${
+                sidebarCollapsed ? "flex-col items-center gap-3" : "items-start justify-between gap-3"
+              }`}
+            >
+              <div className={`flex items-center ${sidebarCollapsed ? "justify-center" : "gap-3"}`}>
+                <div className="flex size-11 items-center justify-center rounded-[18px] border border-border-strong bg-[linear-gradient(180deg,rgba(201,154,84,0.2),rgba(201,154,84,0.07))] text-accent-soft shadow-[0_12px_28px_rgba(0,0,0,0.22)]">
+                  <Bot className="size-5" strokeWidth={1.9} />
+                </div>
+                {!sidebarCollapsed ? (
+                  <div>
+                    <p className="text-lg font-semibold leading-tight tracking-[-0.04em] text-copy">
+                      Cooagents
+                    </p>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">
+                      Workspace 控制台
+                    </p>
+                  </div>
+                ) : null}
               </div>
+              <button
+                aria-expanded={!sidebarCollapsed}
+                aria-label={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
+                className="inline-flex size-9 items-center justify-center rounded-[12px] border border-border bg-panel-deep text-muted transition hover:border-accent/40 hover:text-copy"
+                onClick={() => setSidebarCollapsed((current) => !current)}
+                title={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
+                type="button"
+              >
+                {sidebarCollapsed ? (
+                  <ChevronsRight className="size-4" strokeWidth={1.8} />
+                ) : (
+                  <ChevronsLeft className="size-4" strokeWidth={1.8} />
+                )}
+              </button>
+            </div>
+
+            <div className={`w-full ${sidebarCollapsed ? "mt-5 space-y-4" : "mt-7 space-y-6"}`}>
+              <div>
+                {!sidebarCollapsed ? (
+                  <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.24em] text-muted-soft">
+                    主导航
+                  </p>
+                ) : null}
+                <nav className={`flex ${sidebarCollapsed ? "flex-col items-center gap-2" : "flex-col gap-1.5"}`}>
+                  {primaryNavItems.map((item) => (
+                    <ShellNavLink key={item.to} collapsed={sidebarCollapsed} item={item} />
+                  ))}
+                </nav>
+              </div>
+
+              <div>
+                {!sidebarCollapsed ? (
+                  <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.24em] text-muted-soft">
+                    全局资源
+                  </p>
+                ) : null}
+                <nav className={`flex ${sidebarCollapsed ? "flex-col items-center gap-2" : "flex-col gap-1.5"}`}>
+                  {operationsNavItems.map((item) => (
+                    <ShellNavLink key={item.to} collapsed={sidebarCollapsed} item={item} />
+                  ))}
+                </nav>
+              </div>
+
               {!sidebarCollapsed ? (
                 <div>
-                  <p className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">
-                    Cooagents
-                  </p>
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-soft">
-                    Workspace 控制台
-                  </p>
-                </div>
-              ) : null}
-            </div>
-            <button
-              aria-expanded={!sidebarCollapsed}
-              aria-label={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
-              className="inline-flex size-9 items-center justify-center rounded-lg border border-border-strong bg-panel-strong/50 text-muted transition hover:border-accent/40 hover:text-accent"
-              onClick={() => setSidebarCollapsed((current) => !current)}
-              title={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
-              type="button"
-            >
-              {sidebarCollapsed ? (
-                <ChevronsRight className="size-4" strokeWidth={1.8} />
-              ) : (
-                <ChevronsLeft className="size-4" strokeWidth={1.8} />
-              )}
-            </button>
-          </div>
-
-          <div className={`w-full ${sidebarCollapsed ? "mt-6 space-y-4" : "mt-8 space-y-6"}`}>
-            <div>
-              {!sidebarCollapsed ? (
-                <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
-                  主导航
-                </p>
-              ) : null}
-              <nav className={`flex ${sidebarCollapsed ? "flex-col items-center gap-2" : "flex-col gap-1"}`}>
-                {primaryNavItems.map((item) => (
-                  <ShellNavLink key={item.to} item={item} collapsed={sidebarCollapsed} />
-                ))}
-              </nav>
-            </div>
-
-            <div>
-              {!sidebarCollapsed ? (
-                <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
-                  全局资源
-                </p>
-              ) : null}
-              <nav className={`flex ${sidebarCollapsed ? "flex-col items-center gap-2" : "flex-col gap-1"}`}>
-                {operationsNavItems.map((item) => (
-                  <ShellNavLink key={item.to} item={item} collapsed={sidebarCollapsed} />
-                ))}
-              </nav>
-            </div>
-
-            {!sidebarCollapsed ? (
-              <div>
-              <div className="mb-2 flex items-center justify-between gap-2 px-1">
-                <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">
-                  最近 Workspace
-                </p>
-                <span className="text-[11px] text-muted-soft">
-                  {workspacesQuery.data ? recentWorkspaces.length : "..."}
-                </span>
-              </div>
-              <div className="space-y-2">
-                {recentWorkspaces.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-border bg-panel-strong/35 px-4 py-4 text-xs text-muted">
-                    暂无活跃 Workspace。
+                  <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-muted-soft">
+                      最近 Workspace
+                    </p>
+                    <span className="text-[11px] text-muted-soft">
+                      {workspacesQuery.data ? recentWorkspaces.length : "..."}
+                    </span>
                   </div>
-                ) : (
-                  recentWorkspaces.map((workspace) => (
-                    <NavLink
-                      key={workspace.id}
-                      to={`/workspaces/${workspace.id}`}
-                      className="block rounded-2xl border border-border bg-panel-strong/55 px-4 py-3 transition hover:border-accent/30"
-                    >
-                      <p className="truncate text-sm font-medium text-copy">{workspace.title}</p>
-                      <p className="mt-1 truncate font-mono text-[11px] text-muted">
-                        {workspace.slug}
-                      </p>
-                    </NavLink>
-                  ))
-                )}
-              </div>
-              </div>
-            ) : null}
-          </div>
+                  <div className="space-y-2">
+                    {recentWorkspaces.length === 0 ? (
+                      <div className="rounded-[20px] border border-dashed border-border bg-panel-deep/72 px-4 py-4 text-xs text-muted">
+                        暂无活跃 Workspace。
+                      </div>
+                    ) : (
+                      recentWorkspaces.map((workspace) => (
+                        <NavLink
+                          key={workspace.id}
+                          to={`/workspaces/${workspace.id}`}
+                          className="block rounded-[20px] border border-border bg-panel-strong/55 px-4 py-3 transition hover:border-accent/30 hover:bg-panel-strong/8"
+                        >
+                          <p className="truncate text-sm font-medium text-copy">{workspace.title}</p>
+                          <p className="mt-1 truncate font-mono text-[11px] text-muted">{workspace.slug}</p>
+                        </NavLink>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
 
-          <div className="mt-auto w-full">
-            {sidebarCollapsed ? (
-              <div className="flex flex-col items-center gap-3">
-                <div
-                  className="flex size-10 items-center justify-center rounded-2xl border border-border bg-panel text-sm font-medium text-copy"
-                  title={user?.username ?? "-"}
-                >
-                  {(user?.username ?? "?").slice(0, 1).toUpperCase()}
+            <div className="mt-auto w-full">
+              {sidebarCollapsed ? (
+                <div className="flex flex-col items-center gap-3">
+                  <div
+                    className="flex size-10 items-center justify-center rounded-[16px] border border-border bg-panel-deep text-sm font-medium text-copy"
+                    title={user?.username ?? "-"}
+                  >
+                    {(user?.username ?? "?").slice(0, 1).toUpperCase()}
+                  </div>
+                  <button
+                    aria-label="退出"
+                    className="inline-flex size-9 items-center justify-center rounded-[12px] border border-border bg-panel-deep text-muted transition hover:border-accent/40 hover:text-copy"
+                    onClick={() => void logout()}
+                    title="退出"
+                    type="button"
+                  >
+                    <LogOut className="size-4" strokeWidth={1.8} />
+                  </button>
                 </div>
-                <button
-                  aria-label="退出"
-                  className="inline-flex size-9 items-center justify-center rounded-lg border border-border-strong text-muted transition hover:border-accent/40 hover:text-accent"
-                  onClick={() => void logout()}
-                  title="退出"
-                  type="button"
-                >
-                  <LogOut className="size-4" strokeWidth={1.8} />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3 text-xs text-muted">
-                <div className="min-w-0 truncate">
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-muted-soft">已登录</p>
-                  <p className="truncate text-sm text-copy">{user?.username ?? "-"}</p>
+              ) : (
+                <div className="rounded-[22px] border border-border bg-panel-deep/72 px-4 py-3 text-xs text-muted">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 truncate">
+                      <p className="text-[10px] uppercase tracking-[0.22em] text-muted-soft">已登录</p>
+                      <p className="truncate text-sm text-copy">{user?.username ?? "-"}</p>
+                    </div>
+                    <button
+                      className="inline-flex items-center gap-1 rounded-[12px] border border-border px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-copy"
+                      onClick={() => void logout()}
+                      type="button"
+                    >
+                      <LogOut className="size-3.5" strokeWidth={1.8} />
+                      退出
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void logout()}
-                  className="inline-flex items-center gap-1 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
-                >
-                  <LogOut className="size-3.5" strokeWidth={1.8} />
-                  退出
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </aside>
 
         <div className="flex min-h-[calc(100vh-1.5rem)] min-w-0 flex-1 flex-col gap-4">
-          <header className="overflow-hidden rounded-2xl border border-border bg-panel px-4 py-4 shadow-whisper md:px-5">
-            <div className="flex flex-col gap-3">
+          <header
+            className="relative overflow-hidden rounded-[30px] border border-border-strong bg-panel/95 px-4 py-4 shadow-shell md:px-5"
+            data-console-chrome="masthead"
+          >
+            <div className="pointer-events-none absolute inset-[1px] rounded-[29px] border border-white/4" />
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.8),transparent)]" />
+
+            <div className="relative flex flex-col gap-3">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-accent">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent-soft">
                     {meta.eyebrow}
                   </p>
-                  <h1 className="mt-1 font-serif text-[1.55rem] font-medium leading-tight tracking-tight text-copy md:text-[1.9rem]">
+                  <h1 className="mt-1 text-[1.55rem] font-semibold leading-tight tracking-[-0.04em] text-copy md:text-[1.9rem]">
                     {meta.title}
                   </h1>
-                  <p className="mt-1 max-w-5xl text-sm leading-relaxed text-muted">
-                    {meta.description}
-                  </p>
+                  <p className="mt-1 max-w-5xl text-sm leading-relaxed text-muted">{meta.description}</p>
                 </div>
 
-                <div className="hidden shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-muted md:flex">
-                  <span className="size-1.5 rounded-full bg-success" />
+                <div className="hidden shrink-0 items-center gap-2 rounded-[14px] border border-border bg-panel-deep/76 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-muted md:flex">
+                  <span className="size-1.5 rounded-full bg-success ring-2 ring-black/20" />
                   实时
                 </div>
               </div>
 
               <nav className="flex gap-2 overflow-x-auto pb-1 md:hidden">
                 {[...primaryNavItems, ...operationsNavItems].map((item) => (
-                  <ShellNavLink key={item.to} item={item} compact />
+                  <ShellNavLink key={item.to} compact item={item} />
                 ))}
               </nav>
             </div>

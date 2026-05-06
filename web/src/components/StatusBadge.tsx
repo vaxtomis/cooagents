@@ -2,15 +2,20 @@ import type { ReactNode } from "react";
 
 export type StatusTone = "success" | "warning" | "danger" | "accent" | "muted";
 
-const SUCCESS_CLASS = "border-success/25 bg-success/10 text-success";
+const SUCCESS_CLASS =
+  "border-[rgba(125,190,122,0.34)] bg-[linear-gradient(180deg,rgba(125,190,122,0.18),rgba(125,190,122,0.08))] text-[#a9dfa4]";
 const SUCCESS_DOT = "bg-success";
-const ACCENT_CLASS = "border-accent/25 bg-accent/10 text-accent";
+const ACCENT_CLASS =
+  "border-[rgba(201,154,84,0.34)] bg-[linear-gradient(180deg,rgba(201,154,84,0.2),rgba(201,154,84,0.08))] text-accent-soft";
 const ACCENT_DOT = "bg-accent";
-const WARNING_CLASS = "border-warning/25 bg-warning/10 text-warning";
+const WARNING_CLASS =
+  "border-[rgba(213,164,92,0.34)] bg-[linear-gradient(180deg,rgba(213,164,92,0.18),rgba(213,164,92,0.08))] text-[#f0c582]";
 const WARNING_DOT = "bg-warning";
-const DANGER_CLASS = "border-danger/25 bg-danger/10 text-danger";
+const DANGER_CLASS =
+  "border-[rgba(210,113,89,0.34)] bg-[linear-gradient(180deg,rgba(210,113,89,0.18),rgba(210,113,89,0.08))] text-[#f1a18e]";
 const DANGER_DOT = "bg-danger";
-const MUTED_CLASS = "border-border bg-panel-strong/50 text-muted";
+const MUTED_CLASS =
+  "border-border bg-panel-strong/55 text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]";
 const MUTED_DOT = "bg-muted";
 
 function success(label: string) {
@@ -34,7 +39,6 @@ function muted(label: string) {
 }
 
 const STATUS_META: Record<string, { label: string; tone: StatusTone; className: string; dotClassName: string }> = {
-  // Legacy / shared tones.
   active: success("在线"),
   approved: success("已通过"),
   cancelled: danger("已取消"),
@@ -51,15 +55,12 @@ const STATUS_META: Record<string, { label: string; tone: StatusTone; className: 
   timeout: danger("超时"),
   waiting: warning("等待中"),
 
-  // Workspace lifecycle.
   archived: muted("已归档"),
 
-  // DesignDoc status.
   draft: warning("草稿"),
   published: success("已发布"),
   superseded: muted("已被替代"),
 
-  // DesignWorkState - keys are lowercased; resolveStatusBadge lowercases input.
   init: muted("待启动"),
   mode_branch: accent("模式分支"),
   pre_validate: warning("预校验"),
@@ -70,28 +71,23 @@ const STATUS_META: Record<string, { label: string; tone: StatusTone; className: 
   persist: success("持久化"),
   escalated: danger("升级"),
 
-  // DevWorkStep.
   step1_validate: warning("Step1 校验"),
   step2_iteration: accent("Step2 迭代"),
   step3_context: accent("Step3 上下文"),
   step4_develop: accent("Step4 开发"),
   step5_review: warning("Step5 评审"),
 
-  // ProblemCategory.
   req_gap: warning("需求缺口"),
   impl_gap: warning("实现缺口"),
   design_hollow: warning("设计空洞"),
 
-  // Repo registry - fetch_status enum.
   unknown: muted("未知"),
   healthy: success("健康"),
   unhealthy: danger("异常"),
   error: danger("失败"),
 
-  // Repo push state (Phase 5 - dev_work_repos.push_state).
   pending: warning("待推送"),
   pushed: success("已推送"),
-  // `failed` already mapped above to danger("失败").
 };
 
 export function resolveStatusBadge(status: string | null | undefined) {
@@ -99,8 +95,8 @@ export function resolveStatusBadge(status: string | null | undefined) {
   return STATUS_META[normalized] ?? {
     label: normalized,
     tone: "muted" as StatusTone,
-    className: "border-border bg-panel-strong/50 text-muted",
-    dotClassName: "bg-muted",
+    className: MUTED_CLASS,
+    dotClassName: MUTED_DOT,
   };
 }
 
@@ -121,11 +117,17 @@ export function StatusBadge({
   return (
     <span
       aria-label={resolvedLabel}
-      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium ${meta.className} ${className}`.trim()}
+      className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium shadow-[0_10px_24px_rgba(0,0,0,0.16)] ${meta.className} ${className}`.trim()}
+      data-ornament="console-pill"
       data-tone={meta.tone}
       role="status"
     >
-      {icon ?? <span className={`size-1.5 rounded-full ${meta.dotClassName}`} />}
+      {icon ?? (
+        <span
+          className={`size-1.5 rounded-full ring-2 ring-black/20 ${meta.dotClassName}`}
+          data-badge-dot="true"
+        />
+      )}
       {resolvedLabel}
     </span>
   );

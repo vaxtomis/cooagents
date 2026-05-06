@@ -18,26 +18,28 @@ export function SegmentedControl<T extends string>({
 }: SegmentedControlProps<T>) {
   return (
     <div
-      className="inline-flex flex-wrap gap-2 rounded-full border border-border bg-panel-strong/45 p-1"
-      role="tablist"
       aria-label={ariaLabel}
+      className="inline-flex flex-wrap gap-2 rounded-[18px] border border-border-strong bg-panel-deep/80 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+      data-segmented-tone="console"
+      role="tablist"
     >
       {options.map((option) => {
         const selected = option.value === value;
         return (
           <button
             key={option.value}
-            type="button"
-            role="tab"
             aria-selected={selected}
-            tabIndex={selected ? 0 : -1}
-            onClick={() => onChange(option.value)}
             className={[
-              "rounded-full px-3 py-1.5 text-xs font-medium transition",
+              "rounded-[14px] border px-3 py-1.5 text-xs font-medium transition",
               selected
-                ? "bg-panel text-copy shadow-[0_0_0_1px_var(--color-ring-warm)]"
-                : "text-muted hover:text-copy",
+                ? "border-[color:var(--color-border-dark)] bg-[linear-gradient(180deg,rgba(201,154,84,0.24),rgba(201,154,84,0.14))] text-copy shadow-[0_8px_18px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.06)]"
+                : "border-transparent text-muted hover:border-border hover:bg-panel-strong/70 hover:text-copy",
             ].join(" ")}
+            data-selected={selected ? "true" : "false"}
+            onClick={() => onChange(option.value)}
+            role="tab"
+            tabIndex={selected ? 0 : -1}
+            type="button"
           >
             {option.label}
           </button>

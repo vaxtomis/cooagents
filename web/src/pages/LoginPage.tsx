@@ -33,58 +33,61 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-void px-4 py-10">
+    <div className="flex min-h-screen items-center justify-center px-4 py-10">
       <form
+        className="relative w-full max-w-sm overflow-hidden rounded-[34px] border border-border-strong bg-panel/96 p-10 shadow-shell"
         onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-6 rounded-[32px] border border-border bg-panel p-10 shadow-whisper"
       >
-        <div className="space-y-2">
-          <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-accent">
-            Cooagents 控制台
-          </p>
-          <h1 className="font-serif text-3xl font-medium leading-tight tracking-tight text-copy">
-            Cooagents
-          </h1>
-          <p className="text-sm leading-relaxed text-muted">
-            请先登录以进入运维控制台。
-          </p>
+        <div className="pointer-events-none absolute inset-[1px] rounded-[33px] border border-white/4" />
+        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.8),transparent)]" />
+
+        <div className="relative space-y-6">
+          <div className="space-y-2">
+            <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-accent-soft">
+              Cooagents 控制台
+            </p>
+            <h1 className="text-3xl font-semibold leading-tight tracking-[-0.05em] text-copy">
+              Cooagents
+            </h1>
+            <p className="text-sm leading-relaxed text-muted">请先登录以进入运维控制台。</p>
+          </div>
+
+          <label className="block space-y-1.5 text-xs font-medium uppercase tracking-[0.16em] text-muted-soft">
+            <span>用户名</span>
+            <input
+              autoComplete="username"
+              autoFocus
+              className="w-full rounded-[16px] border border-border bg-panel-deep px-4 py-3 text-sm font-normal normal-case tracking-normal text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(139,188,255,0.18)]"
+              name="username"
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              value={username}
+            />
+          </label>
+
+          <label className="block space-y-1.5 text-xs font-medium uppercase tracking-[0.16em] text-muted-soft">
+            <span>密码</span>
+            <input
+              autoComplete="current-password"
+              className="w-full rounded-[16px] border border-border bg-panel-deep px-4 py-3 text-sm font-normal normal-case tracking-normal text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(139,188,255,0.18)]"
+              name="password"
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              type="password"
+              value={password}
+            />
+          </label>
+
+          {error ? <p className="text-sm text-danger">{error}</p> : null}
+
+          <button
+            className="w-full rounded-[16px] border border-[rgba(201,154,84,0.34)] bg-[linear-gradient(180deg,rgba(201,154,84,0.28),rgba(201,154,84,0.14))] px-4 py-3 text-sm font-medium text-copy shadow-[0_14px_30px_rgba(0,0,0,0.24)] transition hover:border-[rgba(226,188,120,0.45)] hover:bg-[linear-gradient(180deg,rgba(226,188,120,0.34),rgba(201,154,84,0.16))] disabled:opacity-60"
+            disabled={submitting}
+            type="submit"
+          >
+            {submitting ? "登录中..." : "登录"}
+          </button>
         </div>
-
-        <label className="block space-y-1.5 text-xs font-medium uppercase tracking-[0.16em] text-muted-soft">
-          <span>用户名</span>
-          <input
-            autoFocus
-            autoComplete="username"
-            name="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm font-normal normal-case tracking-normal text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-            required
-          />
-        </label>
-
-        <label className="block space-y-1.5 text-xs font-medium uppercase tracking-[0.16em] text-muted-soft">
-          <span>密码</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            name="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm font-normal normal-case tracking-normal text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-            required
-          />
-        </label>
-
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-xl bg-accent px-4 py-3 text-sm font-medium text-ink-invert transition hover:bg-accent-soft disabled:opacity-60"
-        >
-          {submitting ? "登录中..." : "登录"}
-        </button>
       </form>
     </div>
   );

@@ -60,13 +60,15 @@ function renderAt(path: string) {
 
 describe("App shell", () => {
   it("renders sidebar navigation and workspace-centric routes", async () => {
-    const overviewLabel = "总览";
+    const overviewLabel = "概览";
     const workspacesLabel = "Workspace";
     const agentHostsLabel = "Agent Host 管理";
     const repoRegistryLabel = "仓库注册表";
 
     const overview = renderAt("/");
     await waitFor(() => expect(screen.getByText("Cooagents")).toBeInTheDocument());
+    expect(document.querySelector('[data-shell-tone="console"]')).not.toBeNull();
+    expect(screen.getByRole("banner")).toHaveAttribute("data-console-chrome", "masthead");
     expect(screen.getAllByRole("link", { name: overviewLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: workspacesLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: agentHostsLabel }).length).toBeGreaterThan(0);
@@ -108,11 +110,12 @@ describe("App shell", () => {
   it("collapses and expands the desktop sidebar", async () => {
     renderAt("/");
     await waitFor(() => expect(screen.getByText("Cooagents")).toBeInTheDocument());
+    expect(document.querySelector('[data-console-chrome="sidebar"]')).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "折叠侧栏" }));
 
     expect(screen.getByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
     expect(screen.queryByText("主导航")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "总览" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "概览" }).length).toBeGreaterThan(0);
   });
 });

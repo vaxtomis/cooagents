@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { StatusBadge } from "./StatusBadge";
 
 describe("StatusBadge", () => {
@@ -7,7 +7,8 @@ describe("StatusBadge", () => {
     render(<StatusBadge status="running" />);
     const badge = screen.getByRole("status", { name: "运行中" });
     expect(badge).toHaveAttribute("data-tone", "success");
-    expect(badge).toHaveClass("bg-success/10", "text-success");
+    expect(badge).toHaveAttribute("data-ornament", "console-pill");
+    expect(badge.querySelector("[data-badge-dot='true']")).not.toBeNull();
   });
 
   it("maps STEP5_REVIEW (uppercase enum) to a warning label", () => {

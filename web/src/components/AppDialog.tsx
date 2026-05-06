@@ -1,6 +1,6 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
-import type { ReactNode } from "react";
 import { X } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface AppDialogProps {
   open: boolean;
@@ -13,13 +13,16 @@ interface AppDialogProps {
 export function AppDialog({ open, title, description, onClose, children }: AppDialogProps) {
   return (
     <Dialog className="relative z-50" onClose={onClose} open={open}>
-      <DialogBackdrop className="fixed inset-0 bg-copy/30" />
+      <DialogBackdrop className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
       <div className="fixed inset-0 overflow-y-auto p-3 sm:p-6">
         <div className="flex min-h-full items-start justify-center sm:items-center">
-          <DialogPanel className="w-full max-w-4xl rounded-2xl border border-border bg-panel p-5 shadow-shell">
-            <div className="flex items-start justify-between gap-4">
+          <DialogPanel className="relative w-full max-w-4xl overflow-hidden rounded-[30px] border border-border-strong bg-panel/98 p-5 shadow-shell">
+            <div className="pointer-events-none absolute inset-[1px] rounded-[29px] border border-white/4" />
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.75),transparent)]" />
+
+            <div className="relative flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <DialogTitle className="font-serif text-2xl font-medium leading-tight text-copy">
+                <DialogTitle className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-copy">
                   {title}
                 </DialogTitle>
                 {description ? (
@@ -28,14 +31,14 @@ export function AppDialog({ open, title, description, onClose, children }: AppDi
               </div>
               <button
                 aria-label="关闭弹窗"
-                className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-border-strong bg-panel-strong/50 text-muted transition hover:border-copy/20 hover:text-copy"
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-[12px] border border-border bg-panel-deep text-muted transition hover:border-accent/40 hover:text-copy"
                 onClick={onClose}
                 type="button"
               >
                 <X className="size-4" strokeWidth={1.8} />
               </button>
             </div>
-            <div className="mt-5">{children}</div>
+            <div className="relative mt-5">{children}</div>
           </DialogPanel>
         </div>
       </div>

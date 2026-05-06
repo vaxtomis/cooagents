@@ -41,17 +41,19 @@ export function DevWorkStepProgress({ current, escalated = false, className = ""
                 ? "current"
                 : "pending";
           const toneClass = {
-            complete: "bg-success/15 text-success border-success/30",
-            current: "bg-accent/15 text-accent border-accent/40 shadow-[0_0_0_1px_var(--color-accent)]",
-            muted: "bg-panel-strong/60 text-muted border-border",
-            pending: "bg-panel-strong text-muted border-border",
+            complete:
+              "border-[rgba(125,190,122,0.24)] bg-[linear-gradient(180deg,rgba(125,190,122,0.18),rgba(125,190,122,0.1))] text-[#a9dfa4]",
+            current:
+              "border-[rgba(201,154,84,0.28)] bg-[linear-gradient(180deg,rgba(201,154,84,0.22),rgba(201,154,84,0.12))] text-copy shadow-[0_0_0_1px_rgba(201,154,84,0.24)]",
+            muted: "border-border bg-panel-strong/60 text-muted",
+            pending: "border-border bg-panel-deep/90 text-muted",
           }[tone];
           return (
             <li
-              key={step}
               aria-label={step}
               className={`flex-1 rounded-full border px-3 py-1.5 text-center text-[11px] font-medium ${toneClass}`}
               data-state={tone}
+              key={step}
             >
               {STEP_LABELS[step]}
             </li>
@@ -60,7 +62,7 @@ export function DevWorkStepProgress({ current, escalated = false, className = ""
       </ol>
       {terminal ? (
         <span
-          className="shrink-0 rounded-full border border-danger/25 bg-danger/10 px-3 py-1 text-xs font-medium text-danger"
+          className="shrink-0 rounded-full border border-[rgba(210,113,89,0.34)] bg-[linear-gradient(180deg,rgba(210,113,89,0.18),rgba(210,113,89,0.08))] px-3 py-1 text-xs font-medium text-[#f1a18e]"
           data-state="terminal"
           role="status"
         >
