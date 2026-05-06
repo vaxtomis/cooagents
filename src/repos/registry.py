@@ -30,6 +30,14 @@ _MAX_FETCH_ERR_LEN = 256
 # fetch_status values that imply we successfully reached the remote and can
 # stamp ``last_fetched_at`` with the current time.
 _SUCCESSFUL_FETCH_STATUSES: frozenset[str] = frozenset({"healthy"})
+_REPO_SORT_SQL: dict[str, str] = {
+    "name_asc": "LOWER(name) ASC, id ASC",
+    "name_desc": "LOWER(name) DESC, id DESC",
+    "updated_desc": "updated_at DESC, id DESC",
+    "updated_asc": "updated_at ASC, id ASC",
+    "last_fetched_desc": "COALESCE(last_fetched_at, '') DESC, id DESC",
+    "last_fetched_asc": "COALESCE(last_fetched_at, '') ASC, id ASC",
+}
 
 
 def _now() -> str:
@@ -130,9 +138,100 @@ class RepoRegistryRepo:
             return None
         return dict(row)
 
-    async def list_all(self) -> list[dict[str, Any]]:
-        rows = await self.db.fetchall("SELECT * FROM repos ORDER BY name")
+    @staticmethod
+    def _build_list_where(
+        *,
+        role: str | None = None,
+        fetch_status: str | None = None,
+        query: str | None = None,
+    ) -> tuple[str, list[object]]:
+        conditions: list[str] = []
+        params: list[object] = []
+        if role:
+            conditions.append("role=?")
+            params.append(role)
+        if fetch_status:
+            conditions.append("fetch_status=?")
+            params.append(fetch_status)
+        if query:
+            like = f"%{query.strip()}%"
+            conditions.append(
+                "(name LIKE ? OR url LIKE ? OR default_branch LIKE ?)"
+            )
+            params.extend([like, like, like])
+        where_sql = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where_sql, params
+
+    @staticmethod
+    def _order_sql(sort: str) -> str:
+        try:
+            return _REPO_SORT_SQL[sort]
+        except KeyError as exc:
+            raise BadRequestError(
+                f"invalid repo sort={sort!r}; expected one of "
+                f"{sorted(_REPO_SORT_SQL)}"
+            ) from exc
+
+    async def list_all(
+        self,
+        *,
+        role: str | None = None,
+        fetch_status: str | None = None,
+        query: str | None = None,
+        sort: str = "name_asc",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        where_sql, params = self._build_list_where(
+            role=role,
+            fetch_status=fetch_status,
+            query=query,
+        )
+        rows = await self.db.fetchall(
+            "SELECT * FROM repos"
+            f"{where_sql} ORDER BY {self._order_sql(sort)}"
+            + (" LIMIT ? OFFSET ?" if limit is not None else ""),
+            tuple([*params, limit, offset] if limit is not None else params),
+        )
         return [dict(r) for r in rows]
+
+    async def list_page(
+        self,
+        *,
+        role: str | None = None,
+        fetch_status: str | None = None,
+        query: str | None = None,
+        sort: str = "updated_desc",
+        limit: int = 12,
+        offset: int = 0,
+    ) -> dict[str, object]:
+        where_sql, params = self._build_list_where(
+            role=role,
+            fetch_status=fetch_status,
+            query=query,
+        )
+        count_row = await self.db.fetchone(
+            f"SELECT COUNT(*) AS c FROM repos{where_sql}",
+            tuple(params),
+        )
+        total = int(count_row["c"]) if count_row is not None else 0
+        rows = await self.list_all(
+            role=role,
+            fetch_status=fetch_status,
+            query=query,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "items": rows,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": total,
+                "has_more": (offset + limit) < total,
+            },
+        }
 
     async def update_fetch_status(
         self,

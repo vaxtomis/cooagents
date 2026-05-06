@@ -100,6 +100,7 @@ async def test_default_returns_all_desc(client):
     # Newest first
     assert body["events"][0]["event_id"] == "e5"
     assert body["events"][-1]["event_id"] == "e1"
+    assert body["pagination"]["total"] == 5
     assert body["pagination"]["has_more"] is False
 
 
@@ -110,6 +111,7 @@ async def test_pagination(client):
     )
     body = r.json()
     assert len(body["events"]) == 2
+    assert body["pagination"]["total"] == 5
     assert body["pagination"]["has_more"] is True
 
     r2 = await client.get(
@@ -117,6 +119,7 @@ async def test_pagination(client):
     )
     body2 = r2.json()
     assert len(body2["events"]) == 1
+    assert body2["pagination"]["total"] == 5
     assert body2["pagination"]["has_more"] is False
 
 

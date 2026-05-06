@@ -314,6 +314,30 @@ async def test_get_missing_returns_404(client):
     assert r.status_code == 404
 
 
+async def test_list_paginated_envelope(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    assert create.status_code == 201, create.text
+
+    resp = await client.get(
+        "/api/v1/dev-works",
+        params={
+            "workspace_id": app.state._ws["id"],
+            "paginate": True,
+            "limit": 1,
+            "offset": 0,
+            "sort": "created_desc",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pagination"]["limit"] == 1
+    assert body["pagination"]["offset"] == 0
+    assert body["pagination"]["total"] == 1
+    assert body["pagination"]["has_more"] is False
+    assert len(body["items"]) == 1
+
+
 async def test_unknown_repo_id_returns_400(client):
     app = client._app
     r = await client.post("/api/v1/dev-works", json=_payload(app, repo_refs=[

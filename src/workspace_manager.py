@@ -37,6 +37,14 @@ _SUBDIRS = ("designs", "devworks")
 
 # Kebab-case slug: 1-63 chars, must start and end alphanumeric, no double dashes.
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?!-)){0,61}[a-z0-9]$|^[a-z0-9]$")
+_WORKSPACE_SORT_SQL: dict[str, str] = {
+    "created_desc": "created_at DESC, id DESC",
+    "created_asc": "created_at ASC, id ASC",
+    "updated_desc": "updated_at DESC, id DESC",
+    "updated_asc": "updated_at ASC, id ASC",
+    "title_asc": "LOWER(title) ASC, id ASC",
+    "title_desc": "LOWER(title) DESC, id DESC",
+}
 
 _DEFAULT_DESIGN_SECTION = (
     "_暂无 DesignWork。在此 Workspace 下创建后此处自动刷新。_"
@@ -143,15 +151,84 @@ class WorkspaceManager:
             "SELECT * FROM workspaces WHERE slug=?", (slug,)
         )
 
-    async def list(self, status: str | None = None) -> list[dict]:
+    @staticmethod
+    def _build_list_where(
+        *,
+        status: str | None = None,
+        query: str | None = None,
+    ) -> tuple[str, list[object]]:
+        conditions: list[str] = []
+        params: list[object] = []
         if status:
-            return await self.db.fetchall(
-                "SELECT * FROM workspaces WHERE status=? ORDER BY created_at DESC",
-                (status,),
-            )
-        return await self.db.fetchall(
-            "SELECT * FROM workspaces ORDER BY created_at DESC"
+            conditions.append("status=?")
+            params.append(status)
+        if query:
+            like = f"%{query.strip()}%"
+            conditions.append("(title LIKE ? OR slug LIKE ?)")
+            params.extend([like, like])
+        where_sql = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where_sql, params
+
+    @staticmethod
+    def _order_sql(sort: str) -> str:
+        try:
+            return _WORKSPACE_SORT_SQL[sort]
+        except KeyError as exc:
+            raise BadRequestError(
+                f"invalid workspace sort={sort!r}; expected one of "
+                f"{sorted(_WORKSPACE_SORT_SQL)}"
+            ) from exc
+
+    async def list(
+        self,
+        status: str | None = None,
+        *,
+        query: str | None = None,
+        sort: str = "created_desc",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict]:
+        where_sql, params = self._build_list_where(status=status, query=query)
+        sql = (
+            "SELECT * FROM workspaces"
+            f"{where_sql} ORDER BY {self._order_sql(sort)}"
         )
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+        return await self.db.fetchall(sql, tuple(params))
+
+    async def list_page(
+        self,
+        *,
+        status: str | None = None,
+        query: str | None = None,
+        sort: str = "updated_desc",
+        limit: int = 12,
+        offset: int = 0,
+    ) -> dict[str, object]:
+        where_sql, params = self._build_list_where(status=status, query=query)
+        count_row = await self.db.fetchone(
+            f"SELECT COUNT(*) AS c FROM workspaces{where_sql}",
+            tuple(params),
+        )
+        total = int(count_row["c"]) if count_row is not None else 0
+        rows = await self.list(
+            status=status,
+            query=query,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "items": rows,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": total,
+                "has_more": (offset + limit) < total,
+            },
+        }
 
     async def archive(self, workspace_id: str) -> int:
         now = self._now()

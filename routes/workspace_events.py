@@ -88,6 +88,7 @@ async def list_workspace_events(
         "pagination": {
             "limit": limit,
             "offset": offset,
+            "total": total,
             "has_more": (offset + limit) < total,
         },
     }

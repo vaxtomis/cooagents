@@ -285,6 +285,20 @@ async def test_log_limit_explicit(env):
     assert len(log.entries) == 1
 
 
+async def test_log_offset_skips_latest_entry(env):
+    first_page = await env["inspector"].log(REPO_ID, ref="main", limit=1, offset=0)
+    second_page = await env["inspector"].log(REPO_ID, ref="main", limit=1, offset=1)
+    assert len(first_page.entries) == 1
+    assert len(second_page.entries) == 1
+    assert first_page.entries[0].sha != second_page.entries[0].sha
+
+
+async def test_log_count_matches_commit_volume(env):
+    total = await env["inspector"].log_count(REPO_ID, ref="main")
+    log = await env["inspector"].log(REPO_ID, ref="main", limit=10)
+    assert total >= len(log.entries) >= 2
+
+
 # 404 / 409 paths -------------------------------------------------------------
 
 async def test_inspector_404_when_repo_unknown(env):

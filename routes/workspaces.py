@@ -13,11 +13,11 @@ Delegates all business logic to WorkspaceManager.
 """
 from urllib.parse import quote
 
-from fastapi import APIRouter, Header, Request, Response, UploadFile, File, Form
+from fastapi import APIRouter, Header, Request, Response, UploadFile, File, Form, Query
 from slowapi import Limiter
 
 from src.exceptions import BadRequestError, NotFoundError
-from src.models import CreateWorkspaceRequest, WorkspaceSyncReport
+from src.models import CreateWorkspaceRequest, WorkspacePage, WorkspaceSyncReport
 from src.request_utils import client_ip
 
 limiter = Limiter(key_func=client_ip)
@@ -43,11 +43,28 @@ async def create_workspace(
 
 
 @router.get("/workspaces")
-async def list_workspaces(request: Request, status: str | None = None):
+async def list_workspaces(
+    request: Request,
+    status: str | None = None,
+    query: str | None = None,
+    sort: str = "created_desc",
+    limit: int = Query(12, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    paginate: bool = False,
+):
     wm = request.app.state.workspaces
     if status and status not in {"active", "archived"}:
         raise BadRequestError("status must be 'active' or 'archived'")
-    rows = await wm.list(status=status)
+    if paginate:
+        page = await wm.list_page(
+            status=status,
+            query=query,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+        return WorkspacePage(**page)
+    rows = await wm.list(status=status, query=query, sort=sort)
     return [dict(r) for r in rows]
 
 

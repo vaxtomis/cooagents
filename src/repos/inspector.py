@@ -390,6 +390,7 @@ class RepoInspector:
         ref: str,
         path: str | None = None,
         limit: int = DEFAULT_LOG_LIMIT,
+        offset: int = 0,
     ) -> RepoLog:
         _validate_ref(ref)
         if path is not None and path != "":
@@ -397,10 +398,13 @@ class RepoInspector:
         if limit is None or limit <= 0:
             limit = DEFAULT_LOG_LIMIT
         limit = min(int(limit), 500)
+        if offset < 0:
+            offset = 0
         _, bare = await self._resolve_bare(repo_id)
         args: list[str] = [
             "--git-dir", str(bare),
             "log",
+            f"--skip={offset}",
             f"-n{limit}",
             "--pretty=format:%H%x09%an%x09%ae%x09%cI%x09%s",
             ref,
@@ -427,3 +431,35 @@ class RepoInspector:
                 subject=subject,
             ))
         return RepoLog(ref=ref, path=path, entries=entries)
+
+    async def log_count(
+        self,
+        repo_id: str,
+        *,
+        ref: str,
+        path: str | None = None,
+    ) -> int:
+        _validate_ref(ref)
+        if path is not None and path != "":
+            _validate_path(path)
+        _, bare = await self._resolve_bare(repo_id)
+        args: list[str] = [
+            "--git-dir", str(bare),
+            "rev-list",
+            "--count",
+            ref,
+        ]
+        if path:
+            args += ["--", path]
+        try:
+            out, _, _ = await self._git(*args)
+        except RuntimeError as exc:
+            raise BadRequestError(
+                f"could not count log entries for {ref!r}: {exc}"
+            ) from exc
+        try:
+            return int(out.strip() or "0")
+        except ValueError as exc:  # pragma: no cover - git contract
+            raise RuntimeError(
+                f"git rev-list --count returned non-integer: {out!r}"
+            ) from exc

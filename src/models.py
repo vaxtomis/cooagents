@@ -207,6 +207,13 @@ class WorkspaceEvent(BaseModel):
     ts: str
 
 
+class PaginationMeta(BaseModel):
+    limit: int
+    offset: int
+    total: int
+    has_more: bool
+
+
 # ---------------------------------------------------------------------------
 # Phase 2 — Workspace lifecycle DTOs
 # ---------------------------------------------------------------------------
@@ -250,6 +257,11 @@ class WorkspaceMetrics(BaseModel):
     active_workspaces: int
     first_pass_success_rate: float
     avg_iteration_rounds: float
+
+
+class WorkspacePage(BaseModel):
+    items: list[Workspace] = Field(default_factory=list)
+    pagination: PaginationMeta
 
 
 class RepoRegistryMetrics(BaseModel):
@@ -324,6 +336,11 @@ class DesignWorkProgress(BaseModel):
     updated_at: str
     # Phase 4 (repo-registry): persisted refs from design_work_repos.
     repo_refs: list["DesignRepoRefView"] = Field(default_factory=list)
+
+
+class DesignWorkPage(BaseModel):
+    items: list[DesignWorkProgress] = Field(default_factory=list)
+    pagination: PaginationMeta
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +421,11 @@ class DevWorkProgress(BaseModel):
     # without a follow-up GET on /api/v1/repos/{id}. UI consumers keep
     # reading repo_refs.
     repos: list["WorkerRepoHandoff"] = Field(default_factory=list)
+
+
+class DevWorkPage(BaseModel):
+    items: list[DevWorkProgress] = Field(default_factory=list)
+    pagination: PaginationMeta
 
 
 # ---------------------------------------------------------------------------
@@ -554,6 +576,11 @@ class Repo(BaseModel):
     last_fetch_err: str | None = None
     created_at: str
     updated_at: str
+
+
+class RepoPage(BaseModel):
+    items: list["Repo"] = Field(default_factory=list)
+    pagination: PaginationMeta
 
 
 class CreateRepoRequest(BaseModel):
@@ -733,6 +760,13 @@ class RepoLog(BaseModel):
     ref: str
     path: str | None = None
     entries: list[RepoLogEntry] = Field(default_factory=list)
+
+
+class RepoLogPage(BaseModel):
+    ref: str
+    path: str | None = None
+    items: list[RepoLogEntry] = Field(default_factory=list)
+    pagination: PaginationMeta
 
 
 # Resolve forward references for models that hold list[\"DevRepoRefView\"] /

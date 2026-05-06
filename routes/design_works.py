@@ -18,20 +18,28 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 from slowapi import Limiter
 
 from routes._repo_refs_validation import validate_design_repo_refs
-from src.exceptions import NotFoundError
+from src.exceptions import BadRequestError, NotFoundError
 from src.models import (
     CreateDesignWorkRequest,
+    DesignWorkPage,
     DesignRepoRefView,
     DesignWorkProgress,
+    DesignWorkState,
 )
 from src.request_utils import client_ip
 
 limiter = Limiter(key_func=client_ip)
 router = APIRouter(tags=["design-works"])
+_DESIGN_WORK_SORT_SQL: dict[str, str] = {
+    "created_desc": "created_at DESC, id DESC",
+    "created_asc": "created_at ASC, id ASC",
+    "updated_desc": "updated_at DESC, id DESC",
+    "updated_asc": "updated_at ASC, id ASC",
+}
 
 
 async def _load_repo_refs(db, dw_id: str) -> list[DesignRepoRefView]:
@@ -138,8 +146,15 @@ async def create_design_work(
 
 @router.get("/design-works")
 async def list_design_works(
-    request: Request, workspace_id: str  # REQUIRED per U3 (option B)
-) -> list[DesignWorkProgress]:
+    request: Request,
+    workspace_id: str,  # REQUIRED per U3 (option B)
+    state: str | None = None,
+    query: str | None = None,
+    sort: str = "created_desc",
+    limit: int = Query(12, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    paginate: bool = False,
+) -> list[DesignWorkProgress] | DesignWorkPage:
     """List DesignWorks within a single workspace.
 
     ``workspace_id`` is mandatory: DesignWork always belongs to a workspace,
@@ -147,10 +162,52 @@ async def list_design_works(
     the param triggers FastAPI's 422 (missing query param).
     """
     db = request.app.state.db
-    rows = await db.fetchall(
-        "SELECT * FROM design_works WHERE workspace_id=? ORDER BY created_at DESC",
-        (workspace_id,),
+    if state and state not in {s.value for s in DesignWorkState}:
+        raise BadRequestError(
+            f"state must be one of {sorted(s.value for s in DesignWorkState)}"
+        )
+    try:
+        order_sql = _DESIGN_WORK_SORT_SQL[sort]
+    except KeyError as exc:
+        raise BadRequestError(
+            f"sort must be one of {sorted(_DESIGN_WORK_SORT_SQL)}"
+        ) from exc
+    conditions = ["workspace_id=?"]
+    params: list[object] = [workspace_id]
+    if state:
+        conditions.append("current_state=?")
+        params.append(state)
+    if query:
+        like = f"%{query.strip()}%"
+        conditions.append("(COALESCE(title, '') LIKE ? OR COALESCE(sub_slug, '') LIKE ? OR id LIKE ?)")
+        params.extend([like, like, like])
+    where_sql = " WHERE " + " AND ".join(conditions)
+    sql = (
+        "SELECT * FROM design_works"
+        f"{where_sql} ORDER BY {order_sql}"
     )
+    page_params = [*params, limit, offset]
+    if paginate:
+        count_row = await db.fetchone(
+            f"SELECT COUNT(*) AS c FROM design_works{where_sql}",
+            tuple(params),
+        )
+        total = int(count_row["c"]) if count_row is not None else 0
+        rows = await db.fetchall(
+            f"{sql} LIMIT ? OFFSET ?",
+            tuple(page_params),
+        )
+        refs_by_id = await _load_repo_refs_batch(db, [r["id"] for r in rows])
+        return DesignWorkPage(
+            items=[_row_to_progress(r, refs_by_id.get(r["id"], [])) for r in rows],
+            pagination={
+                "limit": limit,
+                "offset": offset,
+                "total": total,
+                "has_more": (offset + limit) < total,
+            },
+        )
+    rows = await db.fetchall(sql, tuple(params))
     refs_by_id = await _load_repo_refs_batch(db, [r["id"] for r in rows])
     return [_row_to_progress(r, refs_by_id.get(r["id"], [])) for r in rows]
 

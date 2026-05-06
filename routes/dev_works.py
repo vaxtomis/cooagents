@@ -31,14 +31,15 @@ import json
 import logging
 import sqlite3
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 from slowapi import Limiter
 
 from routes._repo_refs_validation import validate_dev_repo_refs
-from src.exceptions import ConflictError, NotFoundError
+from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.models import (
     CreateDevWorkRequest,
     DevRepoRefView,
+    DevWorkPage,
     DevWorkProgress,
     DevWorkStep,
     ProgressSnapshot,
@@ -51,6 +52,12 @@ logger = logging.getLogger(__name__)
 
 limiter = Limiter(key_func=client_ip)
 router = APIRouter(tags=["dev-works"])
+_DEV_WORK_SORT_SQL: dict[str, str] = {
+    "created_desc": "created_at DESC, id DESC",
+    "created_asc": "created_at ASC, id ASC",
+    "updated_desc": "updated_at DESC, id DESC",
+    "updated_asc": "updated_at ASC, id ASC",
+}
 
 # Derived from DevWorkStep so adding a step updates both the enum and this
 # tuple consistently. _TERMINAL must match src.dev_work_sm._TERMINAL.
@@ -220,14 +227,67 @@ async def create_dev_work(
 
 @router.get("/dev-works")
 async def list_dev_works(
-    request: Request, workspace_id: str
-) -> list[DevWorkProgress]:
+    request: Request,
+    workspace_id: str,
+    step: str | None = None,
+    query: str | None = None,
+    sort: str = "created_desc",
+    limit: int = Query(12, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    paginate: bool = False,
+) -> list[DevWorkProgress] | DevWorkPage:
     db = request.app.state.db
     state_repo = request.app.state.dev_work_repo_state
-    rows = await db.fetchall(
-        "SELECT * FROM dev_works WHERE workspace_id=? ORDER BY created_at DESC",
-        (workspace_id,),
-    )
+    if step and step not in {s.value for s in DevWorkStep}:
+        raise BadRequestError(
+            f"step must be one of {sorted(s.value for s in DevWorkStep)}"
+        )
+    try:
+        order_sql = _DEV_WORK_SORT_SQL[sort]
+    except KeyError as exc:
+        raise BadRequestError(
+            f"sort must be one of {sorted(_DEV_WORK_SORT_SQL)}"
+        ) from exc
+    conditions = ["workspace_id=?"]
+    params: list[object] = [workspace_id]
+    if step:
+        conditions.append("current_step=?")
+        params.append(step)
+    if query:
+        like = f"%{query.strip()}%"
+        conditions.append("(id LIKE ? OR design_doc_id LIKE ?)")
+        params.extend([like, like])
+    where_sql = " WHERE " + " AND ".join(conditions)
+    sql = f"SELECT * FROM dev_works{where_sql} ORDER BY {order_sql}"
+    if paginate:
+        count_row = await db.fetchone(
+            f"SELECT COUNT(*) AS c FROM dev_works{where_sql}",
+            tuple(params),
+        )
+        total = int(count_row["c"]) if count_row is not None else 0
+        rows = await db.fetchall(
+            f"{sql} LIMIT ? OFFSET ?",
+            tuple([*params, limit, offset]),
+        )
+        dev_ids = [r["id"] for r in rows]
+        repos_by_id = await _load_worker_repos_batch(state_repo, dev_ids)
+        return DevWorkPage(
+            items=[
+                _row_to_progress(
+                    r,
+                    [_handoff_to_repo_ref(h) for h in repos_by_id.get(r["id"], [])],
+                    repos_by_id.get(r["id"], []),
+                )
+                for r in rows
+            ],
+            pagination={
+                "limit": limit,
+                "offset": offset,
+                "total": total,
+                "has_more": (offset + limit) < total,
+            },
+        )
+    rows = await db.fetchall(sql, tuple(params))
     dev_ids = [r["id"] for r in rows]
     repos_by_id = await _load_worker_repos_batch(state_repo, dev_ids)
     return [

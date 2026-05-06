@@ -226,6 +226,46 @@ async def test_list_filters_by_workspace(client):
     assert slugs == {"aa"}
 
 
+async def test_list_paginated_envelope(client):
+    ws = await _create_workspace(client, slug="ws-page")
+    await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Alpha",
+            "slug": "alpha",
+            "user_input": "x" * 30,
+        },
+    )
+    await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Beta",
+            "slug": "beta",
+            "user_input": "x" * 30,
+        },
+    )
+
+    r = await client.get(
+        "/api/v1/design-works",
+        params={
+          "workspace_id": ws["id"],
+          "paginate": True,
+          "limit": 1,
+          "offset": 0,
+          "sort": "created_desc",
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pagination"]["limit"] == 1
+    assert body["pagination"]["offset"] == 0
+    assert body["pagination"]["total"] == 2
+    assert body["pagination"]["has_more"] is True
+    assert len(body["items"]) == 1
+
+
 async def test_get_missing_returns_404(client):
     r = await client.get("/api/v1/design-works/desw-nope")
     assert r.status_code == 404

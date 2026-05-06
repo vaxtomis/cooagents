@@ -26,7 +26,7 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
 
@@ -37,6 +37,9 @@ from src.models import (
     RepoBlob,
     RepoBranches,
     RepoLog,
+    RepoLogPage,
+    RepoPage,
+    RepoRole,
     RepoTree,
     UpdateRepoRequest,
 )
@@ -53,10 +56,42 @@ router = APIRouter(tags=["repos"])
 # CRUD
 # ---------------------------------------------------------------------------
 
-@router.get("/repos", response_model=list[Repo])
-async def list_repos(request: Request) -> list[dict[str, Any]]:
+@router.get("/repos", response_model=list[Repo] | RepoPage)
+async def list_repos(
+    request: Request,
+    role: str | None = None,
+    fetch_status: str | None = None,
+    query: str | None = None,
+    sort: str = "name_asc",
+    limit: int = Query(12, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    paginate: bool = False,
+) -> list[dict[str, Any]] | RepoPage:
     registry = request.app.state.repo_registry_repo
-    return await registry.list_all()
+    if role and role not in {r.value for r in RepoRole}:
+        raise BadRequestError(
+            f"role must be one of {sorted(r.value for r in RepoRole)}"
+        )
+    if fetch_status and fetch_status not in {"unknown", "healthy", "error"}:
+        raise BadRequestError(
+            "fetch_status must be 'unknown', 'healthy', or 'error'"
+        )
+    if paginate:
+        page = await registry.list_page(
+            role=role,
+            fetch_status=fetch_status,
+            query=query,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+        return RepoPage(**page)
+    return await registry.list_all(
+        role=role,
+        fetch_status=fetch_status,
+        query=query,
+        sort=sort,
+    )
 
 
 @router.get("/repos/{repo_id}", response_model=Repo)
@@ -241,16 +276,33 @@ async def repo_blob(
     return await inspector.blob(repo_id, ref=ref, path=path)
 
 
-@router.get("/repos/{repo_id}/log", response_model=RepoLog)
+@router.get("/repos/{repo_id}/log", response_model=RepoLog | RepoLogPage)
 async def repo_log(
     repo_id: str,
     request: Request,
     ref: str,
     path: str | None = None,
     limit: int | None = None,
-) -> RepoLog:
+    offset: int = Query(0, ge=0),
+    paginate: bool = False,
+) -> RepoLog | RepoLogPage:
     inspector = request.app.state.repo_inspector
-    kwargs: dict[str, Any] = {"ref": ref, "path": path}
+    kwargs: dict[str, Any] = {"ref": ref, "path": path, "offset": offset}
     if limit is not None:
         kwargs["limit"] = limit
+    if paginate:
+        log = await inspector.log(repo_id, **kwargs)
+        total = await inspector.log_count(repo_id, ref=ref, path=path)
+        page_limit = limit if limit is not None else 50
+        return RepoLogPage(
+            ref=log.ref,
+            path=log.path,
+            items=log.entries,
+            pagination={
+                "limit": page_limit,
+                "offset": offset,
+                "total": total,
+                "has_more": (offset + page_limit) < total,
+            },
+        )
     return await inspector.log(repo_id, **kwargs)

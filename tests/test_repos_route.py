@@ -83,6 +83,12 @@ class _FakeInspector:
     async def log(self, repo_id: str, **kwargs: Any):
         return await self._maybe("log", self.log_result, repo_id=repo_id, **kwargs)
 
+    async def log_count(self, repo_id: str, **kwargs: Any):
+        self.calls.append(("log_count", {"repo_id": repo_id, **kwargs}))
+        if isinstance(self.log_result, BaseException):
+            raise self.log_result
+        return len(self.log_result.entries)
+
 
 async def _build_app(
     tmp_path: Path,
@@ -199,6 +205,30 @@ async def test_list_repos_empty_then_one(fetched_client):
     body = resp.json()
     assert len(body) == 1
     assert body[0]["id"] == "repo-aaa"
+
+
+async def test_list_repos_paginated_envelope(fetched_client):
+    client, app, _, _ = fetched_client
+    await _seed(app)
+    await app.state.repo_registry_repo.upsert(
+        id="repo-bbb",
+        name="backend",
+        url="git@github.com:org/backend.git",
+        role="backend",
+    )
+    resp = await client.get(
+        "/api/v1/repos",
+        params={"paginate": True, "limit": 1, "offset": 0, "sort": "name_asc"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pagination"] == {
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+    }
+    assert [row["name"] for row in body["items"]] == ["backend"]
 
 
 async def test_get_repo_404(fetched_client):
@@ -450,6 +480,21 @@ async def test_log_route(fetched_client):
     body = resp.json()
     assert len(body["entries"]) == 1  # whatever fake returned
     assert inspector.calls[0][1]["limit"] == 2
+
+
+async def test_log_route_paginated_envelope(fetched_client):
+    client, _, _, inspector = fetched_client
+    resp = await client.get(
+        "/api/v1/repos/repo-aaa/log",
+        params={"ref": "main", "limit": 1, "offset": 0, "paginate": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pagination"]["limit"] == 1
+    assert body["pagination"]["offset"] == 0
+    assert body["pagination"]["total"] == 1
+    assert body["pagination"]["has_more"] is False
+    assert len(body["items"]) == 1
 
 
 async def test_inspector_404_when_repo_unknown_route(fetched_client):

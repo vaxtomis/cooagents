@@ -133,6 +133,29 @@ async def test_list_filters_by_status(client):
     assert {w["slug"] for w in archived.json()} == {"bb"}
 
 
+async def test_list_paginated_envelope(client):
+    await client.post(
+        "/api/v1/workspaces", json={"title": "Alpha", "slug": "alpha"}
+    )
+    await client.post(
+        "/api/v1/workspaces", json={"title": "Beta", "slug": "beta"}
+    )
+
+    resp = await client.get(
+        "/api/v1/workspaces",
+        params={"paginate": True, "limit": 1, "offset": 0, "sort": "title_asc"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pagination"] == {
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+    }
+    assert [row["slug"] for row in body["items"]] == ["alpha"]
+
+
 async def test_list_invalid_status_returns_400(client):
     r = await client.get("/api/v1/workspaces?status=garbage")
     assert r.status_code == 400
