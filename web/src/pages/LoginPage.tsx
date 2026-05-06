@@ -39,7 +39,7 @@ export function LoginPage() {
         onSubmit={handleSubmit}
       >
         <div className="pointer-events-none absolute inset-[1px] rounded-[33px] border border-white/4" />
-        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.8),transparent)]" />
+        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.8),transparent)]" />
 
         <div className="relative space-y-6">
           <div className="space-y-2">
@@ -57,7 +57,7 @@ export function LoginPage() {
             <input
               autoComplete="username"
               autoFocus
-              className="w-full rounded-[16px] border border-border bg-panel-deep px-4 py-3 text-sm font-normal normal-case tracking-normal text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(139,188,255,0.18)]"
+              className="w-full rounded-[16px] border border-border bg-panel-deep px-4 py-3 text-sm font-normal normal-case tracking-normal text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(208,160,90,0.18)]"
               name="username"
               onChange={(e) => setUsername(e.target.value)}
               required
@@ -69,7 +69,7 @@ export function LoginPage() {
             <span>密码</span>
             <input
               autoComplete="current-password"
-              className="w-full rounded-[16px] border border-border bg-panel-deep px-4 py-3 text-sm font-normal normal-case tracking-normal text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(139,188,255,0.18)]"
+              className="w-full rounded-[16px] border border-border bg-panel-deep px-4 py-3 text-sm font-normal normal-case tracking-normal text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(208,160,90,0.18)]"
               name="password"
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -81,7 +81,7 @@ export function LoginPage() {
           {error ? <p className="text-sm text-danger">{error}</p> : null}
 
           <button
-            className="w-full rounded-[16px] border border-[rgba(201,154,84,0.34)] bg-[linear-gradient(180deg,rgba(201,154,84,0.28),rgba(201,154,84,0.14))] px-4 py-3 text-sm font-medium text-copy shadow-[0_14px_30px_rgba(0,0,0,0.24)] transition hover:border-[rgba(226,188,120,0.45)] hover:bg-[linear-gradient(180deg,rgba(226,188,120,0.34),rgba(201,154,84,0.16))] disabled:opacity-60"
+            className="w-full rounded-[16px] border border-[rgba(169,112,45,0.34)] bg-[linear-gradient(180deg,rgba(169,112,45,0.28),rgba(169,112,45,0.14))] px-4 py-3 text-sm font-medium text-copy shadow-[0_14px_30px_rgba(0,0,0,0.24)] transition hover:border-[rgba(208,160,90,0.45)] hover:bg-[linear-gradient(180deg,rgba(208,160,90,0.34),rgba(169,112,45,0.16))] disabled:opacity-60"
             disabled={submitting}
             type="submit"
           >

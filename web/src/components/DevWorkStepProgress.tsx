@@ -42,9 +42,9 @@ export function DevWorkStepProgress({ current, escalated = false, className = ""
                 : "pending";
           const toneClass = {
             complete:
-              "border-[rgba(125,190,122,0.24)] bg-[linear-gradient(180deg,rgba(125,190,122,0.18),rgba(125,190,122,0.1))] text-[#a9dfa4]",
+              "border-[rgba(143,164,106,0.24)] bg-[linear-gradient(180deg,rgba(143,164,106,0.18),rgba(143,164,106,0.1))] text-[#c1cb9a]",
             current:
-              "border-[rgba(201,154,84,0.28)] bg-[linear-gradient(180deg,rgba(201,154,84,0.22),rgba(201,154,84,0.12))] text-copy shadow-[0_0_0_1px_rgba(201,154,84,0.24)]",
+              "border-[rgba(169,112,45,0.28)] bg-[linear-gradient(180deg,rgba(169,112,45,0.22),rgba(169,112,45,0.12))] text-copy shadow-[0_0_0_1px_rgba(169,112,45,0.24)]",
             muted: "border-border bg-panel-strong/60 text-muted",
             pending: "border-border bg-panel-deep/90 text-muted",
           }[tone];
@@ -62,7 +62,7 @@ export function DevWorkStepProgress({ current, escalated = false, className = ""
       </ol>
       {terminal ? (
         <span
-          className="shrink-0 rounded-full border border-[rgba(210,113,89,0.34)] bg-[linear-gradient(180deg,rgba(210,113,89,0.18),rgba(210,113,89,0.08))] px-3 py-1 text-xs font-medium text-[#f1a18e]"
+          className="shrink-0 rounded-full border border-[rgba(170,80,61,0.34)] bg-[linear-gradient(180deg,rgba(170,80,61,0.18),rgba(170,80,61,0.08))] px-3 py-1 text-xs font-medium text-[#d4876f]"
           data-state="terminal"
           role="status"
         >

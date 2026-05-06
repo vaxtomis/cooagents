@@ -166,7 +166,7 @@ function ShellNavLink({
             ? "flex size-11 items-center justify-center rounded-[16px] border text-sm transition"
             : "flex items-center gap-3 rounded-[16px] border px-3 py-2.5 text-sm font-medium transition";
         const state = isActive
-          ? "border-[color:var(--color-border-dark)] bg-[linear-gradient(180deg,rgba(201,154,84,0.22),rgba(201,154,84,0.12))] text-copy shadow-[0_14px_28px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.08)]"
+          ? "border-[color:var(--color-border-dark)] bg-[linear-gradient(180deg,rgba(169,112,45,0.22),rgba(169,112,45,0.12))] text-copy shadow-[0_14px_28px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.08)]"
           : "border-transparent text-muted hover:border-border hover:bg-panel-strong/65 hover:text-copy";
         return `${base} ${state}`;
       }}
@@ -221,7 +221,7 @@ function ShellLayout() {
           data-console-chrome="sidebar"
         >
           <div className="pointer-events-none absolute inset-[1px] rounded-[29px] border border-white/4" />
-          <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.78),transparent)]" />
+          <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.78),transparent)]" />
 
           <div className="relative flex h-full w-full flex-col">
             <div
@@ -230,7 +230,7 @@ function ShellLayout() {
               }`}
             >
               <div className={`flex items-center ${sidebarCollapsed ? "justify-center" : "gap-3"}`}>
-                <div className="flex size-11 items-center justify-center rounded-[18px] border border-border-strong bg-[linear-gradient(180deg,rgba(201,154,84,0.2),rgba(201,154,84,0.07))] text-accent-soft shadow-[0_12px_28px_rgba(0,0,0,0.22)]">
+                <div className="flex size-11 items-center justify-center rounded-[18px] border border-border-strong bg-[linear-gradient(180deg,rgba(169,112,45,0.2),rgba(169,112,45,0.07))] text-accent-soft shadow-[0_12px_28px_rgba(0,0,0,0.22)]">
                   <Bot className="size-5" strokeWidth={1.9} />
                 </div>
                 {!sidebarCollapsed ? (
@@ -366,7 +366,7 @@ function ShellLayout() {
             data-console-chrome="masthead"
           >
             <div className="pointer-events-none absolute inset-[1px] rounded-[29px] border border-white/4" />
-            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.8),transparent)]" />
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.8),transparent)]" />
 
             <div className="relative flex flex-col gap-3">
               <div className="flex items-start justify-between gap-4">

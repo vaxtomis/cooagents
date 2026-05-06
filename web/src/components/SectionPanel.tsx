@@ -14,7 +14,7 @@ export function SectionPanel({ title, kicker, children, actions }: SectionPanelP
       data-panel-tone="console"
     >
       <div className="pointer-events-none absolute inset-[1px] rounded-[27px] border border-white/4" />
-      <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.85),transparent)]" />
+      <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.85),transparent)]" />
 
       <div className="relative flex flex-wrap items-center justify-between gap-3">
         <div>

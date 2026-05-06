@@ -32,7 +32,7 @@ export function SegmentedControl<T extends string>({
             className={[
               "rounded-[14px] border px-3 py-1.5 text-xs font-medium transition",
               selected
-                ? "border-[color:var(--color-border-dark)] bg-[linear-gradient(180deg,rgba(201,154,84,0.24),rgba(201,154,84,0.14))] text-copy shadow-[0_8px_18px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.06)]"
+                ? "border-[color:var(--color-border-dark)] bg-[linear-gradient(180deg,rgba(169,112,45,0.24),rgba(169,112,45,0.14))] text-copy shadow-[0_8px_18px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.06)]"
                 : "border-transparent text-muted hover:border-border hover:bg-panel-strong/70 hover:text-copy",
             ].join(" ")}
             data-selected={selected ? "true" : "false"}

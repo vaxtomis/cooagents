@@ -46,7 +46,7 @@ export function GateActionPanel({ gateId, gateInfo, onAction }: Props) {
 
   return (
     <div className="relative overflow-hidden rounded-[24px] border border-border bg-panel-strong/82 p-4 shadow-panel">
-      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.55),transparent)]" />
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.55),transparent)]" />
 
       <div className="relative space-y-3">
         <div className="flex items-start justify-between gap-3">
@@ -64,7 +64,7 @@ export function GateActionPanel({ gateId, gateInfo, onAction }: Props) {
           <label className="block space-y-1 text-xs text-muted">
             <span>备注（可选）</span>
             <textarea
-              className="w-full rounded-[16px] border border-border bg-panel-deep px-3 py-2 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(139,188,255,0.18)]"
+              className="w-full rounded-[16px] border border-border bg-panel-deep px-3 py-2 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(208,160,90,0.18)]"
               onChange={(event) => setNote(event.target.value)}
               rows={2}
               value={note}
@@ -74,7 +74,7 @@ export function GateActionPanel({ gateId, gateInfo, onAction }: Props) {
 
         <div className="flex flex-wrap gap-2">
           <button
-            className="rounded-[12px] border border-[rgba(125,190,122,0.34)] bg-[linear-gradient(180deg,rgba(125,190,122,0.2),rgba(125,190,122,0.1))] px-3 py-1.5 text-xs font-medium text-[#e4ffe1] shadow-[0_10px_22px_rgba(0,0,0,0.2)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-[12px] border border-[rgba(143,164,106,0.34)] bg-[linear-gradient(180deg,rgba(143,164,106,0.2),rgba(143,164,106,0.1))] px-3 py-1.5 text-xs font-medium text-[#e4ffe1] shadow-[0_10px_22px_rgba(0,0,0,0.2)] disabled:cursor-not-allowed disabled:opacity-60"
             disabled={!waiting || pending !== null}
             onClick={() => void runAction("approve")}
             type="button"
@@ -82,7 +82,7 @@ export function GateActionPanel({ gateId, gateInfo, onAction }: Props) {
             {pending === "approve" ? "批准中..." : "批准"}
           </button>
           <button
-            className="rounded-[12px] border border-[rgba(210,113,89,0.34)] bg-[linear-gradient(180deg,rgba(210,113,89,0.2),rgba(210,113,89,0.1))] px-3 py-1.5 text-xs font-medium text-[#ffe3db] shadow-[0_10px_22px_rgba(0,0,0,0.2)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-[12px] border border-[rgba(170,80,61,0.34)] bg-[linear-gradient(180deg,rgba(170,80,61,0.2),rgba(170,80,61,0.1))] px-3 py-1.5 text-xs font-medium text-[#ffe3db] shadow-[0_10px_22px_rgba(0,0,0,0.2)] disabled:cursor-not-allowed disabled:opacity-60"
             disabled={!waiting || pending !== null}
             onClick={() => void runAction("reject")}
             type="button"

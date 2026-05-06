@@ -18,10 +18,10 @@ export function ScoreBadge({ score, threshold, className = "" }: Props) {
   const passed = typeof threshold === "number" ? score >= threshold : undefined;
   const tone =
     passed === undefined
-      ? "border-[rgba(201,154,84,0.34)] bg-[linear-gradient(180deg,rgba(201,154,84,0.2),rgba(201,154,84,0.08))] text-accent-soft"
+      ? "border-[rgba(169,112,45,0.34)] bg-[linear-gradient(180deg,rgba(169,112,45,0.2),rgba(169,112,45,0.08))] text-accent-soft"
       : passed
-        ? "border-[rgba(125,190,122,0.34)] bg-[linear-gradient(180deg,rgba(125,190,122,0.18),rgba(125,190,122,0.08))] text-[#a9dfa4]"
-        : "border-[rgba(213,164,92,0.34)] bg-[linear-gradient(180deg,rgba(213,164,92,0.18),rgba(213,164,92,0.08))] text-[#f0c582]";
+        ? "border-[rgba(143,164,106,0.34)] bg-[linear-gradient(180deg,rgba(143,164,106,0.18),rgba(143,164,106,0.08))] text-[#c1cb9a]"
+        : "border-[rgba(185,130,54,0.34)] bg-[linear-gradient(180deg,rgba(185,130,54,0.18),rgba(185,130,54,0.08))] text-[#d6a461]";
 
   const suffix = typeof threshold === "number" ? ` / ${threshold}` : "";
   return (

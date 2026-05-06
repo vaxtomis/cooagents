@@ -3,16 +3,16 @@ import type { ReactNode } from "react";
 export type StatusTone = "success" | "warning" | "danger" | "accent" | "muted";
 
 const SUCCESS_CLASS =
-  "border-[rgba(125,190,122,0.34)] bg-[linear-gradient(180deg,rgba(125,190,122,0.18),rgba(125,190,122,0.08))] text-[#a9dfa4]";
+  "border-[rgba(143,164,106,0.34)] bg-[linear-gradient(180deg,rgba(143,164,106,0.18),rgba(143,164,106,0.08))] text-[#c1cb9a]";
 const SUCCESS_DOT = "bg-success";
 const ACCENT_CLASS =
-  "border-[rgba(201,154,84,0.34)] bg-[linear-gradient(180deg,rgba(201,154,84,0.2),rgba(201,154,84,0.08))] text-accent-soft";
+  "border-[rgba(169,112,45,0.34)] bg-[linear-gradient(180deg,rgba(169,112,45,0.2),rgba(169,112,45,0.08))] text-accent-soft";
 const ACCENT_DOT = "bg-accent";
 const WARNING_CLASS =
-  "border-[rgba(213,164,92,0.34)] bg-[linear-gradient(180deg,rgba(213,164,92,0.18),rgba(213,164,92,0.08))] text-[#f0c582]";
+  "border-[rgba(185,130,54,0.34)] bg-[linear-gradient(180deg,rgba(185,130,54,0.18),rgba(185,130,54,0.08))] text-[#d6a461]";
 const WARNING_DOT = "bg-warning";
 const DANGER_CLASS =
-  "border-[rgba(210,113,89,0.34)] bg-[linear-gradient(180deg,rgba(210,113,89,0.18),rgba(210,113,89,0.08))] text-[#f1a18e]";
+  "border-[rgba(170,80,61,0.34)] bg-[linear-gradient(180deg,rgba(170,80,61,0.18),rgba(170,80,61,0.08))] text-[#d4876f]";
 const DANGER_DOT = "bg-danger";
 const MUTED_CLASS =
   "border-border bg-panel-strong/55 text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]";

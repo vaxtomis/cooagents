@@ -14,7 +14,7 @@ export function StatCard({
   return (
     <section className="relative overflow-hidden rounded-[24px] border border-border bg-panel p-6 shadow-panel transition hover:-translate-y-0.5 hover:shadow-shell">
       <div className="pointer-events-none absolute inset-[1px] rounded-[23px] border border-white/4" />
-      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.55),transparent)]" />
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.55),transparent)]" />
 
       <div className="relative">
         <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent-soft">{title}</p>

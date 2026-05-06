@@ -18,7 +18,7 @@ export function AppDialog({ open, title, description, onClose, children }: AppDi
         <div className="flex min-h-full items-start justify-center sm:items-center">
           <DialogPanel className="relative w-full max-w-4xl overflow-hidden rounded-[30px] border border-border-strong bg-panel/98 p-5 shadow-shell">
             <div className="pointer-events-none absolute inset-[1px] rounded-[29px] border border-white/4" />
-            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.75),transparent)]" />
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.75),transparent)]" />
 
             <div className="relative flex items-start justify-between gap-4">
               <div className="min-w-0">

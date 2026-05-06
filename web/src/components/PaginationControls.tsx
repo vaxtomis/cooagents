@@ -27,7 +27,7 @@ export function PaginationControls({
       className="relative overflow-hidden rounded-[24px] border border-border bg-panel/90 px-4 py-3 text-sm text-muted shadow-panel md:flex md:items-center md:justify-between"
       data-pagination-tone="console"
     >
-      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.55),transparent)]" />
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.55),transparent)]" />
 
       <div className="relative flex flex-col gap-1 md:flex-row md:items-center md:gap-3">
         <p className="text-xs uppercase tracking-[0.24em] text-accent-soft">{itemLabel}</p>

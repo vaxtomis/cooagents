@@ -22,7 +22,7 @@ export function RepoPushStatusGrid({ repos }: Props) {
           className="relative overflow-hidden rounded-[22px] border border-border bg-panel-strong/82 p-4 shadow-panel"
           key={r.mount_name}
         >
-          <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(201,154,84,0.4),transparent)]" />
+          <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.4),transparent)]" />
           <div className="relative">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-copy">
