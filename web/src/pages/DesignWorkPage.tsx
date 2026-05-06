@@ -25,7 +25,7 @@ function ReviewRow({ review }: { review: Review }) {
       {review.reviewer ? <p className="mt-2 text-xs text-muted">审核者 {review.reviewer}</p> : null}
       {review.issues && review.issues.length > 0 ? (
         <details className="mt-3 text-xs text-muted">
-          <summary className="cursor-pointer">Issues ({review.issues.length})</summary>
+          <summary className="cursor-pointer">问题 ({review.issues.length})</summary>
           <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
             {JSON.stringify(review.issues, null, 2)}
           </pre>
@@ -33,7 +33,7 @@ function ReviewRow({ review }: { review: Review }) {
       ) : null}
       {review.findings && review.findings.length > 0 ? (
         <details className="mt-2 text-xs text-muted">
-          <summary className="cursor-pointer">Findings ({review.findings.length})</summary>
+          <summary className="cursor-pointer">发现项 ({review.findings.length})</summary>
           <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
             {JSON.stringify(review.findings, null, 2)}
           </pre>
@@ -151,13 +151,13 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
             ← 返回 Workspace
           </Link>
         }
-        kicker="DesignWork"
+        kicker="设计工作"
         title={designWork.title ?? designWork.sub_slug ?? designWork.id}
       >
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge status={designWork.current_state} />
-          <span className="text-sm text-muted">loop {designWork.loop}</span>
-          <span className="text-sm text-muted">mode {designWork.mode}</span>
+          <span className="text-sm text-muted">循环 {designWork.loop}</span>
+          <span className="text-sm text-muted">模式 {designWork.mode}</span>
           {designWork.version ? (
             <span className="font-mono text-xs text-muted">{designWork.version}</span>
           ) : null}
@@ -175,7 +175,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
 
         {designWork.missing_sections && designWork.missing_sections.length > 0 ? (
           <div className="mt-5 space-y-2">
-            <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">missing_sections</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">缺失章节</p>
             <div className="flex flex-wrap gap-2">
               {designWork.missing_sections.map((section) => (
                 <span
@@ -196,7 +196,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
             onClick={() => void runAction("tick")}
             type="button"
           >
-            {actionPending === "tick" ? "Tick 中..." : "Tick"}
+            {actionPending === "tick" ? "推进中..." : "推进"}
           </button>
           <button
             className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
@@ -238,7 +238,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
         )}
       </SectionPanel>
 
-      <SectionPanel kicker="审核历史" title="Reviews">
+      <SectionPanel kicker="审核历史" title="审核记录">
         {reviewsQuery.error ? (
           <p className="text-xs text-danger">{extractError(reviewsQuery.error, "加载失败")}</p>
         ) : reviewsDesc.length === 0 ? (

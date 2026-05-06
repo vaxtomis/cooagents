@@ -28,7 +28,7 @@ export function LogList({ repoId, gitRef }: Props) {
   if (query.error) {
     return (
       <p className="rounded-2xl border border-danger/15 bg-danger/8 p-3 text-xs text-danger">
-        Commit log failed to load: {String((query.error as Error).message ?? query.error)}
+        提交历史加载失败：{String((query.error as Error).message ?? query.error)}
       </p>
     );
   }
@@ -44,7 +44,7 @@ export function LogList({ repoId, gitRef }: Props) {
   }
 
   if (query.data.items.length === 0) {
-    return <EmptyState copy="No commits were found for the selected ref." />;
+    return <EmptyState copy="当前 ref 下没有提交记录。" />;
   }
 
   return (
@@ -67,7 +67,7 @@ export function LogList({ repoId, gitRef }: Props) {
 
       <PaginationControls
         pagination={query.data.pagination}
-        itemLabel="Commits"
+        itemLabel="提交"
         onPageChange={setOffset}
         disabled={query.isLoading}
       />

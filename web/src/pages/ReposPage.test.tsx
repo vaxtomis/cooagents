@@ -110,13 +110,14 @@ describe("ReposPage", () => {
     renderPage();
     await waitFor(() => expect(listRepoPage).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByLabelText("Name"), {
+    fireEvent.click(screen.getByRole("button", { name: "登记仓库" }));
+    fireEvent.change(screen.getByLabelText("名称"), {
       target: { value: "new-repo" },
     });
     fireEvent.change(screen.getByLabelText("URL"), {
       target: { value: "git@github.com:org/new.git" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    fireEvent.click(screen.getByRole("button", { name: "登记" }));
 
     await waitFor(() => {
       expect(createRepo).toHaveBeenCalledWith({
@@ -134,15 +135,16 @@ describe("ReposPage", () => {
     renderPage();
     await waitFor(() => expect(listRepoPage).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByLabelText("Name"), {
+    fireEvent.click(screen.getByRole("button", { name: "登记仓库" }));
+    fireEvent.change(screen.getByLabelText("名称"), {
       target: { value: "-bad" },
     });
     fireEvent.change(screen.getByLabelText("URL"), {
       target: { value: "git@github.com:org/x.git" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    fireEvent.click(screen.getByRole("button", { name: "登记" }));
 
-    expect(await screen.findByText(/start with a letter or number/i)).toBeInTheDocument();
+    expect(await screen.findByText(/必须以字母或数字开头/)).toBeInTheDocument();
     expect(createRepo).not.toHaveBeenCalled();
   });
 
@@ -155,7 +157,7 @@ describe("ReposPage", () => {
     });
 
     renderPage();
-    const fetchBtn = await screen.findByRole("button", { name: /Fetch now/ });
+    const fetchBtn = await screen.findByRole("button", { name: /立即 fetch/ });
     fireEvent.click(fetchBtn);
 
     await waitFor(() => {
@@ -171,7 +173,7 @@ describe("ReposPage", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     renderPage();
-    const deleteBtn = await screen.findByRole("button", { name: /Delete/ });
+    const deleteBtn = await screen.findByRole("button", { name: /删除/ });
     fireEvent.click(deleteBtn);
 
     await waitFor(() => {
@@ -192,10 +194,10 @@ describe("ReposPage", () => {
 
     renderPage();
     await waitFor(() => expect(listRepoPage).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("button", { name: /Sync config/ }));
+    fireEvent.click(screen.getByRole("button", { name: /同步配置/ }));
 
     await waitFor(() => expect(syncRepos).toHaveBeenCalled());
-    expect(await screen.findByText(/in_sync 1 \/ fs_only 1 \/ db_only 0/)).toBeInTheDocument();
+    expect(await screen.findByText(/一致 1 \/ 仅文件 1 \/ 仅数据库 0/)).toBeInTheDocument();
     confirmSpy.mockRestore();
   });
 });

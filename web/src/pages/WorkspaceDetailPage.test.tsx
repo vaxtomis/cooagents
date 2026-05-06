@@ -191,9 +191,28 @@ describe("WorkspaceDetailPage", () => {
     expect(await screen.findByText("WS")).toBeInTheDocument();
     const matches = await screen.findAllByText(/feature/);
     expect(matches.length).toBeGreaterThan(0);
-    expect(screen.getByRole("tab", { name: "Design work" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Development work" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Events" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "设计工作" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "开发工作" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "事件流" })).toBeInTheDocument();
+  });
+
+  it("renders a retry state when design work loading fails", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage)
+      .mockRejectedValueOnce(new Error("设计工作接口失败"))
+      .mockResolvedValueOnce(designPage);
+    vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
+    vi.mocked(listDevWorkPage).mockResolvedValue(devPage);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+
+    renderPage();
+
+    expect(await screen.findByText("设计工作接口失败")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(listDesignWorkPage).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("T")).toBeInTheDocument();
   });
 
   it("DevWork form rejects empty repo_refs and never calls createDevWork", async () => {
@@ -207,14 +226,14 @@ describe("WorkspaceDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Development work" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New development work" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建开发工作" }));
 
-    const docSelect = await screen.findByDisplayValue("Select one");
+    const docSelect = await screen.findByDisplayValue("请选择");
     fireEvent.change(docSelect, { target: { value: "doc-1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
-    expect(await screen.findByText(/Add at least one repository/)).toBeInTheDocument();
+    expect(await screen.findByText(/至少添加一个仓库/)).toBeInTheDocument();
     expect(createDevWork).not.toHaveBeenCalled();
   });
 
@@ -230,10 +249,10 @@ describe("WorkspaceDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Development work" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New development work" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建开发工作" }));
 
-    const docSelect = await screen.findByDisplayValue("Select one");
+    const docSelect = await screen.findByDisplayValue("请选择");
     fireEvent.change(docSelect, { target: { value: "doc-1" } });
 
     const selects = await screen.findAllByRole("combobox");
@@ -244,10 +263,10 @@ describe("WorkspaceDetailPage", () => {
     const branchSelect = (await screen.findAllByRole("combobox"))[2];
     fireEvent.change(branchSelect, { target: { value: "main" } });
 
-    const promptArea = screen.getByLabelText("DevWork prompt");
+    const promptArea = screen.getByLabelText("DevWork 执行提示");
     fireEvent.change(promptArea, { target: { value: "ship feature x" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
     await waitFor(() => {
       expect(createDevWork).toHaveBeenCalledWith(
@@ -278,10 +297,10 @@ describe("WorkspaceDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Development work" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New development work" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建开发工作" }));
 
-    const docSelect = await screen.findByDisplayValue("Select one");
+    const docSelect = await screen.findByDisplayValue("请选择");
     fireEvent.change(docSelect, { target: { value: "doc-1" } });
 
     let selects = await screen.findAllByRole("combobox");
@@ -299,10 +318,10 @@ describe("WorkspaceDetailPage", () => {
     fireEvent.change(selects[2], { target: { value: "main" } });
     fireEvent.change(selects[4], { target: { value: "main" } });
 
-    fireEvent.change(screen.getByLabelText("DevWork prompt"), { target: { value: "x" } });
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
-    expect(await screen.findByText(/mount_name "frontend" is duplicated/)).toBeInTheDocument();
+    expect(await screen.findByText(/mount_name "frontend" 重复/)).toBeInTheDocument();
     expect(createDevWork).not.toHaveBeenCalled();
   });
 
@@ -316,10 +335,10 @@ describe("WorkspaceDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "New design work" }));
-    const toggle = await screen.findByRole("button", { name: /Attach repositories/ });
+    fireEvent.click(await screen.findByRole("button", { name: "新建设计工作" }));
+    const toggle = await screen.findByRole("button", { name: /关联仓库/ });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByLabelText("浠撳簱閫夋嫨 #1")).toBeNull();
+    expect(screen.queryByLabelText("仓库选择 #1")).toBeNull();
   });
 
   it("DesignWork form omits repo_refs when disclosure stays closed", async () => {
@@ -333,13 +352,13 @@ describe("WorkspaceDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "New design work" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建设计工作" }));
 
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Hello" } });
-    fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "feature-x" } });
-    fireEvent.change(screen.getByLabelText("Brief"), { target: { value: "do something" } });
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Hello" } });
+    fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "feature-x" } });
+    fireEvent.change(screen.getByLabelText("需求说明"), { target: { value: "do something" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
     await waitFor(() => {
       expect(createDesignWork).toHaveBeenCalledWith(

@@ -56,10 +56,10 @@ function renderAt(path: string) {
 
 describe("App shell", () => {
   it("renders sidebar navigation and workspace-centric routes", async () => {
-    const overviewLabel = "Overview";
-    const workspacesLabel = "Workspaces";
-    const crossLabel = "Cross-workspace DevWorks";
-    const repoRegistryLabel = "Repository Registry";
+    const overviewLabel = "总览";
+    const workspacesLabel = "Workspace";
+    const crossLabel = "跨 Workspace DevWork";
+    const repoRegistryLabel = "仓库注册表";
 
     const overview = renderAt("/");
     await waitFor(() => expect(screen.getByText("Cooagents")).toBeInTheDocument());
@@ -67,30 +67,30 @@ describe("App shell", () => {
     expect(screen.getAllByRole("link", { name: workspacesLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: crossLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: repoRegistryLabel }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("heading", { name: "Operations overview" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "运行总览" })).toBeInTheDocument();
     overview.unmount();
 
     const workspaces = renderAt("/workspaces");
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Workspace directory" })).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: "Workspace 目录" })).toBeInTheDocument(),
     );
     workspaces.unmount();
 
     const detail = renderAt("/workspaces/ws-123");
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Workspace detail" })).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: "Workspace 工作台" })).toBeInTheDocument(),
     );
     detail.unmount();
 
     const dwDetail = renderAt("/workspaces/ws-1/design-works/dw-1");
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Design work detail" })).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: "DesignWork 详情" })).toBeInTheDocument(),
     );
     dwDetail.unmount();
 
     const dvDetail = renderAt("/workspaces/ws-1/dev-works/dv-1");
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Development work detail" })).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: "DevWork 详情" })).toBeInTheDocument(),
     );
     dvDetail.unmount();
 

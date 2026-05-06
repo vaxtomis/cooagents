@@ -183,7 +183,7 @@ describe("RepoRefsEditor", () => {
     });
 
     await waitFor(() => expect(listRepos).toHaveBeenCalled());
-    const dupErrors = await screen.findAllByText("mount_name 重复");
+    const dupErrors = await screen.findAllByText("挂载名重复");
     expect(dupErrors.length).toBeGreaterThanOrEqual(1);
   });
 

@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setState({
           status: "unauthenticated",
           user: null,
-          error: err instanceof Error ? err.message : "Failed to fetch session",
+          error: err instanceof Error ? err.message : "会话加载失败",
         });
       }
     }

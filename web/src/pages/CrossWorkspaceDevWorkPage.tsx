@@ -111,10 +111,10 @@ export function CrossWorkspaceDevWorkPage() {
                     无 DevWork。
                   </p>
                 ) : (
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="space-y-2">
                     {devWorks.map((dv) => (
                       <Link
-                        className="flex flex-col gap-2 rounded-2xl border border-border bg-panel-strong/80 p-4 transition hover:border-accent/30"
+                        className="flex flex-col gap-2 rounded-xl border border-border bg-panel-strong/80 p-3 transition hover:border-accent/30 md:flex-row md:items-center md:justify-between"
                         key={dv.id}
                         to={`/workspaces/${workspace.id}/dev-works/${dv.id}`}
                       >

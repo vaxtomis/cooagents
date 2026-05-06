@@ -15,9 +15,9 @@ const TAB_IDS = ["branches", "tree", "log"] as const;
 type TabId = (typeof TAB_IDS)[number];
 
 const TAB_LABELS: Record<TabId, string> = {
-  branches: "Branches",
-  tree: "Tree",
-  log: "Log",
+  branches: "分支",
+  tree: "文件树",
+  log: "提交历史",
 };
 
 function TabSwitch({
@@ -60,17 +60,17 @@ function Header({ repo }: { repo: Repo | undefined }) {
     <div className="flex flex-wrap items-center gap-3">
       <RepoFetchStatusBadge repo={repo} />
       <p className="font-mono text-xs text-muted">
-        url: <span className="text-copy">{repo.url}</span>
+        URL：<span className="text-copy">{repo.url}</span>
       </p>
       <p className="font-mono text-xs text-muted">
-        default_branch: <span className="text-copy">{repo.default_branch}</span>
+        默认分支：<span className="text-copy">{repo.default_branch}</span>
       </p>
       <p className="font-mono text-xs text-muted">
-        role: <span className="text-copy">{repo.role}</span>
+        角色：<span className="text-copy">{repo.role}</span>
       </p>
       {repo.last_fetched_at ? (
         <p className="font-mono text-xs text-muted">
-          last_fetched_at:{" "}
+          最近 fetch：{" "}
           <span className="text-copy">{repo.last_fetched_at}</span>
         </p>
       ) : null}
@@ -98,7 +98,7 @@ function BranchesList({ branches }: { branches: RepoBranches | undefined }) {
           <span className="truncate">{branch}</span>
           {branch === branches.default_branch ? (
             <span className="text-[10px] uppercase tracking-[0.2em] text-accent">
-              default
+              默认
             </span>
           ) : null}
         </li>
@@ -169,7 +169,7 @@ function RepoDetailContent({ repoId }: { repoId: string }) {
             onClick={() => void handleFetch()}
             type="button"
           >
-            {fetching ? "fetching…" : "立即 fetch"}
+            {fetching ? "fetch 中..." : "立即 fetch"}
           </button>
         }
         kicker="仓库详情"
@@ -190,7 +190,7 @@ function RepoDetailContent({ repoId }: { repoId: string }) {
       <SectionPanel
         actions={<TabSwitch setTab={setTab} tab={tab} />}
         kicker="侦察"
-        title="branches / tree / log"
+        title={TAB_LABELS[tab]}
       >
         <div className="space-y-4">
           <BranchPicker
@@ -202,7 +202,7 @@ function RepoDetailContent({ repoId }: { repoId: string }) {
           {tab === "branches" && <BranchesList branches={branchesQuery.data} />}
 
           {tab === "tree" && (
-            <div className="grid gap-4 md:grid-cols-[280px_1fr]">
+            <div className="grid gap-4 md:grid-cols-[300px_minmax(0,1fr)]">
               <TreeBrowser
                 gitRef={gitRef}
                 onPathChange={setPath}

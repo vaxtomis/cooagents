@@ -17,17 +17,16 @@ function HeroStat({
   caption: string;
 }) {
   return (
-    <section className="relative overflow-hidden rounded-[32px] border border-[color:var(--color-border-dark)] bg-[color:var(--color-panel-deep)] p-8 shadow-panel">
-      <div className="pointer-events-none absolute -right-24 -top-24 size-72 rounded-full bg-accent/20 blur-3xl" aria-hidden />
+    <section className="rounded-2xl border border-[color:var(--color-border-dark)] bg-[color:var(--color-panel-deep)] p-4 shadow-panel">
       <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-[color:var(--color-accent-soft)]">
         {title}
       </p>
-      <div className="mt-6 flex items-end gap-4">
-        <div className="font-serif text-[4rem] font-medium leading-none tracking-tight text-[color:var(--color-ink-invert)] [font-variant-numeric:tabular-nums]">
+      <div className="mt-3 flex items-end gap-4">
+        <div className="font-serif text-[2.6rem] font-medium leading-none tracking-tight text-[color:var(--color-ink-invert)] [font-variant-numeric:tabular-nums]">
           {value}
         </div>
       </div>
-      <p className="mt-5 max-w-md text-sm leading-relaxed text-[color:var(--color-ink-invert-soft)]">
+      <p className="mt-3 max-w-md text-xs leading-relaxed text-[color:var(--color-ink-invert-soft)]">
         {caption}
       </p>
     </section>
@@ -98,7 +97,7 @@ export function WorkspaceDashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <HeroStat
           caption="当前活跃 Workspace 数量；每 15 秒自动刷新。"
-          title="并行 active 数"
+          title="活跃 Workspace"
           value={activeValue}
         />
         <HeroStat
@@ -118,7 +117,7 @@ export function WorkspaceDashboardPage() {
         />
       </div>
 
-      <SectionPanel kicker="清单" title="活跃 Workspaces">
+      <SectionPanel kicker="清单" title="活跃 Workspace">
         {workspacesQuery.error ? (
           <p className="rounded-2xl border border-danger/15 bg-danger/8 p-4 text-sm text-muted">
             Workspace 数据加载失败。
@@ -128,7 +127,7 @@ export function WorkspaceDashboardPage() {
             当前没有活跃 Workspace。
           </p>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
             {activeWorkspaces.map((ws) => (
               <WorkspaceRow key={ws.id} workspace={ws} />
             ))}

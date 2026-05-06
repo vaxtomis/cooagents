@@ -44,85 +44,85 @@ type PageMeta = {
 };
 
 const primaryNavItems: NavItem[] = [
-  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/workspaces", label: "Workspaces", icon: FolderKanban },
+  { to: "/", label: "总览", icon: LayoutDashboard, end: true },
+  { to: "/workspaces", label: "Workspace", icon: FolderKanban },
 ];
 
 const operationsNavItems: NavItem[] = [
-  { to: "/dev-works", label: "Cross-workspace DevWorks", icon: GitBranch },
-  { to: "/repos", label: "Repository Registry", icon: Database },
+  { to: "/dev-works", label: "跨 Workspace DevWork", icon: GitBranch },
+  { to: "/repos", label: "仓库注册表", icon: Database },
 ];
 
 function resolvePageMeta(pathname: string): PageMeta {
   if (pathname === "/") {
     return {
-      title: "Operations overview",
-      eyebrow: "Workspace pulse",
+      title: "运行总览",
+      eyebrow: "Workspace 脉搏",
       description:
-        "Track active workspaces, intervention load, first-pass quality, and iteration depth from one compact control surface.",
+        "集中查看活跃 Workspace、人工介入、一次性准出率和迭代深度。",
     };
   }
 
   if (pathname === "/workspaces") {
     return {
-      title: "Workspace directory",
-      eyebrow: "Primary context",
+      title: "Workspace 目录",
+      eyebrow: "主工作区",
       description:
-        "Create, filter, and reopen workspaces. This remains the primary entry point for design work, development work, and activity review.",
+        "创建、筛选和重新进入 Workspace。",
     };
   }
 
   if (/^\/workspaces\/[^/]+\/design-works\/[^/]+$/.test(pathname)) {
     return {
-      title: "Design work detail",
-      eyebrow: "Workspace execution",
+      title: "DesignWork 详情",
+      eyebrow: "Workspace 执行",
       description:
-        "Inspect state progression, design-doc output, validation gaps, and review history for a single design work item.",
+        "查看状态推进、设计文档产物、校验缺口和审核历史。",
     };
   }
 
   if (/^\/workspaces\/[^/]+\/dev-works\/[^/]+$/.test(pathname)) {
     return {
-      title: "Development work detail",
-      eyebrow: "Workspace execution",
+      title: "DevWork 详情",
+      eyebrow: "Workspace 执行",
       description:
-        "Inspect progress, notes, reviews, and gate actions for a single development work item.",
+        "查看开发进度、迭代文档、评审记录和闸门动作。",
     };
   }
 
   if (/^\/workspaces\/[^/]+$/.test(pathname)) {
     return {
-      title: "Workspace detail",
-      eyebrow: "Design / develop / events",
+      title: "Workspace 工作台",
+      eyebrow: "设计 / 开发 / 事件",
       description:
-        "Operate a single workspace with paged design work, development work, and event streams from one panel.",
+        "在一个 Workspace 内处理设计工作、开发工作和事件流。",
     };
   }
 
   if (pathname === "/dev-works") {
     return {
-      title: "Cross-workspace DevWorks",
-      eyebrow: "Secondary operation",
+      title: "跨 Workspace DevWork",
+      eyebrow: "全局视图",
       description:
-        "Scan development work across active workspaces without leaving the workspace-first shell.",
+        "跨活跃 Workspace 扫描开发工作状态。",
     };
   }
 
   if (pathname === "/repos") {
     return {
-      title: "Repository registry",
-      eyebrow: "Shared infrastructure",
+      title: "仓库注册表",
+      eyebrow: "共享基础设施",
       description:
-        "Manage registered repositories, fetch health, and repo metadata without losing track of workspace context.",
+        "管理仓库登记、fetch 健康度和仓库元数据。",
     };
   }
 
   if (/^\/repos\/[^/]+$/.test(pathname)) {
     return {
-      title: "Repository detail",
-      eyebrow: "Inspector",
+      title: "仓库详情",
+      eyebrow: "代码检查器",
       description:
-        "Browse branches, trees, and commit history through the healthy bare clone contract.",
+        "浏览分支、目录树、文件内容和提交历史。",
     };
   }
 
@@ -158,7 +158,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-void text-muted">
-        <span className="text-sm">Loading session...</span>
+        <span className="text-sm">正在加载会话...</span>
       </div>
     );
   }
@@ -178,8 +178,8 @@ function ShellLayout() {
 
   return (
     <div className="min-h-screen bg-void text-copy">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1360px] gap-6 px-4 py-5 md:px-8 md:py-8">
-        <aside className="hidden w-[286px] shrink-0 flex-col rounded-[32px] border border-border bg-panel p-6 shadow-whisper md:flex">
+      <div className="flex min-h-screen w-full gap-4 px-3 py-3 md:px-4 md:py-4">
+        <aside className="hidden w-[232px] shrink-0 flex-col rounded-2xl border border-border bg-panel p-4 shadow-whisper md:flex">
           <div className="flex items-center gap-3 px-1 pb-2">
             <div className="flex size-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
               <Bot className="size-5" strokeWidth={1.9} />
@@ -189,7 +189,7 @@ function ShellLayout() {
                 Cooagents
               </p>
               <p className="text-[11px] uppercase tracking-[0.18em] text-muted-soft">
-                Workspace control plane
+                Workspace 控制台
               </p>
             </div>
           </div>
@@ -197,7 +197,7 @@ function ShellLayout() {
           <div className="mt-8 space-y-6">
             <div>
               <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
-                Primary
+                主导航
               </p>
               <nav className="flex flex-col gap-1">
                 {primaryNavItems.map((item) => (
@@ -208,7 +208,7 @@ function ShellLayout() {
 
             <div>
               <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
-                Operations
+                全局视图
               </p>
               <nav className="flex flex-col gap-1">
                 {operationsNavItems.map((item) => (
@@ -220,7 +220,7 @@ function ShellLayout() {
             <div>
               <div className="mb-2 flex items-center justify-between gap-2 px-1">
                 <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">
-                  Recent workspaces
+                  最近 Workspace
                 </p>
                 <span className="text-[11px] text-muted-soft">
                   {workspacesQuery.data ? recentWorkspaces.length : "..."}
@@ -229,7 +229,7 @@ function ShellLayout() {
               <div className="space-y-2">
                 {recentWorkspaces.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-border bg-panel-strong/35 px-4 py-4 text-xs text-muted">
-                    No active workspaces yet.
+                    暂无活跃 Workspace。
                   </div>
                 ) : (
                   recentWorkspaces.map((workspace) => (
@@ -250,17 +250,9 @@ function ShellLayout() {
           </div>
 
           <div className="mt-auto space-y-3">
-            <div className="rounded-2xl border border-border-strong bg-panel-strong/40 p-4 text-sm text-muted">
-              <p className="font-serif text-base font-medium leading-snug text-copy">
-                Workspace-first cadence
-              </p>
-              <p className="mt-2 leading-relaxed">
-                Shared list behavior now favors compact scanning, explicit paging, and recent workspace recall over oversized hero chrome.
-              </p>
-            </div>
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3 text-xs text-muted">
               <div className="min-w-0 truncate">
-                <p className="text-[10px] uppercase tracking-[0.22em] text-muted-soft">Signed in</p>
+                <p className="text-[10px] uppercase tracking-[0.22em] text-muted-soft">已登录</p>
                 <p className="truncate text-sm text-copy">{user?.username ?? "-"}</p>
               </div>
               <button
@@ -269,31 +261,31 @@ function ShellLayout() {
                 className="inline-flex items-center gap-1 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
               >
                 <LogOut className="size-3.5" strokeWidth={1.8} />
-                Sign out
+                退出
               </button>
             </div>
           </div>
         </aside>
 
-        <div className="flex min-h-[calc(100vh-2rem)] flex-1 flex-col gap-6">
-          <header className="overflow-hidden rounded-[32px] border border-border bg-panel px-6 py-6 shadow-whisper md:px-10">
-            <div className="flex flex-col gap-4">
+        <div className="flex min-h-[calc(100vh-1.5rem)] min-w-0 flex-1 flex-col gap-4">
+          <header className="overflow-hidden rounded-2xl border border-border bg-panel px-4 py-4 shadow-whisper md:px-5">
+            <div className="flex flex-col gap-3">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-accent">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-accent">
                     {meta.eyebrow}
                   </p>
-                  <h1 className="mt-2 font-serif text-[2rem] font-medium leading-[1.15] tracking-tight text-copy md:text-[2.35rem]">
+                  <h1 className="mt-1 font-serif text-[1.55rem] font-medium leading-tight tracking-tight text-copy md:text-[1.9rem]">
                     {meta.title}
                   </h1>
-                  <p className="mt-3 max-w-3xl text-[15px] leading-relaxed text-muted md:text-base">
+                  <p className="mt-1 max-w-5xl text-sm leading-relaxed text-muted">
                     {meta.description}
                   </p>
                 </div>
 
-                <div className="hidden shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-panel-strong/50 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-muted md:flex">
+                <div className="hidden shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-muted md:flex">
                   <span className="size-1.5 rounded-full bg-success" />
-                  Live
+                  实时
                 </div>
               </div>
 

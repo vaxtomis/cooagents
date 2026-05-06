@@ -40,7 +40,7 @@ export function LoginPage() {
       >
         <div className="space-y-2">
           <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-accent">
-            Anthropic-inspired ops
+            Cooagents 控制台
           </p>
           <h1 className="font-serif text-3xl font-medium leading-tight tracking-tight text-copy">
             Cooagents

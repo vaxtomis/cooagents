@@ -10,6 +10,7 @@ import {
   syncRepos,
   type ListRepoPageParams,
 } from "../api/repos";
+import { AppDialog } from "../components/AppDialog";
 import { PaginationControls } from "../components/PaginationControls";
 import { EmptyState, SectionPanel } from "../components/SectionPanel";
 import { SegmentedControl } from "../components/SegmentedControl";
@@ -20,6 +21,14 @@ import type { CreateRepoPayload, Repo, RepoFetchStatus, RepoRole } from "../type
 
 const REPO_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.\-]{0,62}$/;
 const ROLES: RepoRole[] = ["backend", "frontend", "fullstack", "infra", "docs", "other"];
+const ROLE_LABELS: Record<RepoRole, string> = {
+  backend: "后端",
+  frontend: "前端",
+  fullstack: "全栈",
+  infra: "基础设施",
+  docs: "文档",
+  other: "其他",
+};
 const PAGE_SIZE_OPTIONS = [6, 12, 24] as const;
 
 type RepoStatusFilter = RepoFetchStatus | "all";
@@ -27,10 +36,10 @@ type RepoRoleFilter = RepoRole | "all";
 type RepoSort = NonNullable<ListRepoPageParams["sort"]>;
 
 const STATUS_OPTIONS = [
-  { value: "all", label: "All" },
-  { value: "healthy", label: "Healthy" },
-  { value: "error", label: "Attention" },
-  { value: "unknown", label: "Unknown" },
+  { value: "all", label: "全部" },
+  { value: "healthy", label: "健康" },
+  { value: "error", label: "需处理" },
+  { value: "unknown", label: "未知" },
 ] as const satisfies readonly { value: RepoStatusFilter; label: string }[];
 
 interface SyncSummary {
@@ -70,8 +79,8 @@ function RepoRow({
   deleting: boolean;
 }) {
   return (
-    <article className="rounded-[28px] border border-border bg-panel-strong/70 p-4 shadow-[0_0_0_1px_rgba(209,207,197,0.2)]">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <article className="rounded-2xl border border-border bg-panel-strong/70 p-3 shadow-[0_0_0_1px_rgba(209,207,197,0.2)]">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex min-w-0 gap-4">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-accent/10 text-accent">
             <Database className="size-5" strokeWidth={1.8} />
@@ -84,10 +93,10 @@ function RepoRow({
             <p className="font-mono text-xs text-muted">{repo.id}</p>
             <p className="truncate font-mono text-sm text-muted">{repo.url}</p>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-soft">
-              <span>Role: {repo.role}</span>
-              <span>Default branch: {repo.default_branch}</span>
-              <span>Updated: {new Date(repo.updated_at).toLocaleString()}</span>
-              {repo.last_fetched_at ? <span>Fetched: {new Date(repo.last_fetched_at).toLocaleString()}</span> : null}
+              <span>角色：{ROLE_LABELS[repo.role]}</span>
+              <span>默认分支：{repo.default_branch}</span>
+              <span>更新：{new Date(repo.updated_at).toLocaleString()}</span>
+              {repo.last_fetched_at ? <span>Fetch：{new Date(repo.last_fetched_at).toLocaleString()}</span> : null}
             </div>
             {repo.last_fetch_err ? (
               <p className="rounded-xl border border-danger/15 bg-danger/8 px-3 py-2 text-xs text-danger">
@@ -103,7 +112,7 @@ function RepoRow({
             onClick={() => onOpen(repo.id)}
             className="rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90"
           >
-            Open
+            打开
           </button>
           <button
             type="button"
@@ -112,7 +121,7 @@ function RepoRow({
             className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-panel px-4 py-2 text-sm font-medium text-muted transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
           >
             <RefreshCw className="size-4" strokeWidth={1.8} />
-            {fetching ? "Fetching..." : "Fetch now"}
+            {fetching ? "Fetch 中..." : "立即 fetch"}
           </button>
           <button
             type="button"
@@ -121,7 +130,7 @@ function RepoRow({
             className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-panel px-4 py-2 text-sm font-medium text-muted transition hover:border-danger/30 hover:text-danger disabled:opacity-50"
           >
             <Trash2 className="size-4" strokeWidth={1.8} />
-            Delete
+            删除
           </button>
         </div>
       </div>
@@ -145,15 +154,15 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
     const trimmedBranch = defaultBranch.trim();
     const trimmedSshKey = sshKeyPath.trim();
     if (!REPO_NAME_RE.test(trimmedName)) {
-      setError("Repository name must start with a letter or number and may include _ . -");
+      setError("仓库名称必须以字母或数字开头，可包含 _ . -");
       return;
     }
     if (!trimmedUrl) {
-      setError("Repository URL is required");
+      setError("仓库 URL 不能为空");
       return;
     }
     if (!trimmedBranch) {
-      setError("Default branch is required");
+      setError("默认分支不能为空");
       return;
     }
 
@@ -175,7 +184,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
       setSshKeyPath("");
       onCreated();
     } catch (err) {
-      setError(extractError(err, "Failed to register repository"));
+      setError(extractError(err, "登记仓库失败"));
     } finally {
       setSubmitting(false);
     }
@@ -184,7 +193,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
   return (
     <form className="grid gap-3 md:grid-cols-[1fr_2fr_1fr_1fr_1fr_auto]" onSubmit={handleSubmit}>
       <label className="space-y-1 text-sm text-muted">
-        <span>Name</span>
+          <span>名称</span>
         <input
           className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
           onChange={(event) => setName(event.target.value)}
@@ -202,7 +211,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
         />
       </label>
       <label className="space-y-1 text-sm text-muted">
-        <span>Default branch</span>
+          <span>默认分支</span>
         <input
           className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
           onChange={(event) => setDefaultBranch(event.target.value)}
@@ -211,7 +220,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
         />
       </label>
       <label className="space-y-1 text-sm text-muted">
-        <span>Role</span>
+          <span>角色</span>
         <select
           className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
           onChange={(event) => setRole(event.target.value as RepoRole)}
@@ -219,13 +228,13 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
         >
           {ROLES.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {ROLE_LABELS[option]}
             </option>
           ))}
         </select>
       </label>
       <label className="space-y-1 text-sm text-muted">
-        <span>SSH key path</span>
+          <span>SSH key 路径</span>
         <input
           className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
           onChange={(event) => setSshKeyPath(event.target.value)}
@@ -239,7 +248,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
           disabled={submitting}
           type="submit"
         >
-          {submitting ? "Registering..." : "Register"}
+          {submitting ? "登记中..." : "登记"}
         </button>
       </div>
       {error ? <p className="text-xs text-danger md:col-span-6">{error}</p> : null}
@@ -259,6 +268,7 @@ export function ReposPage() {
   const [sort, setSort] = useState<RepoSort>("updated_desc");
   const [limit, setLimit] = useState<number>(12);
   const [offset, setOffset] = useState(0);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const query = useSWR(
     ["repos-page", status, role, search, sort, limit, offset],
@@ -283,14 +293,14 @@ export function ReposPage() {
       await fetchRepo(id);
       await query.mutate();
     } catch (err) {
-      setActionError(extractError(err, "Fetch failed"));
+      setActionError(extractError(err, "Fetch 失败"));
     } finally {
       setPending(null);
     }
   }
 
   async function handleDelete(id: string) {
-    if (typeof window !== "undefined" && !window.confirm(`Delete repository ${id}?`)) {
+    if (typeof window !== "undefined" && !window.confirm(`确认删除仓库 ${id}？`)) {
       return;
     }
     setPending({ kind: "delete", id });
@@ -299,14 +309,14 @@ export function ReposPage() {
       await deleteRepo(id);
       await query.mutate();
     } catch (err) {
-      setActionError(extractError(err, "Delete failed"));
+      setActionError(extractError(err, "删除失败"));
     } finally {
       setPending(null);
     }
   }
 
   async function handleSync() {
-    if (typeof window !== "undefined" && !window.confirm("Sync the repository registry from config/repos.yaml?")) {
+    if (typeof window !== "undefined" && !window.confirm("确认从 config/repos.yaml 同步仓库注册表？")) {
       return;
     }
     setActionError(null);
@@ -319,7 +329,7 @@ export function ReposPage() {
       });
       await query.mutate();
     } catch (err) {
-      setActionError(extractError(err, "Sync failed"));
+      setActionError(extractError(err, "同步失败"));
     }
   }
 
@@ -343,70 +353,89 @@ export function ReposPage() {
 
   return (
     <div className="space-y-6">
-      <SectionPanel kicker="Register" title="Register repository">
-        <CreateForm onCreated={() => void query.mutate()} />
-      </SectionPanel>
+      <AppDialog
+        description="登记后可在仓库详情中浏览分支、目录树、文件和提交历史。"
+        onClose={() => setCreateOpen(false)}
+        open={createOpen}
+        title="登记仓库"
+      >
+        <CreateForm
+          onCreated={() => {
+            setCreateOpen(false);
+            void query.mutate();
+          }}
+        />
+      </AppDialog>
 
       <SectionPanel
-        kicker="Directory"
-        title="Repository registry"
+        kicker="目录"
+        title="仓库注册表"
         actions={
-          <button
-            type="button"
-            onClick={() => void handleSync()}
-            className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs font-medium text-muted transition hover:border-accent/40 hover:text-accent"
-          >
-            <RefreshCw className="size-3.5" strokeWidth={1.8} />
-            Sync config
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft"
+            >
+              登记仓库
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSync()}
+              className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-panel-strong/50 px-3 py-2 text-sm font-medium text-muted transition hover:border-accent/40 hover:text-accent"
+            >
+              <RefreshCw className="size-3.5" strokeWidth={1.8} />
+              同步配置
+            </button>
+          </>
         }
       >
         <div className="space-y-4">
           <div className="grid gap-3 xl:grid-cols-[1.2fr_1fr_1fr_auto]">
             <label className="space-y-1 text-sm text-muted">
-              <span>Search</span>
+              <span>搜索</span>
               <input
                 className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
                 value={search}
                 onChange={(event) => updateFilters({ search: event.target.value, offset: 0 })}
-                placeholder="Search by name, URL, or branch"
+                placeholder="按名称、URL 或分支搜索"
               />
             </label>
 
             <label className="space-y-1 text-sm text-muted">
-              <span>Role</span>
+              <span>角色</span>
               <select
                 className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
                 value={role}
                 onChange={(event) => updateFilters({ role: event.target.value as RepoRoleFilter, offset: 0 })}
               >
-                <option value="all">All roles</option>
+                <option value="all">全部角色</option>
                 {ROLES.map((option) => (
                   <option key={option} value={option}>
-                    {option}
+                    {ROLE_LABELS[option]}
                   </option>
                 ))}
               </select>
             </label>
 
             <label className="space-y-1 text-sm text-muted">
-              <span>Sort</span>
+              <span>排序</span>
               <select
                 className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
                 value={sort}
                 onChange={(event) => updateFilters({ sort: event.target.value as RepoSort, offset: 0 })}
               >
-                <option value="updated_desc">Recently updated</option>
-                <option value="last_fetched_desc">Recently fetched</option>
-                <option value="name_asc">Name A-Z</option>
-                <option value="name_desc">Name Z-A</option>
+                <option value="updated_desc">最近更新</option>
+                <option value="last_fetched_desc">最近 fetch</option>
+                <option value="name_asc">名称 A-Z</option>
+                <option value="name_desc">名称 Z-A</option>
               </select>
             </label>
 
             <div className="space-y-1">
-              <span className="text-sm text-muted">Health</span>
+              <span className="text-sm text-muted">健康度</span>
               <SegmentedControl
-                ariaLabel="Repository fetch status"
+                ariaLabel="仓库 fetch 状态"
                 options={STATUS_OPTIONS}
                 value={status}
                 onChange={(value) => updateFilters({ status: value, offset: 0 })}
@@ -416,34 +445,34 @@ export function ReposPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3">
             <div>
-              <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">Result set</p>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">结果集</p>
               <p className="mt-1 text-sm text-copy">
-                {query.data ? `${query.data.pagination.total} repositories matching the current filters` : "Loading repositories..."}
+                {query.data ? `当前筛选命中 ${query.data.pagination.total} 个仓库` : "正在加载仓库..."}
               </p>
             </div>
             {syncReport ? (
               <p className="text-xs text-muted">
-                Last sync: in_sync {syncReport.in_sync} / fs_only {syncReport.fs_only} / db_only {syncReport.db_only}
+                最近同步：一致 {syncReport.in_sync} / 仅文件 {syncReport.fs_only} / 仅数据库 {syncReport.db_only}
               </p>
             ) : null}
           </div>
 
           {query.error ? (
             <div className="rounded-2xl border border-danger/15 bg-danger/8 p-5">
-              <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">Repository data failed to load</h3>
-              <p className="mt-2 text-sm text-muted">Retry the request or narrow the current filters.</p>
+              <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">仓库数据加载失败</h3>
+              <p className="mt-2 text-sm text-muted">请重试请求，或收窄当前筛选条件。</p>
               <button
                 className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90"
                 onClick={() => void query.mutate()}
                 type="button"
               >
-                Retry
+                重试
               </button>
             </div>
           ) : !query.data ? (
             <LoadingSkeleton />
           ) : repos.length === 0 ? (
-            <EmptyState copy="No repositories match the current filters." />
+            <EmptyState copy="当前筛选条件下没有仓库。" />
           ) : (
             <div className="space-y-3">
               {repos.map((repo) => (
@@ -463,7 +492,7 @@ export function ReposPage() {
           {query.data ? (
             <PaginationControls
               pagination={query.data.pagination}
-              itemLabel="Repositories"
+              itemLabel="仓库"
               pageSizeOptions={[...PAGE_SIZE_OPTIONS]}
               onPageChange={(nextOffset) => updateFilters({ offset: nextOffset })}
               onPageSizeChange={(nextLimit) => updateFilters({ limit: nextLimit, offset: 0 })}

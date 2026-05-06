@@ -29,14 +29,14 @@ export function PaginationControls({
           {itemLabel}
         </p>
         <p className="text-sm text-copy">
-          {from}-{to} of {pagination.total}
+          {from}-{to} / 共 {pagination.total}
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         {onPageSizeChange ? (
           <label className="flex items-center gap-2 text-xs text-muted">
-            <span>Page size</span>
+            <span>每页</span>
             <select
               className="rounded-lg border border-border-strong bg-panel-strong/60 px-2 py-1.5 text-xs text-copy outline-none"
               value={pagination.limit}
@@ -58,7 +58,7 @@ export function PaginationControls({
           onClick={() => onPageChange(Math.max(0, pagination.offset - pagination.limit))}
           className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs font-medium text-muted transition hover:border-copy/20 hover:text-copy disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Prev
+          上一页
         </button>
         <button
           type="button"
@@ -66,7 +66,7 @@ export function PaginationControls({
           onClick={() => onPageChange(pagination.offset + pagination.limit)}
           className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs font-medium text-muted transition hover:border-copy/20 hover:text-copy disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Next
+          下一页
         </button>
       </div>
     </div>

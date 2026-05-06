@@ -230,7 +230,7 @@ function RowEditor({
       </div>
 
       <label className="block space-y-1 text-xs text-muted">
-        <span>repo</span>
+        <span>仓库</span>
         <select
           aria-label={`仓库选择 #${index + 1}`}
           className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none [&_option]:bg-panel-strong"
@@ -253,7 +253,7 @@ function RowEditor({
 
       <div className="grid gap-2 md:grid-cols-2">
         <label className="space-y-1 text-xs text-muted">
-          <span>base_branch</span>
+          <span>基准分支</span>
           <select
             aria-label={`base_branch #${index + 1}`}
             className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none disabled:opacity-50 [&_option]:bg-panel-strong"
@@ -283,7 +283,7 @@ function RowEditor({
 
         {mode === "dev" ? (
           <label className="space-y-1 text-xs text-muted">
-            <span>mount_name</span>
+            <span>挂载名</span>
             <input
               aria-label={`mount_name #${index + 1}`}
               className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 font-mono text-sm text-copy outline-none"
@@ -293,12 +293,12 @@ function RowEditor({
             />
             {duplicate ? (
               <span className="block text-[11px] text-danger">
-                mount_name 重复
+                挂载名重复
               </span>
             ) : null}
             {invalidMount && !duplicate ? (
               <span className="block text-[11px] text-danger">
-                mount_name 必须匹配 [A-Za-z0-9][A-Za-z0-9_.-]{"{0,62}"}
+                挂载名必须匹配 [A-Za-z0-9][A-Za-z0-9_.-]{"{0,62}"}
               </span>
             ) : null}
           </label>
@@ -322,4 +322,3 @@ function RowEditor({
     </div>
   );
 }
-

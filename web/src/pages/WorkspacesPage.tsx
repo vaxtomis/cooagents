@@ -7,6 +7,7 @@ import {
   listWorkspacePage,
   type ListWorkspacePageParams,
 } from "../api/workspaces";
+import { AppDialog } from "../components/AppDialog";
 import { PaginationControls } from "../components/PaginationControls";
 import { EmptyState, SectionPanel } from "../components/SectionPanel";
 import { SegmentedControl } from "../components/SegmentedControl";
@@ -22,9 +23,9 @@ type StatusFilter = WorkspaceStatus | "all";
 type WorkspaceSort = NonNullable<ListWorkspacePageParams["sort"]>;
 
 const STATUS_OPTIONS = [
-  { value: "active", label: "Active" },
-  { value: "archived", label: "Archived" },
-  { value: "all", label: "All" },
+  { value: "active", label: "活跃" },
+  { value: "archived", label: "已归档" },
+  { value: "all", label: "全部" },
 ] as const satisfies readonly { value: StatusFilter; label: string }[];
 
 function LoadingSkeleton() {
@@ -49,8 +50,8 @@ function WorkspaceRow({
   busy: boolean;
 }) {
   return (
-    <article className="rounded-[28px] border border-border bg-panel-strong/70 p-4 shadow-[0_0_0_1px_rgba(209,207,197,0.2)]">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+    <article className="rounded-2xl border border-border bg-panel-strong/70 p-3 shadow-[0_0_0_1px_rgba(209,207,197,0.2)]">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-3">
             <h3 className="font-serif text-xl font-medium text-copy">{workspace.title}</h3>
@@ -62,7 +63,7 @@ function WorkspaceRow({
 
         <div className="flex min-w-[220px] flex-col items-start gap-3 md:items-end">
           <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">
-            Updated {new Date(workspace.updated_at).toLocaleString()}
+            更新于 {new Date(workspace.updated_at).toLocaleString()}
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -70,7 +71,7 @@ function WorkspaceRow({
               onClick={() => onOpen(workspace.id)}
               className="rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90"
             >
-              Open
+              打开
             </button>
             {workspace.status === "active" ? (
               <button
@@ -79,7 +80,7 @@ function WorkspaceRow({
                 onClick={() => onArchive(workspace.id)}
                 className="rounded-xl border border-border-strong bg-panel px-4 py-2 text-sm font-medium text-muted transition hover:border-danger/30 hover:text-danger disabled:opacity-50"
               >
-                Archive
+                归档
               </button>
             ) : null}
           </div>
@@ -100,11 +101,11 @@ function CreateForm({ onCreated }: { onCreated: (workspace: Workspace) => void }
     const trimmedTitle = title.trim();
     const trimmedSlug = slug.trim();
     if (!trimmedTitle) {
-      setError("Title is required");
+      setError("标题不能为空");
       return;
     }
     if (!SLUG_RE.test(trimmedSlug)) {
-      setError("Slug must be kebab-case, 1-63 chars, without leading or duplicate dashes");
+      setError("Slug 标识必须是 1-63 位 kebab-case，不能以短横线开头或包含连续短横线");
       return;
     }
     setError(null);
@@ -115,7 +116,7 @@ function CreateForm({ onCreated }: { onCreated: (workspace: Workspace) => void }
       setSlug("");
       onCreated(created);
     } catch (err) {
-      setError(extractError(err, "Failed to create workspace"));
+      setError(extractError(err, "创建 Workspace 失败"));
     } finally {
       setSubmitting(false);
     }
@@ -124,16 +125,16 @@ function CreateForm({ onCreated }: { onCreated: (workspace: Workspace) => void }
   return (
     <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={handleSubmit}>
       <label className="space-y-1 text-sm text-muted">
-        <span>Title</span>
+          <span>标题</span>
         <input
           className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
           onChange={(event) => setTitle(event.target.value)}
-          placeholder="Workspace title"
+          placeholder="Workspace 标题"
           value={title}
         />
       </label>
       <label className="space-y-1 text-sm text-muted">
-        <span>Slug</span>
+          <span>Slug 标识</span>
         <input
           className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
           onChange={(event) => setSlug(event.target.value.toLowerCase())}
@@ -147,7 +148,7 @@ function CreateForm({ onCreated }: { onCreated: (workspace: Workspace) => void }
           disabled={submitting}
           type="submit"
         >
-          {submitting ? "Creating..." : "New workspace"}
+          {submitting ? "创建中..." : "创建 Workspace"}
         </button>
       </div>
       {error ? <p className="text-xs text-danger md:col-span-3">{error}</p> : null}
@@ -163,6 +164,7 @@ export function WorkspacesPage() {
   const [sort, setSort] = useState<WorkspaceSort>("updated_desc");
   const [limit, setLimit] = useState<number>(12);
   const [offset, setOffset] = useState(0);
+  const [createOpen, setCreateOpen] = useState(false);
   const [archivePending, setArchivePending] = useState<string | null>(null);
   const [archiveError, setArchiveError] = useState<string | null>(null);
 
@@ -183,7 +185,7 @@ export function WorkspacesPage() {
   const workspaces = page?.items ?? [];
 
   async function handleArchive(id: string) {
-    if (typeof window !== "undefined" && !window.confirm("Archive this workspace?")) {
+    if (typeof window !== "undefined" && !window.confirm("确认归档这个 Workspace？")) {
       return;
     }
     setArchivePending(id);
@@ -192,13 +194,14 @@ export function WorkspacesPage() {
       await archiveWorkspace(id);
       await query.mutate();
     } catch (err) {
-      setArchiveError(extractError(err, "Failed to archive workspace"));
+      setArchiveError(extractError(err, "归档 Workspace 失败"));
     } finally {
       setArchivePending(null);
     }
   }
 
   function handleCreated(workspace: Workspace) {
+    setCreateOpen(false);
     void query.mutate();
     navigate(`/workspaces/${workspace.id}`);
   }
@@ -213,41 +216,58 @@ export function WorkspacesPage() {
 
   return (
     <div className="space-y-6">
-      <SectionPanel kicker="Create" title="Create workspace">
+      <AppDialog
+        description="填写标题和稳定 slug，创建后会直接进入该 Workspace。"
+        onClose={() => setCreateOpen(false)}
+        open={createOpen}
+        title="新建 Workspace"
+      >
         <CreateForm onCreated={handleCreated} />
-      </SectionPanel>
+      </AppDialog>
 
-      <SectionPanel kicker="Directory" title="Workspace workbench">
+      <SectionPanel
+        actions={
+          <button
+            className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft"
+            onClick={() => setCreateOpen(true)}
+            type="button"
+          >
+            新建 Workspace
+          </button>
+        }
+        kicker="目录"
+        title="Workspace 工作台"
+      >
         <div className="space-y-4">
           <div className="grid gap-3 xl:grid-cols-[1.2fr_auto_auto]">
             <label className="space-y-1 text-sm text-muted">
-              <span>Search</span>
+              <span>搜索</span>
               <input
                 className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
                 value={search}
                 onChange={(event) => updateFilters({ search: event.target.value, offset: 0 })}
-                placeholder="Search by title or slug"
+                placeholder="按标题或 slug 搜索"
               />
             </label>
 
             <label className="space-y-1 text-sm text-muted">
-              <span>Sort</span>
+              <span>排序</span>
               <select
                 className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
                 value={sort}
                 onChange={(event) => updateFilters({ sort: event.target.value as WorkspaceSort, offset: 0 })}
               >
-                <option value="updated_desc">Recently updated</option>
-                <option value="created_desc">Recently created</option>
-                <option value="title_asc">Title A-Z</option>
-                <option value="title_desc">Title Z-A</option>
+                <option value="updated_desc">最近更新</option>
+                <option value="created_desc">最近创建</option>
+                <option value="title_asc">标题 A-Z</option>
+                <option value="title_desc">标题 Z-A</option>
               </select>
             </label>
 
             <div className="space-y-1">
-              <span className="text-sm text-muted">Status</span>
+              <span className="text-sm text-muted">状态</span>
               <SegmentedControl
-                ariaLabel="Workspace status"
+                ariaLabel="Workspace 状态"
                 options={STATUS_OPTIONS}
                 value={status}
                 onChange={(value) => updateFilters({ status: value, offset: 0 })}
@@ -257,29 +277,31 @@ export function WorkspacesPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3">
             <div>
-              <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">Result set</p>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">结果集</p>
               <p className="mt-1 text-sm text-copy">
-                {page ? `${page.pagination.total} workspaces matching the current filters` : "Loading workspaces..."}
+                {page ? `当前筛选命中 ${page.pagination.total} 个 Workspace` : "正在加载 Workspace..."}
               </p>
             </div>
           </div>
 
           {query.error ? (
             <div className="rounded-2xl border border-danger/15 bg-danger/8 p-5">
-              <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">Workspace data failed to load</h3>
-              <p className="mt-2 text-sm text-muted">Retry the request or adjust the current filters.</p>
+              <h3 className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">
+                Workspace 数据加载失败
+              </h3>
+              <p className="mt-2 text-sm text-muted">请重试请求，或调整当前筛选条件。</p>
               <button
                 className="mt-4 rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90"
                 onClick={() => void query.mutate()}
                 type="button"
               >
-                Retry
+                重试
               </button>
             </div>
           ) : !page ? (
             <LoadingSkeleton />
           ) : workspaces.length === 0 ? (
-            <EmptyState copy="No workspaces match the current filters." />
+            <EmptyState copy="当前筛选条件下没有 Workspace。" />
           ) : (
             <div className="space-y-3">
               {workspaces.map((workspace) => (
@@ -297,7 +319,7 @@ export function WorkspacesPage() {
           {page ? (
             <PaginationControls
               pagination={page.pagination}
-              itemLabel="Workspaces"
+              itemLabel="Workspace"
               pageSizeOptions={[...PAGE_SIZE_OPTIONS]}
               onPageChange={(nextOffset) => updateFilters({ offset: nextOffset })}
               onPageSizeChange={(nextLimit) => updateFilters({ limit: nextLimit, offset: 0 })}

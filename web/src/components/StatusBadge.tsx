@@ -59,7 +59,7 @@ const STATUS_META: Record<string, { label: string; tone: StatusTone; className: 
   published: success("已发布"),
   superseded: muted("已被替代"),
 
-  // DesignWorkState — keys are lowercased; resolveStatusBadge lowercases input.
+  // DesignWorkState - keys are lowercased; resolveStatusBadge lowercases input.
   init: muted("待启动"),
   mode_branch: accent("模式分支"),
   pre_validate: warning("预校验"),
@@ -82,12 +82,12 @@ const STATUS_META: Record<string, { label: string; tone: StatusTone; className: 
   impl_gap: warning("实现缺口"),
   design_hollow: warning("设计空洞"),
 
-  // Repo registry — fetch_status enum.
+  // Repo registry - fetch_status enum.
   unknown: muted("未知"),
   healthy: success("健康"),
   error: danger("失败"),
 
-  // Repo push state (Phase 5 — dev_work_repos.push_state).
+  // Repo push state (Phase 5 - dev_work_repos.push_state).
   pending: warning("待推送"),
   pushed: success("已推送"),
   // `failed` already mapped above to danger("失败").

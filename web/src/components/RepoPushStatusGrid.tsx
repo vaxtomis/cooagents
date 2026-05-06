@@ -25,7 +25,7 @@ export function RepoPushStatusGrid({ repos }: Props) {
             <p className="text-sm text-copy">
               <span className="font-medium">{r.mount_name}</span>
               {r.is_primary ? (
-                <span className="ml-2 text-[11px] text-muted">primary</span>
+                <span className="ml-2 text-[11px] text-muted">主仓库</span>
               ) : null}
             </p>
             <span title={r.push_err ?? undefined}>
@@ -36,7 +36,7 @@ export function RepoPushStatusGrid({ repos }: Props) {
             {r.repo_id} → {r.devwork_branch}
           </p>
           <p className="mt-1 text-[11px] text-muted-soft">
-            base: {r.base_branch}
+            基准：{r.base_branch}
             {r.base_rev ? `@${shortSha(r.base_rev)}` : ""}
           </p>
           {r.push_err ? (

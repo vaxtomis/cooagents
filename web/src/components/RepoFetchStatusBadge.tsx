@@ -10,7 +10,7 @@ export function RepoFetchStatusBadge({ repo }: Props) {
     repo.fetch_status === "error" && repo.last_fetch_err
       ? repo.last_fetch_err
       : repo.last_fetched_at
-        ? `最近 fetch: ${repo.last_fetched_at}`
+        ? `最近 fetch：${repo.last_fetched_at}`
         : undefined;
   return (
     <span title={tooltip}>

@@ -42,7 +42,7 @@ function ReviewRow({ review }: { review: Review }) {
       {review.reviewer ? <p className="mt-2 text-xs text-muted">审核者 {review.reviewer}</p> : null}
       {review.issues && review.issues.length > 0 ? (
         <details className="mt-3 text-xs text-muted">
-          <summary className="cursor-pointer">Issues ({review.issues.length})</summary>
+          <summary className="cursor-pointer">问题 ({review.issues.length})</summary>
           <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
             {JSON.stringify(review.issues, null, 2)}
           </pre>
@@ -50,7 +50,7 @@ function ReviewRow({ review }: { review: Review }) {
       ) : null}
       {review.findings && review.findings.length > 0 ? (
         <details className="mt-2 text-xs text-muted">
-          <summary className="cursor-pointer">Findings ({review.findings.length})</summary>
+          <summary className="cursor-pointer">发现项 ({review.findings.length})</summary>
           <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
             {JSON.stringify(review.findings, null, 2)}
           </pre>
@@ -229,12 +229,12 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
             ← 返回 Workspace
           </Link>
         }
-        kicker="DevWork"
+        kicker="开发工作"
         title={devWork.id}
       >
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge status={devWork.current_step} />
-          <span className="font-mono text-xs text-muted">doc: {devWork.design_doc_id}</span>
+          <span className="font-mono text-xs text-muted">文档：{devWork.design_doc_id}</span>
           <span className="text-sm text-muted">
             轮次 {devWork.iteration_rounds}
           </span>
@@ -258,7 +258,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
             onClick={() => void runAction("tick")}
             type="button"
           >
-            {actionPending === "tick" ? "Tick 中..." : "Tick"}
+            {actionPending === "tick" ? "推进中..." : "推进"}
           </button>
           <button
             className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
@@ -274,16 +274,16 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
 
       <SectionPanel kicker="摘要" title="指标">
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
-          <MetricCard label="last_score" value={devWork.last_score?.toString() ?? "-"} />
-          <MetricCard label="problem_category" value={devWork.last_problem_category ?? "-"} />
+          <MetricCard label="最近分数" value={devWork.last_score?.toString() ?? "-"} />
+          <MetricCard label="问题分类" value={devWork.last_problem_category ?? "-"} />
           <MetricCard
-            label="first_pass_success"
+            label="一次通过"
             value={
               devWork.first_pass_success === null ? "-" : devWork.first_pass_success ? "是" : "否"
             }
           />
-          <MetricCard label="worktree_branch" value={devWork.worktree_branch ?? "-"} />
-          <MetricCard label="worktree_path" value={devWork.worktree_path ?? "-"} />
+          <MetricCard label="工作分支" value={devWork.worktree_branch ?? "-"} />
+          <MetricCard label="工作目录" value={devWork.worktree_path ?? "-"} />
         </div>
       </SectionPanel>
 
@@ -293,7 +293,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
 
       <SectionPanel
         actions={
-          <div className="flex gap-2" role="tablist" aria-label="DevWork tabs">
+          <div className="flex gap-2" role="tablist" aria-label="DevWork 详情切换">
             {TAB_IDS.map((id) => {
               const selected = tab === id;
               return (

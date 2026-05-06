@@ -64,7 +64,7 @@ describe("DesignWorkPage", () => {
     expect(screen.getByText("architecture")).toBeInTheDocument();
     expect(screen.getByText("data-flow")).toBeInTheDocument();
 
-    const tickBtn = screen.getByRole("button", { name: "Tick" });
+    const tickBtn = screen.getByRole("button", { name: "推进" });
     expect(tickBtn).toBeDisabled();
   });
 

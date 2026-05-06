@@ -110,7 +110,7 @@ export function BlobViewer({ repoId, gitRef, path }: Props) {
     );
   }
   if (!query.data) {
-    return <p className="text-xs text-muted">加载中…</p>;
+    return <p className="text-xs text-muted">加载中...</p>;
   }
   const blob = query.data;
   return (
@@ -124,7 +124,7 @@ export function BlobViewer({ repoId, gitRef, path }: Props) {
       </header>
       {blob.binary ? (
         <p className="rounded-2xl border border-border bg-panel-strong/40 p-3 text-sm text-muted">
-          二进制文件 — 不可预览。
+          二进制文件，暂不支持预览。
         </p>
       ) : highlighted ? (
         <pre className="overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[12px]">

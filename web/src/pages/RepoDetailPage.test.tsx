@@ -102,7 +102,7 @@ describe("RepoDetailPage", () => {
     expect(
       await screen.findByRole("heading", { name: "frontend" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/role:/)).toBeInTheDocument();
+    expect(screen.getByText(/角色：/)).toBeInTheDocument();
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
@@ -195,7 +195,7 @@ describe("RepoDetailPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /logo\.png/ }));
 
     expect(
-      await screen.findByText("二进制文件 — 不可预览。"),
+      await screen.findByText("二进制文件，暂不支持预览。"),
     ).toBeInTheDocument();
     expect(document.querySelector("pre")).toBeNull();
   });
@@ -257,7 +257,7 @@ describe("RepoDetailPage", () => {
     renderAt();
     await screen.findByText("README.md");
 
-    fireEvent.click(screen.getByRole("tab", { name: "Log" }));
+    fireEvent.click(screen.getByRole("tab", { name: "提交历史" }));
 
     await waitFor(() => {
       expect(repoLogPage).toHaveBeenCalledWith("repo-aaa111", {

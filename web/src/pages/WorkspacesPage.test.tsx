@@ -65,9 +65,10 @@ describe("WorkspacesPage", () => {
     renderPage();
     await waitFor(() => expect(listWorkspacePage).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New WS" } });
-    fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "new-ws" } });
-    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建 Workspace" }));
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "New WS" } });
+    fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "new-ws" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建 Workspace" }));
 
     await waitFor(() => {
       expect(createWorkspace).toHaveBeenCalledWith({ title: "New WS", slug: "new-ws" });
@@ -82,9 +83,10 @@ describe("WorkspacesPage", () => {
     renderPage();
     await waitFor(() => expect(listWorkspacePage).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Bad" } });
-    fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "--nope--" } });
-    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建 Workspace" }));
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Bad" } });
+    fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "--nope--" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建 Workspace" }));
 
     expect(await screen.findByText(/kebab-case/)).toBeInTheDocument();
     expect(createWorkspace).not.toHaveBeenCalled();
@@ -96,7 +98,7 @@ describe("WorkspacesPage", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     renderPage();
-    const archiveBtn = await screen.findByRole("button", { name: "Archive" });
+    const archiveBtn = await screen.findByRole("button", { name: "归档" });
     fireEvent.click(archiveBtn);
 
     await waitFor(() => {
