@@ -32,11 +32,13 @@
 - Workspace detail contract:
   - Design work, development work, and events all page explicitly
   - creation forms can stay inline, but collection browsing must use shared paging behavior
+  - actions that depend on prerequisite collection data (for example, published design docs before creating a DevWork) must distinguish loading, empty, and error states instead of collapsing them into a disabled control
 
 ### 4. Validation & Error Matrix
 - page helpers must include `paginate=true`; forgetting it is a caller bug because the backend falls back to legacy shapes
 - SWR keys must include page inputs (`limit`, `offset`, filter, sort, query) or stale page caches will leak between views
 - if a collection query fails, render a contained error state with a retry action, not a blank page
+- if a create/action prerequisite query fails, surface that failure near the action with retry guidance; do not present the control as merely unavailable because the prerequisite set is empty
 - if a paged collection returns zero items, render an explicit empty state rather than a missing panel
 
 ### 5. Good / Base / Bad Cases
@@ -48,6 +50,7 @@
 ### 6. Tests Required
 - page tests should assert the paginated helper is called with the expected `limit` and `offset`
 - page tests should cover filter/search/sort interactions when they affect the SWR key
+- page tests should cover prerequisite-query failure states when create actions depend on related records
 - repo detail tests should assert log paging uses `repoLogPage`
 - build and typecheck must pass after route/helper signature updates
 
