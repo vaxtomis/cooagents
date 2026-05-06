@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis\\spec\\frontend\\index.md", "reason": "Frontend entrypoint and checklist"}
+{"file": ".trellis\\spec\\frontend\\dashboard-collection-patterns.md", "reason": "Dense workspace-first collection UI rules"}
+{"file": ".trellis\\spec\\guides\\code-reuse-thinking-guide.md", "reason": "Reuse shared controls instead of page-specific variants"}

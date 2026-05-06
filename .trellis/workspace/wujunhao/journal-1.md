@@ -109,3 +109,38 @@ Completed the workspace-first dashboard pagination redesign, recorded the backen
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Frontend layout + agent host pass
+
+**Date**: 2026-05-06
+**Task**: Frontend layout + agent host pass
+**Branch**: `main`
+
+### Summary
+
+Completed the frontend layout/i18n task, replaced the cross-workspace DevWork menu with Agent Host management, added a collapsible sidebar, and verified the frontend test/build gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0ea748d` | (see git log) |
+| `477c368` | (see git log) |
+| `1e80cab` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
