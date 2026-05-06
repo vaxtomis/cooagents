@@ -52,6 +52,8 @@ export type DevWorkStep =
 export type ProblemCategory = "req_gap" | "impl_gap" | "design_hollow";
 
 export type AgentKind = "claude" | "codex";
+export type AgentHostType = "claude" | "codex" | "both";
+export type HealthStatus = "unknown" | "healthy" | "unhealthy";
 
 // Canonical ordered happy-path arrays for stepper components.
 export const DESIGN_WORK_STATE_ORDER = [
@@ -212,6 +214,45 @@ export interface WorkspaceMetrics {
   active_workspaces: number;
   first_pass_success_rate: number;
   avg_iteration_rounds: number;
+}
+
+// ---------------------------------------------------------------------------
+// Agent Host registry - mirrors src/models.py:432-506
+// ---------------------------------------------------------------------------
+
+export interface AgentHost {
+  id: string;
+  host: string;
+  agent_type: AgentHostType;
+  max_concurrent: number;
+  labels: string[];
+  health_status: HealthStatus;
+  last_health_at: string | null;
+  last_health_err: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAgentHostPayload {
+  id?: string | null;
+  host: string;
+  agent_type?: AgentHostType;
+  max_concurrent?: number;
+  ssh_key?: string | null;
+  labels?: string[];
+}
+
+export interface UpdateAgentHostPayload {
+  host?: string;
+  agent_type?: AgentHostType;
+  max_concurrent?: number;
+  ssh_key?: string | null;
+  labels?: string[];
+}
+
+export interface AgentHostsSyncReport {
+  upserted: number;
+  marked_unknown: number;
 }
 
 // ---------------------------------------------------------------------------

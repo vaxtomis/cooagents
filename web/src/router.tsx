@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Bot,
+  ChevronsLeft,
+  ChevronsRight,
   Database,
   FolderKanban,
-  GitBranch,
   LayoutDashboard,
   LogOut,
+  Server,
 } from "lucide-react";
 import useSWR from "swr";
 import {
@@ -20,6 +23,7 @@ import {
 import { useAuth } from "./auth/AuthContext";
 import { listWorkspaces } from "./api/workspaces";
 import { useWorkspacePolling } from "./hooks/useWorkspacePolling";
+import { AgentHostsPage } from "./pages/AgentHostsPage";
 import { CrossWorkspaceDevWorkPage } from "./pages/CrossWorkspaceDevWorkPage";
 import { DesignWorkPage } from "./pages/DesignWorkPage";
 import { DevWorkPage } from "./pages/DevWorkPage";
@@ -43,15 +47,24 @@ type PageMeta = {
   description: string;
 };
 
+const DESKTOP_SIDEBAR_STORAGE_KEY = "cooagents.desktopSidebarCollapsed";
+
 const primaryNavItems: NavItem[] = [
   { to: "/", label: "总览", icon: LayoutDashboard, end: true },
   { to: "/workspaces", label: "Workspace", icon: FolderKanban },
 ];
 
 const operationsNavItems: NavItem[] = [
-  { to: "/dev-works", label: "跨 Workspace DevWork", icon: GitBranch },
+  { to: "/agent-hosts", label: "Agent Host 管理", icon: Server },
   { to: "/repos", label: "仓库注册表", icon: Database },
 ];
+
+function readSidebarCollapsedPreference() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return window.localStorage.getItem(DESKTOP_SIDEBAR_STORAGE_KEY) === "1";
+}
 
 function resolvePageMeta(pathname: string): PageMeta {
   if (pathname === "/") {
@@ -108,6 +121,15 @@ function resolvePageMeta(pathname: string): PageMeta {
     };
   }
 
+  if (pathname === "/agent-hosts") {
+    return {
+      title: "Agent Host 管理",
+      eyebrow: "执行基础设施",
+      description:
+        "登记执行节点、查看健康状态，并维护远端 Agent Host 配置。",
+    };
+  }
+
   if (pathname === "/repos") {
     return {
       title: "仓库注册表",
@@ -129,17 +151,29 @@ function resolvePageMeta(pathname: string): PageMeta {
   return { title: "", eyebrow: "", description: "" };
 }
 
-function ShellNavLink({ item, compact = false }: { item: NavItem; compact?: boolean }) {
+function ShellNavLink({
+  item,
+  compact = false,
+  collapsed = false,
+}: {
+  item: NavItem;
+  compact?: boolean;
+  collapsed?: boolean;
+}) {
   const Icon = item.icon;
 
   return (
     <NavLink
+      aria-label={item.label}
       end={item.end}
       to={item.to}
+      title={collapsed ? item.label : undefined}
       className={({ isActive }) => {
         const base = compact
           ? "inline-flex min-w-fit items-center gap-2 rounded-full border px-3 py-2 text-sm transition"
-          : "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition";
+          : collapsed
+            ? "flex size-11 items-center justify-center rounded-xl border text-sm transition"
+            : "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition";
         const state = isActive
           ? "border-[color:var(--color-ring-warm)] bg-panel text-copy shadow-[0_0_0_1px_var(--color-ring-warm)]"
           : "border-transparent text-muted hover:border-border hover:bg-panel-strong/60 hover:text-copy";
@@ -147,7 +181,7 @@ function ShellNavLink({ item, compact = false }: { item: NavItem; compact?: bool
       }}
     >
       <Icon className="size-4 shrink-0" strokeWidth={1.8} />
-      <span>{item.label}</span>
+      {!collapsed ? <span>{item.label}</span> : null}
     </NavLink>
   );
 }
@@ -173,51 +207,96 @@ function ShellLayout() {
   const meta = resolvePageMeta(pathname);
   const { user, logout } = useAuth();
   const polling = useWorkspacePolling();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
   const workspacesQuery = useSWR(["shell-workspaces", "active"], () => listWorkspaces("active"), polling);
   const recentWorkspaces = (workspacesQuery.data ?? []).slice(0, 5);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(
+        DESKTOP_SIDEBAR_STORAGE_KEY,
+        sidebarCollapsed ? "1" : "0",
+      );
+    }
+  }, [sidebarCollapsed]);
 
   return (
     <div className="min-h-screen bg-void text-copy">
       <div className="flex min-h-screen w-full gap-4 px-3 py-3 md:px-4 md:py-4">
-        <aside className="hidden w-[232px] shrink-0 flex-col rounded-2xl border border-border bg-panel p-4 shadow-whisper md:flex">
-          <div className="flex items-center gap-3 px-1 pb-2">
-            <div className="flex size-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
-              <Bot className="size-5" strokeWidth={1.9} />
+        <aside
+          className={`hidden shrink-0 flex-col rounded-2xl border border-border bg-panel shadow-whisper md:flex ${
+            sidebarCollapsed
+              ? "w-[88px] items-center px-3 py-4"
+              : "w-[232px] p-4"
+          }`}
+        >
+          <div
+            className={`flex w-full px-1 pb-2 ${
+              sidebarCollapsed
+                ? "flex-col items-center gap-3"
+                : "items-start justify-between gap-3"
+            }`}
+          >
+            <div className={`flex items-center ${sidebarCollapsed ? "justify-center" : "gap-3"}`}>
+              <div className="flex size-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
+                <Bot className="size-5" strokeWidth={1.9} />
+              </div>
+              {!sidebarCollapsed ? (
+                <div>
+                  <p className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">
+                    Cooagents
+                  </p>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-soft">
+                    Workspace 控制台
+                  </p>
+                </div>
+              ) : null}
             </div>
-            <div>
-              <p className="font-serif text-lg font-medium leading-tight tracking-tight text-copy">
-                Cooagents
-              </p>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-soft">
-                Workspace 控制台
-              </p>
-            </div>
+            <button
+              aria-expanded={!sidebarCollapsed}
+              aria-label={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
+              className="inline-flex size-9 items-center justify-center rounded-lg border border-border-strong bg-panel-strong/50 text-muted transition hover:border-accent/40 hover:text-accent"
+              onClick={() => setSidebarCollapsed((current) => !current)}
+              title={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
+              type="button"
+            >
+              {sidebarCollapsed ? (
+                <ChevronsRight className="size-4" strokeWidth={1.8} />
+              ) : (
+                <ChevronsLeft className="size-4" strokeWidth={1.8} />
+              )}
+            </button>
           </div>
 
-          <div className="mt-8 space-y-6">
+          <div className={`w-full ${sidebarCollapsed ? "mt-6 space-y-4" : "mt-8 space-y-6"}`}>
             <div>
-              <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
-                主导航
-              </p>
-              <nav className="flex flex-col gap-1">
+              {!sidebarCollapsed ? (
+                <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
+                  主导航
+                </p>
+              ) : null}
+              <nav className={`flex ${sidebarCollapsed ? "flex-col items-center gap-2" : "flex-col gap-1"}`}>
                 {primaryNavItems.map((item) => (
-                  <ShellNavLink key={item.to} item={item} />
+                  <ShellNavLink key={item.to} item={item} collapsed={sidebarCollapsed} />
                 ))}
               </nav>
             </div>
 
             <div>
-              <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
-                全局视图
-              </p>
-              <nav className="flex flex-col gap-1">
+              {!sidebarCollapsed ? (
+                <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
+                  全局资源
+                </p>
+              ) : null}
+              <nav className={`flex ${sidebarCollapsed ? "flex-col items-center gap-2" : "flex-col gap-1"}`}>
                 {operationsNavItems.map((item) => (
-                  <ShellNavLink key={item.to} item={item} />
+                  <ShellNavLink key={item.to} item={item} collapsed={sidebarCollapsed} />
                 ))}
               </nav>
             </div>
 
-            <div>
+            {!sidebarCollapsed ? (
+              <div>
               <div className="mb-2 flex items-center justify-between gap-2 px-1">
                 <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">
                   最近 Workspace
@@ -246,24 +325,45 @@ function ShellLayout() {
                   ))
                 )}
               </div>
-            </div>
+              </div>
+            ) : null}
           </div>
 
-          <div className="mt-auto space-y-3">
-            <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3 text-xs text-muted">
-              <div className="min-w-0 truncate">
-                <p className="text-[10px] uppercase tracking-[0.22em] text-muted-soft">已登录</p>
-                <p className="truncate text-sm text-copy">{user?.username ?? "-"}</p>
+          <div className="mt-auto w-full">
+            {sidebarCollapsed ? (
+              <div className="flex flex-col items-center gap-3">
+                <div
+                  className="flex size-10 items-center justify-center rounded-2xl border border-border bg-panel text-sm font-medium text-copy"
+                  title={user?.username ?? "-"}
+                >
+                  {(user?.username ?? "?").slice(0, 1).toUpperCase()}
+                </div>
+                <button
+                  aria-label="退出"
+                  className="inline-flex size-9 items-center justify-center rounded-lg border border-border-strong text-muted transition hover:border-accent/40 hover:text-accent"
+                  onClick={() => void logout()}
+                  title="退出"
+                  type="button"
+                >
+                  <LogOut className="size-4" strokeWidth={1.8} />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => void logout()}
-                className="inline-flex items-center gap-1 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
-              >
-                <LogOut className="size-3.5" strokeWidth={1.8} />
-                退出
-              </button>
-            </div>
+            ) : (
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3 text-xs text-muted">
+                <div className="min-w-0 truncate">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-muted-soft">已登录</p>
+                  <p className="truncate text-sm text-copy">{user?.username ?? "-"}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void logout()}
+                  className="inline-flex items-center gap-1 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
+                >
+                  <LogOut className="size-3.5" strokeWidth={1.8} />
+                  退出
+                </button>
+              </div>
+            )}
           </div>
         </aside>
 
@@ -321,6 +421,7 @@ const routes = [
       { path: "workspaces/:wsId", element: <WorkspaceDetailPage /> },
       { path: "workspaces/:wsId/design-works/:dwId", element: <DesignWorkPage /> },
       { path: "workspaces/:wsId/dev-works/:dvId", element: <DevWorkPage /> },
+      { path: "agent-hosts", element: <AgentHostsPage /> },
       { path: "dev-works", element: <CrossWorkspaceDevWorkPage /> },
       { path: "repos", element: <ReposPage /> },
       { path: "repos/:repoId", element: <RepoDetailPage /> },

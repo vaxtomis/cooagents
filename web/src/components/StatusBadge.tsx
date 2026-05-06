@@ -85,6 +85,7 @@ const STATUS_META: Record<string, { label: string; tone: StatusTone; className: 
   // Repo registry - fetch_status enum.
   unknown: muted("未知"),
   healthy: success("健康"),
+  unhealthy: danger("异常"),
   error: danger("失败"),
 
   // Repo push state (Phase 5 - dev_work_repos.push_state).

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RouterProvider } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "./auth/AuthContext";
@@ -38,6 +38,10 @@ vi.mock("./pages/CrossWorkspaceDevWorkPage", () => ({
   CrossWorkspaceDevWorkPage: () => <div>cross workspace dev works page</div>,
 }));
 
+vi.mock("./pages/AgentHostsPage", () => ({
+  AgentHostsPage: () => <div>agent hosts page</div>,
+}));
+
 vi.mock("./pages/ReposPage", () => ({
   ReposPage: () => <div>repos page</div>,
 }));
@@ -58,14 +62,14 @@ describe("App shell", () => {
   it("renders sidebar navigation and workspace-centric routes", async () => {
     const overviewLabel = "总览";
     const workspacesLabel = "Workspace";
-    const crossLabel = "跨 Workspace DevWork";
+    const agentHostsLabel = "Agent Host 管理";
     const repoRegistryLabel = "仓库注册表";
 
     const overview = renderAt("/");
     await waitFor(() => expect(screen.getByText("Cooagents")).toBeInTheDocument());
     expect(screen.getAllByRole("link", { name: overviewLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: workspacesLabel }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: crossLabel }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: agentHostsLabel }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: repoRegistryLabel }).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "运行总览" })).toBeInTheDocument();
     overview.unmount();
@@ -94,10 +98,21 @@ describe("App shell", () => {
     );
     dvDetail.unmount();
 
-    const cross = renderAt("/dev-works");
+    const hosts = renderAt("/agent-hosts");
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: crossLabel })).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: agentHostsLabel })).toBeInTheDocument(),
     );
-    cross.unmount();
+    hosts.unmount();
+  });
+
+  it("collapses and expands the desktop sidebar", async () => {
+    renderAt("/");
+    await waitFor(() => expect(screen.getByText("Cooagents")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "折叠侧栏" }));
+
+    expect(screen.getByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
+    expect(screen.queryByText("主导航")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "总览" }).length).toBeGreaterThan(0);
   });
 });

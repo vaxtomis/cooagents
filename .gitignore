@@ -29,3 +29,6 @@ AGENTS.md
 .trellis/tasks/*
 !.trellis/tasks/archive/
 !.trellis/tasks/archive/**
+
+ui
+output
