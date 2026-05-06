@@ -53,7 +53,8 @@ describe("WorkspaceDashboardPage", () => {
     renderPage();
 
     // active_workspaces rendered as zero-padded string
-    expect(await screen.findByText("03")).toBeInTheDocument();
+    const activeWorkspaces = await screen.findByText("03");
+    expect(activeWorkspaces).toBeInTheDocument();
     // 1.25.toFixed(2)
     expect(screen.getByText("1.25")).toBeInTheDocument();
     // 0.6667 * 100 rounded
@@ -63,6 +64,13 @@ describe("WorkspaceDashboardPage", () => {
 
     // getWorkspaceMetrics should be called exactly once for the dashboard load.
     expect(vi.mocked(getWorkspaceMetrics)).toHaveBeenCalledTimes(1);
+
+    for (const metricValue of ["03", "1.25", "67%", "2.5"]) {
+      const valueNode = screen.getByText(metricValue);
+      expect(valueNode).toHaveAttribute("data-hero-stat-value", "true");
+      expect(valueNode.className).toContain("text-copy");
+      expect(valueNode.className).not.toContain("ink-invert");
+    }
   });
 
   it("renders '-' placeholders while metrics are loading", async () => {

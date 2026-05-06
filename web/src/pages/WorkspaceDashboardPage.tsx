@@ -17,16 +17,19 @@ function HeroStat({
   caption: string;
 }) {
   return (
-    <section className="rounded-2xl border border-[color:var(--color-border-dark)] bg-[color:var(--color-panel-deep)] p-4 shadow-panel">
+    <section className="rounded-2xl border border-[color:var(--color-border-strong)] bg-[color:var(--color-panel-strong)] p-4 shadow-panel">
       <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-[color:var(--color-accent-soft)]">
         {title}
       </p>
       <div className="mt-3 flex items-end gap-4">
-        <div className="font-serif text-[2.6rem] font-medium leading-none tracking-tight text-[color:var(--color-ink-invert)] [font-variant-numeric:tabular-nums]">
+        <div
+          className="font-serif text-[2.6rem] font-medium leading-none tracking-normal text-copy [font-variant-numeric:tabular-nums]"
+          data-hero-stat-value="true"
+        >
           {value}
         </div>
       </div>
-      <p className="mt-3 max-w-md text-xs leading-relaxed text-[color:var(--color-ink-invert-soft)]">
+      <p className="mt-3 max-w-md text-xs leading-relaxed text-copy-soft">
         {caption}
       </p>
     </section>

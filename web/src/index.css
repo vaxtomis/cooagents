@@ -10,10 +10,10 @@
   --color-panel-strong: #181713;
   --color-panel-deep: #030302;
 
-  --color-copy: #d8d2c4;
-  --color-copy-soft: #aaa294;
-  --color-muted: #81786b;
-  --color-muted-soft: #5a5349;
+  --color-copy: #eee8da;
+  --color-copy-soft: #cbc2b4;
+  --color-muted: #ada393;
+  --color-muted-soft: #8e8577;
   --color-ink-invert: #0f0b05;
   --color-ink-invert-soft: #34220f;
 
@@ -252,6 +252,9 @@ h3 {
 [data-shell-tone="console"] {
   --console-edge: rgba(169, 112, 45, 0.42);
   --console-edge-strong: rgba(208, 160, 90, 0.58);
+  --console-gold-sheen: rgba(208, 160, 90, 0.06);
+  --console-gold-sheen-edge: rgba(208, 160, 90, 0.045);
+  --console-ornament-opacity: 0.18;
   --console-surface: linear-gradient(180deg, rgba(24, 23, 19, 0.97), rgba(10, 10, 8, 0.98));
   --console-surface-deep: linear-gradient(180deg, rgba(16, 16, 13, 0.98), rgba(4, 4, 3, 0.98));
 }
@@ -292,11 +295,11 @@ h3 {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(208, 160, 90, 0.16), transparent 10%, transparent 90%, rgba(208, 160, 90, 0.12)),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 18%),
-    repeating-linear-gradient(135deg, transparent 0 18px, rgba(169, 112, 45, 0.035) 18px 19px);
+    linear-gradient(90deg, var(--console-gold-sheen), transparent 10%, transparent 90%, var(--console-gold-sheen-edge)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%),
+    repeating-linear-gradient(135deg, transparent 0 22px, rgba(169, 112, 45, 0.014) 22px 23px);
   mix-blend-mode: screen;
-  opacity: 0.45;
+  opacity: var(--console-ornament-opacity);
 }
 
 [data-card-tone="console"],
@@ -311,7 +314,7 @@ h3 {
 [data-console-chrome] a[aria-current="page"],
 [data-segmented-tone="console"] [data-selected="true"] {
   border-color: var(--console-edge-strong);
-  background: linear-gradient(180deg, rgba(169, 112, 45, 0.28), rgba(48, 32, 16, 0.72));
+  background: linear-gradient(180deg, rgba(169, 112, 45, 0.16), rgba(48, 32, 16, 0.5));
   color: var(--color-copy);
   box-shadow:
     0 12px 28px rgba(0, 0, 0, 0.38),
