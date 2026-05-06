@@ -2,12 +2,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { archiveWorkspace, createWorkspace, listWorkspaces } from "../api/workspaces";
+import { archiveWorkspace, createWorkspace, listWorkspacePage } from "../api/workspaces";
 import { WorkspacesPage } from "./WorkspacesPage";
-import type { Workspace } from "../types";
+import type { Workspace, WorkspacePage } from "../types";
 
 vi.mock("../api/workspaces", () => ({
   listWorkspaces: vi.fn(),
+  listWorkspacePage: vi.fn(),
   createWorkspace: vi.fn(),
   archiveWorkspace: vi.fn(),
   syncWorkspaces: vi.fn(),
@@ -44,24 +45,29 @@ const workspace: Workspace = {
   updated_at: "2026-04-23T00:00:00Z",
 };
 
+const page: WorkspacePage = {
+  items: [workspace],
+  pagination: { limit: 12, offset: 0, total: 1, has_more: false },
+};
+
 describe("WorkspacesPage", () => {
-  it("renders workspaces from the API", async () => {
-    vi.mocked(listWorkspaces).mockResolvedValue([workspace]);
+  it("renders workspaces from the paginated API", async () => {
+    vi.mocked(listWorkspacePage).mockResolvedValue(page);
     renderPage();
     expect(await screen.findByText("Test Workspace")).toBeInTheDocument();
     expect(screen.getByText("test-workspace")).toBeInTheDocument();
   });
 
   it("creates a workspace and navigates to its detail page", async () => {
-    vi.mocked(listWorkspaces).mockResolvedValue([]);
+    vi.mocked(listWorkspacePage).mockResolvedValue({ items: [], pagination: { limit: 12, offset: 0, total: 0, has_more: false } });
     vi.mocked(createWorkspace).mockResolvedValue({ ...workspace, id: "ws-new" });
 
     renderPage();
-    await waitFor(() => expect(listWorkspaces).toHaveBeenCalled());
+    await waitFor(() => expect(listWorkspacePage).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "New WS" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New WS" } });
     fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "new-ws" } });
-    fireEvent.click(screen.getByRole("button", { name: "新建 Workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
 
     await waitFor(() => {
       expect(createWorkspace).toHaveBeenCalledWith({ title: "New WS", slug: "new-ws" });
@@ -72,25 +78,25 @@ describe("WorkspacesPage", () => {
   });
 
   it("shows inline validation error for invalid slug", async () => {
-    vi.mocked(listWorkspaces).mockResolvedValue([]);
+    vi.mocked(listWorkspacePage).mockResolvedValue({ items: [], pagination: { limit: 12, offset: 0, total: 0, has_more: false } });
     renderPage();
-    await waitFor(() => expect(listWorkspaces).toHaveBeenCalled());
+    await waitFor(() => expect(listWorkspacePage).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Bad" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Bad" } });
     fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "--nope--" } });
-    fireEvent.click(screen.getByRole("button", { name: "新建 Workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
 
     expect(await screen.findByText(/kebab-case/)).toBeInTheDocument();
     expect(createWorkspace).not.toHaveBeenCalled();
   });
 
   it("calls archiveWorkspace when the archive button is confirmed", async () => {
-    vi.mocked(listWorkspaces).mockResolvedValue([workspace]);
+    vi.mocked(listWorkspacePage).mockResolvedValue(page);
     vi.mocked(archiveWorkspace).mockResolvedValue();
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     renderPage();
-    const archiveBtn = await screen.findByRole("button", { name: "归档" });
+    const archiveBtn = await screen.findByRole("button", { name: "Archive" });
     fireEvent.click(archiveBtn);
 
     await waitFor(() => {

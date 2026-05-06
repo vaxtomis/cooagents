@@ -1,8 +1,33 @@
-import type { CreateDesignWorkPayload, DesignWork } from "../types";
+import type {
+  CreateDesignWorkPayload,
+  DesignWork,
+  DesignWorkPage,
+  DesignWorkState,
+} from "../types";
 import { apiFetch } from "./client";
 
 export async function listDesignWorks(workspaceId: string): Promise<DesignWork[]> {
   return apiFetch<DesignWork[]>("/design-works", { query: { workspace_id: workspaceId } });
+}
+
+export interface ListDesignWorkPageParams {
+  workspace_id: string;
+  state?: DesignWorkState;
+  query?: string;
+  sort?: "updated_desc" | "updated_asc" | "created_desc" | "created_asc";
+  limit?: number;
+  offset?: number;
+}
+
+export async function listDesignWorkPage(
+  params: ListDesignWorkPageParams,
+): Promise<DesignWorkPage> {
+  return apiFetch<DesignWorkPage>("/design-works", {
+    query: {
+      ...params,
+      paginate: true,
+    },
+  });
 }
 
 export async function getDesignWork(id: string): Promise<DesignWork> {

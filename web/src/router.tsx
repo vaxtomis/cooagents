@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
 } from "lucide-react";
+import useSWR from "swr";
 import {
   NavLink,
   Navigate,
@@ -17,6 +18,8 @@ import {
   useLocation,
 } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
+import { listWorkspaces } from "./api/workspaces";
+import { useWorkspacePolling } from "./hooks/useWorkspacePolling";
 import { CrossWorkspaceDevWorkPage } from "./pages/CrossWorkspaceDevWorkPage";
 import { DesignWorkPage } from "./pages/DesignWorkPage";
 import { DevWorkPage } from "./pages/DevWorkPage";
@@ -40,80 +43,86 @@ type PageMeta = {
   description: string;
 };
 
-const navItems: NavItem[] = [
-  { to: "/", label: "概览", icon: LayoutDashboard, end: true },
-  { to: "/workspaces", label: "工作区域", icon: FolderKanban },
-  { to: "/repos", label: "仓库注册表", icon: Database },
-  { to: "/dev-works", label: "跨区域 DevWorks", icon: GitBranch },
+const primaryNavItems: NavItem[] = [
+  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
+  { to: "/workspaces", label: "Workspaces", icon: FolderKanban },
+];
+
+const operationsNavItems: NavItem[] = [
+  { to: "/dev-works", label: "Cross-workspace DevWorks", icon: GitBranch },
+  { to: "/repos", label: "Repository Registry", icon: Database },
 ];
 
 function resolvePageMeta(pathname: string): PageMeta {
   if (pathname === "/") {
     return {
-      title: "概览",
-      eyebrow: "Workspace 仪表盘",
+      title: "Operations overview",
+      eyebrow: "Workspace pulse",
       description:
-        "活跃 Workspace、人工介入、一次性准出率与平均循环轮次的聚合视图。",
+        "Track active workspaces, intervention load, first-pass quality, and iteration depth from one compact control surface.",
     };
   }
 
   if (pathname === "/workspaces") {
     return {
-      title: "工作区域",
-      eyebrow: "Workspace 清单",
-      description: "创建、筛选、归档 Workspace；点击进入详情。",
+      title: "Workspace directory",
+      eyebrow: "Primary context",
+      description:
+        "Create, filter, and reopen workspaces. This remains the primary entry point for design work, development work, and activity review.",
     };
   }
 
   if (/^\/workspaces\/[^/]+\/design-works\/[^/]+$/.test(pathname)) {
     return {
-      title: "DesignWork 详情",
-      eyebrow: "设计工作",
+      title: "Design work detail",
+      eyebrow: "Workspace execution",
       description:
-        "查看 D0-D7 流程、missing_sections、设计文档预览、tick/cancel 操作以及审核历史。",
+        "Inspect state progression, design-doc output, validation gaps, and review history for a single design work item.",
     };
   }
 
   if (/^\/workspaces\/[^/]+\/dev-works\/[^/]+$/.test(pathname)) {
     return {
-      title: "DevWork 详情",
-      eyebrow: "开发工作",
+      title: "Development work detail",
+      eyebrow: "Workspace execution",
       description:
-        "Step1-5 进度、迭代设计文件、审核历史与闸门操作面板。",
+        "Inspect progress, notes, reviews, and gate actions for a single development work item.",
     };
   }
 
   if (/^\/workspaces\/[^/]+$/.test(pathname)) {
     return {
-      title: "Workspace 详情",
-      eyebrow: "设计 / 开发 / 事件",
+      title: "Workspace detail",
+      eyebrow: "Design / develop / events",
       description:
-        "管理 DesignWork、DesignDoc、DevWork 与工作区事件。",
+        "Operate a single workspace with paged design work, development work, and event streams from one panel.",
     };
   }
 
   if (pathname === "/dev-works") {
     return {
-      title: "跨区域 DevWorks",
-      eyebrow: "跨 Workspace 视图",
-      description: "按 Workspace 分组展示所有 DevWork，仅供浏览。",
+      title: "Cross-workspace DevWorks",
+      eyebrow: "Secondary operation",
+      description:
+        "Scan development work across active workspaces without leaving the workspace-first shell.",
     };
   }
 
   if (pathname === "/repos") {
     return {
-      title: "仓库注册表",
-      eyebrow: "Repo Registry",
+      title: "Repository registry",
+      eyebrow: "Shared infrastructure",
       description:
-        "查看与管理已注册仓库的 fetch 健康状态、立即触发 fetch、从 config/repos.yaml 同步。",
+        "Manage registered repositories, fetch health, and repo metadata without losing track of workspace context.",
     };
   }
 
   if (/^\/repos\/[^/]+$/.test(pathname)) {
     return {
-      title: "仓库详情",
-      eyebrow: "Branches / Tree / Log",
-      description: "通过 bare clone 浏览分支、目录、文件与提交日志。",
+      title: "Repository detail",
+      eyebrow: "Inspector",
+      description:
+        "Browse branches, trees, and commit history through the healthy bare clone contract.",
     };
   }
 
@@ -149,7 +158,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-void text-muted">
-        <span className="text-sm">加载会话...</span>
+        <span className="text-sm">Loading session...</span>
       </div>
     );
   }
@@ -163,11 +172,14 @@ function ShellLayout() {
   const { pathname } = useLocation();
   const meta = resolvePageMeta(pathname);
   const { user, logout } = useAuth();
+  const polling = useWorkspacePolling();
+  const workspacesQuery = useSWR(["shell-workspaces", "active"], () => listWorkspaces("active"), polling);
+  const recentWorkspaces = (workspacesQuery.data ?? []).slice(0, 5);
 
   return (
     <div className="min-h-screen bg-void text-copy">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1280px] gap-6 px-4 py-5 md:px-8 md:py-8">
-        <aside className="hidden w-[256px] shrink-0 flex-col rounded-[32px] border border-border bg-panel p-6 shadow-whisper md:flex">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1360px] gap-6 px-4 py-5 md:px-8 md:py-8">
+        <aside className="hidden w-[286px] shrink-0 flex-col rounded-[32px] border border-border bg-panel p-6 shadow-whisper md:flex">
           <div className="flex items-center gap-3 px-1 pb-2">
             <div className="flex size-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
               <Bot className="size-5" strokeWidth={1.9} />
@@ -177,29 +189,78 @@ function ShellLayout() {
                 Cooagents
               </p>
               <p className="text-[11px] uppercase tracking-[0.18em] text-muted-soft">
-                运维控制台
+                Workspace control plane
               </p>
             </div>
           </div>
 
-          <nav className="mt-8 flex flex-col gap-1">
-            {navItems.map((item) => (
-              <ShellNavLink key={item.to} item={item} />
-            ))}
-          </nav>
+          <div className="mt-8 space-y-6">
+            <div>
+              <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
+                Primary
+              </p>
+              <nav className="flex flex-col gap-1">
+                {primaryNavItems.map((item) => (
+                  <ShellNavLink key={item.to} item={item} />
+                ))}
+              </nav>
+            </div>
+
+            <div>
+              <p className="mb-2 px-1 text-[11px] uppercase tracking-[0.22em] text-muted-soft">
+                Operations
+              </p>
+              <nav className="flex flex-col gap-1">
+                {operationsNavItems.map((item) => (
+                  <ShellNavLink key={item.to} item={item} />
+                ))}
+              </nav>
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">
+                  Recent workspaces
+                </p>
+                <span className="text-[11px] text-muted-soft">
+                  {workspacesQuery.data ? recentWorkspaces.length : "..."}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {recentWorkspaces.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border bg-panel-strong/35 px-4 py-4 text-xs text-muted">
+                    No active workspaces yet.
+                  </div>
+                ) : (
+                  recentWorkspaces.map((workspace) => (
+                    <NavLink
+                      key={workspace.id}
+                      to={`/workspaces/${workspace.id}`}
+                      className="block rounded-2xl border border-border bg-panel-strong/55 px-4 py-3 transition hover:border-accent/30"
+                    >
+                      <p className="truncate text-sm font-medium text-copy">{workspace.title}</p>
+                      <p className="mt-1 truncate font-mono text-[11px] text-muted">
+                        {workspace.slug}
+                      </p>
+                    </NavLink>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
 
           <div className="mt-auto space-y-3">
             <div className="rounded-2xl border border-border-strong bg-panel-strong/40 p-4 text-sm text-muted">
               <p className="font-serif text-base font-medium leading-snug text-copy">
-                Workspace 驱动的运维节奏
+                Workspace-first cadence
               </p>
               <p className="mt-2 leading-relaxed">
-                概览、工作区域与跨区域 DevWorks 共享同一刷新节律。
+                Shared list behavior now favors compact scanning, explicit paging, and recent workspace recall over oversized hero chrome.
               </p>
             </div>
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-panel px-4 py-3 text-xs text-muted">
               <div className="min-w-0 truncate">
-                <p className="text-[10px] uppercase tracking-[0.22em] text-muted-soft">已登录</p>
+                <p className="text-[10px] uppercase tracking-[0.22em] text-muted-soft">Signed in</p>
                 <p className="truncate text-sm text-copy">{user?.username ?? "-"}</p>
               </div>
               <button
@@ -208,36 +269,36 @@ function ShellLayout() {
                 className="inline-flex items-center gap-1 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
               >
                 <LogOut className="size-3.5" strokeWidth={1.8} />
-                退出
+                Sign out
               </button>
             </div>
           </div>
         </aside>
 
         <div className="flex min-h-[calc(100vh-2rem)] flex-1 flex-col gap-6">
-          <header className="overflow-hidden rounded-[32px] border border-border bg-panel px-6 py-10 shadow-whisper md:px-12 md:py-12">
-            <div className="flex flex-col gap-6">
+          <header className="overflow-hidden rounded-[32px] border border-border bg-panel px-6 py-6 shadow-whisper md:px-10">
+            <div className="flex flex-col gap-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-accent">
                     {meta.eyebrow}
                   </p>
-                  <h1 className="mt-3 font-serif text-[2.5rem] font-medium leading-[1.15] tracking-tight text-copy md:text-[3.25rem]">
+                  <h1 className="mt-2 font-serif text-[2rem] font-medium leading-[1.15] tracking-tight text-copy md:text-[2.35rem]">
                     {meta.title}
                   </h1>
-                  <p className="mt-5 max-w-2xl text-[15px] leading-relaxed text-muted md:text-base">
+                  <p className="mt-3 max-w-3xl text-[15px] leading-relaxed text-muted md:text-base">
                     {meta.description}
                   </p>
                 </div>
 
                 <div className="hidden shrink-0 items-center gap-2 rounded-lg border border-border-strong bg-panel-strong/50 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-muted md:flex">
                   <span className="size-1.5 rounded-full bg-success" />
-                  在线
+                  Live
                 </div>
               </div>
 
               <nav className="flex gap-2 overflow-x-auto pb-1 md:hidden">
-                {navItems.map((item) => (
+                {[...primaryNavItems, ...operationsNavItems].map((item) => (
                   <ShellNavLink key={item.to} item={item} compact />
                 ))}
               </nav>

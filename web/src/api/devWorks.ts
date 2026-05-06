@@ -1,8 +1,28 @@
-import type { CreateDevWorkPayload, DevWork } from "../types";
+import type { CreateDevWorkPayload, DevWork, DevWorkPage, DevWorkStep } from "../types";
 import { apiFetch } from "./client";
 
 export async function listDevWorks(workspaceId: string): Promise<DevWork[]> {
   return apiFetch<DevWork[]>("/dev-works", { query: { workspace_id: workspaceId } });
+}
+
+export interface ListDevWorkPageParams {
+  workspace_id: string;
+  step?: DevWorkStep;
+  query?: string;
+  sort?: "updated_desc" | "updated_asc" | "created_desc" | "created_asc";
+  limit?: number;
+  offset?: number;
+}
+
+export async function listDevWorkPage(
+  params: ListDevWorkPageParams,
+): Promise<DevWorkPage> {
+  return apiFetch<DevWorkPage>("/dev-works", {
+    query: {
+      ...params,
+      paginate: true,
+    },
+  });
 }
 
 export async function getDevWork(id: string): Promise<DevWork> {

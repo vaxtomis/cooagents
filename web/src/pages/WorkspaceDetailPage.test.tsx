@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   DesignDoc,
   DesignWork,
+  DesignWorkPage,
   DevWork,
+  DevWorkPage,
   Repo,
   RepoBranches,
   Workspace,
@@ -19,6 +21,7 @@ vi.mock("../api/workspaces", () => ({
 }));
 vi.mock("../api/designWorks", () => ({
   listDesignWorks: vi.fn(),
+  listDesignWorkPage: vi.fn(),
   createDesignWork: vi.fn(),
 }));
 vi.mock("../api/designDocs", () => ({
@@ -26,6 +29,7 @@ vi.mock("../api/designDocs", () => ({
 }));
 vi.mock("../api/devWorks", () => ({
   listDevWorks: vi.fn(),
+  listDevWorkPage: vi.fn(),
   createDevWork: vi.fn(),
 }));
 vi.mock("../api/workspaceEvents", () => ({
@@ -33,6 +37,7 @@ vi.mock("../api/workspaceEvents", () => ({
 }));
 vi.mock("../api/repos", () => ({
   listRepos: vi.fn(),
+  listRepoPage: vi.fn(),
   getRepo: vi.fn(),
   createRepo: vi.fn(),
   updateRepo: vi.fn(),
@@ -43,12 +48,13 @@ vi.mock("../api/repos", () => ({
   repoTree: vi.fn(),
   repoBlob: vi.fn(),
   repoLog: vi.fn(),
+  repoLogPage: vi.fn(),
 }));
 
 import { getWorkspace } from "../api/workspaces";
-import { createDesignWork, listDesignWorks } from "../api/designWorks";
+import { createDesignWork, listDesignWorkPage } from "../api/designWorks";
 import { listDesignDocs } from "../api/designDocs";
-import { createDevWork, listDevWorks } from "../api/devWorks";
+import { createDevWork, listDevWorkPage } from "../api/devWorks";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
 import { listRepos, repoBranches } from "../api/repos";
 
@@ -145,9 +151,19 @@ const designDoc: DesignDoc = {
   published_at: "2026-04-02T00:00:00Z",
 };
 
+const designPage: DesignWorkPage = {
+  items: [designWork],
+  pagination: { limit: 6, offset: 0, total: 1, has_more: false },
+};
+
+const devPage: DevWorkPage = {
+  items: [devWork],
+  pagination: { limit: 6, offset: 0, total: 1, has_more: false },
+};
+
 const eventsEnvelope: WorkspaceEventsEnvelope = {
   events: [],
-  pagination: { limit: 50, offset: 0, has_more: false },
+  pagination: { limit: 20, offset: 0, total: 0, has_more: false },
 };
 
 function renderPage() {
@@ -165,56 +181,48 @@ function renderPage() {
 describe("WorkspaceDetailPage", () => {
   it("renders workspace header and switchable tabs", async () => {
     vi.mocked(getWorkspace).mockResolvedValue(workspace);
-    vi.mocked(listDesignWorks).mockResolvedValue([designWork]);
+    vi.mocked(listDesignWorkPage).mockResolvedValue(designPage);
     vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
-    vi.mocked(listDevWorks).mockResolvedValue([devWork]);
+    vi.mocked(listDevWorkPage).mockResolvedValue(devPage);
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
 
     renderPage();
 
     expect(await screen.findByText("WS")).toBeInTheDocument();
-    // DesignDoc "feature@1.0.0" renders as three sibling text nodes (slug, '@', version).
-    // Use findAllByText with a regex to tolerate multiple matches (path + slug).
     const matches = await screen.findAllByText(/feature/);
     expect(matches.length).toBeGreaterThan(0);
-    // All three tab buttons exist.
-    expect(screen.getByRole("tab", { name: "设计工作" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "开发工作" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "事件" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Design work" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Development work" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Events" })).toBeInTheDocument();
   });
 
   it("DevWork form rejects empty repo_refs and never calls createDevWork", async () => {
     vi.mocked(getWorkspace).mockResolvedValue(workspace);
-    vi.mocked(listDesignWorks).mockResolvedValue([]);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
-    vi.mocked(listDevWorks).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
     vi.mocked(repoBranches).mockResolvedValue(branchesMain);
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
-    fireEvent.click(await screen.findByRole("button", { name: "新建 DevWork" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Development work" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New development work" }));
 
-    // Pick the DesignDoc.
-    const docSelect = await screen.findByDisplayValue("请选择");
+    const docSelect = await screen.findByDisplayValue("Select one");
     fireEvent.change(docSelect, { target: { value: "doc-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
-    // Submit without picking any repo — the editor is rendered with one
-    // empty placeholder row that stays excluded from `value` because it has
-    // no real fields, so the parent form should see `repo_refs.length === 0`.
-    fireEvent.click(screen.getByRole("button", { name: "提交" }));
-
-    expect(await screen.findByText(/请至少添加一个仓库/)).toBeInTheDocument();
+    expect(await screen.findByText(/Add at least one repository/)).toBeInTheDocument();
     expect(createDevWork).not.toHaveBeenCalled();
   });
 
   it("DevWork form posts repo_refs[] when a repo + branch is selected", async () => {
     vi.mocked(getWorkspace).mockResolvedValue(workspace);
-    vi.mocked(listDesignWorks).mockResolvedValue([]);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
-    vi.mocked(listDevWorks).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
     vi.mocked(repoBranches).mockResolvedValue(branchesMain);
@@ -222,26 +230,24 @@ describe("WorkspaceDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
-    fireEvent.click(await screen.findByRole("button", { name: "新建 DevWork" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Development work" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New development work" }));
 
-    const docSelect = await screen.findByDisplayValue("请选择");
+    const docSelect = await screen.findByDisplayValue("Select one");
     fireEvent.change(docSelect, { target: { value: "doc-1" } });
 
-    // Pick a repo (auto-seeds mount_name).
-    const repoSelect = await screen.findByLabelText("仓库选择 #1");
+    const selects = await screen.findAllByRole("combobox");
+    const repoSelect = selects[1];
     fireEvent.change(repoSelect, { target: { value: "repo-aaa111" } });
 
-    // Pick a branch (lazy-loaded after repo selection).
-    const branchSelect = await screen.findByLabelText("base_branch #1");
     await waitFor(() => expect(repoBranches).toHaveBeenCalled());
+    const branchSelect = (await screen.findAllByRole("combobox"))[2];
     fireEvent.change(branchSelect, { target: { value: "main" } });
 
-    // Fill prompt.
     const promptArea = screen.getByLabelText("DevWork prompt");
     fireEvent.change(promptArea, { target: { value: "ship feature x" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
       expect(createDevWork).toHaveBeenCalledWith(
@@ -263,92 +269,77 @@ describe("WorkspaceDetailPage", () => {
 
   it("DevWork form blocks submit when two rows share a mount_name", async () => {
     vi.mocked(getWorkspace).mockResolvedValue(workspace);
-    vi.mocked(listDesignWorks).mockResolvedValue([]);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
-    vi.mocked(listDevWorks).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     vi.mocked(listRepos).mockResolvedValue([repoFrontend, repoBackend]);
     vi.mocked(repoBranches).mockResolvedValue(branchesMain);
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
-    fireEvent.click(await screen.findByRole("button", { name: "新建 DevWork" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Development work" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New development work" }));
 
-    const docSelect = await screen.findByDisplayValue("请选择");
+    const docSelect = await screen.findByDisplayValue("Select one");
     fireEvent.change(docSelect, { target: { value: "doc-1" } });
 
-    const repoSelect1 = await screen.findByLabelText("仓库选择 #1");
-    fireEvent.change(repoSelect1, { target: { value: "repo-aaa111" } });
+    let selects = await screen.findAllByRole("combobox");
+    fireEvent.change(selects[1], { target: { value: "repo-aaa111" } });
 
     fireEvent.click(screen.getByRole("button", { name: /添加仓库/ }));
-    const repoSelect2 = await screen.findByLabelText("仓库选择 #2");
-    fireEvent.change(repoSelect2, { target: { value: "repo-bbb222" } });
+    selects = await screen.findAllByRole("combobox");
+    fireEvent.change(selects[3], { target: { value: "repo-bbb222" } });
 
-    // Force both rows to use the same mount_name.
     const mount2 = await screen.findByLabelText("mount_name #2");
     fireEvent.change(mount2, { target: { value: "frontend" } });
 
-    // Both branches set so the only blocker is the duplicate.
     await waitFor(() => expect(repoBranches).toHaveBeenCalled());
-    const branch1 = screen.getByLabelText("base_branch #1");
-    fireEvent.change(branch1, { target: { value: "main" } });
-    const branch2 = screen.getByLabelText("base_branch #2");
-    fireEvent.change(branch2, { target: { value: "main" } });
+    selects = await screen.findAllByRole("combobox");
+    fireEvent.change(selects[2], { target: { value: "main" } });
+    fireEvent.change(selects[4], { target: { value: "main" } });
 
-    const promptArea = screen.getByLabelText("DevWork prompt");
-    fireEvent.change(promptArea, { target: { value: "x" } });
+    fireEvent.change(screen.getByLabelText("DevWork prompt"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "提交" }));
-
-    expect(
-      await screen.findByText(/mount_name "frontend" 重复/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/mount_name "frontend" is duplicated/)).toBeInTheDocument();
     expect(createDevWork).not.toHaveBeenCalled();
   });
 
   it("DesignWork repo binding starts collapsed", async () => {
     vi.mocked(getWorkspace).mockResolvedValue(workspace);
-    vi.mocked(listDesignWorks).mockResolvedValue([]);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listDesignDocs).mockResolvedValue([]);
-    vi.mocked(listDevWorks).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "新建 DesignWork" }));
-    const toggle = await screen.findByRole("button", {
-      name: /添加仓库绑定（可选）/,
-    });
+    fireEvent.click(await screen.findByRole("button", { name: "New design work" }));
+    const toggle = await screen.findByRole("button", { name: /Attach repositories/ });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByLabelText("仓库选择 #1")).toBeNull();
+    expect(screen.queryByLabelText("浠撳簱閫夋嫨 #1")).toBeNull();
   });
 
   it("DesignWork form omits repo_refs when disclosure stays closed", async () => {
     vi.mocked(getWorkspace).mockResolvedValue(workspace);
-    vi.mocked(listDesignWorks).mockResolvedValue([]);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listDesignDocs).mockResolvedValue([]);
-    vi.mocked(listDevWorks).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
     vi.mocked(createDesignWork).mockResolvedValue(designWork);
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "新建 DesignWork" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New design work" }));
 
-    fireEvent.change(screen.getByLabelText("标题"), {
-      target: { value: "Hello" },
-    });
-    fireEvent.change(screen.getByLabelText("Slug"), {
-      target: { value: "feature-x" },
-    });
-    fireEvent.change(screen.getByLabelText("用户输入"), {
-      target: { value: "do something" },
-    });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Hello" } });
+    fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "feature-x" } });
+    fireEvent.change(screen.getByLabelText("Brief"), { target: { value: "do something" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
       expect(createDesignWork).toHaveBeenCalledWith(

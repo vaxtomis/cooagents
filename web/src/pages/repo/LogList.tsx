@@ -1,67 +1,76 @@
-import useSWR from "swr";
 import { GitCommit } from "lucide-react";
-import { repoLog } from "../../api/repos";
+import { useEffect, useState } from "react";
+import useSWR from "swr";
+import { repoLogPage } from "../../api/repos";
+import { PaginationControls } from "../../components/PaginationControls";
 import { EmptyState } from "../../components/SectionPanel";
-import type { RepoLog } from "../../types";
+import type { RepoLogPage } from "../../types";
 
 interface Props {
   repoId: string;
   gitRef: string;
 }
 
-const LOG_LIMIT = 50;
+const LOG_LIMIT = 20;
 
 export function LogList({ repoId, gitRef }: Props) {
-  const query = useSWR<RepoLog>(
-    gitRef ? ["repo-log", repoId, gitRef] : null,
-    () => repoLog(repoId, { ref: gitRef, limit: LOG_LIMIT }),
+  const [offset, setOffset] = useState(0);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [gitRef]);
+
+  const query = useSWR<RepoLogPage>(
+    gitRef ? ["repo-log-page", repoId, gitRef, offset] : null,
+    () => repoLogPage(repoId, { ref: gitRef, limit: LOG_LIMIT, offset }),
   );
 
   if (query.error) {
     return (
       <p className="rounded-2xl border border-danger/15 bg-danger/8 p-3 text-xs text-danger">
-        提交日志加载失败：
-        {String((query.error as Error).message ?? query.error)}
+        Commit log failed to load: {String((query.error as Error).message ?? query.error)}
       </p>
     );
   }
+
   if (!query.data) {
     return (
       <ul className="space-y-1">
         {Array.from({ length: 6 }, (_, index) => (
-          <li
-            className="h-9 animate-pulse rounded-md bg-panel-strong/70"
-            key={index}
-          />
+          <li key={index} className="h-9 animate-pulse rounded-md bg-panel-strong/70" />
         ))}
       </ul>
     );
   }
-  if (query.data.entries.length === 0) {
-    return <EmptyState copy="该 ref 下无提交。" />;
+
+  if (query.data.items.length === 0) {
+    return <EmptyState copy="No commits were found for the selected ref." />;
   }
+
   return (
-    <ul className="space-y-2">
-      {query.data.entries.map((entry) => (
-        <li
-          className="flex flex-wrap items-baseline gap-3 rounded-md border border-border bg-panel-strong/50 px-3 py-2 text-xs text-copy"
-          key={entry.sha}
-        >
-          <GitCommit className="size-3.5 shrink-0 text-accent" strokeWidth={1.8} />
-          <span className="font-mono text-muted-soft">
-            {entry.sha.slice(0, 12)}
-          </span>
-          <span className="min-w-0 flex-1 truncate">{entry.subject}</span>
-          <span className="text-muted-soft">
-            {entry.author} · {entry.committed_at}
-          </span>
-        </li>
-      ))}
-      {query.data.entries.length === LOG_LIMIT && (
-        <li className="px-2 py-1 text-[11px] text-muted-soft">
-          仅显示最近 {LOG_LIMIT} 条。
-        </li>
-      )}
-    </ul>
+    <div className="space-y-3">
+      <ul className="space-y-2">
+        {query.data.items.map((entry) => (
+          <li
+            key={entry.sha}
+            className="flex flex-wrap items-baseline gap-3 rounded-md border border-border bg-panel-strong/50 px-3 py-2 text-xs text-copy"
+          >
+            <GitCommit className="size-3.5 shrink-0 text-accent" strokeWidth={1.8} />
+            <span className="font-mono text-muted-soft">{entry.sha.slice(0, 12)}</span>
+            <span className="min-w-0 flex-1 truncate">{entry.subject}</span>
+            <span className="text-muted-soft">
+              {entry.author} / {entry.committed_at}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <PaginationControls
+        pagination={query.data.pagination}
+        itemLabel="Commits"
+        onPageChange={setOffset}
+        disabled={query.isLoading}
+      />
+    </div>
   );
 }

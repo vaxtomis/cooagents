@@ -1,17 +1,19 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import useSWR from "swr";
-import { createDesignWork, listDesignWorks } from "../api/designWorks";
+import { createDesignWork, listDesignWorkPage } from "../api/designWorks";
 import { listDesignDocs } from "../api/designDocs";
-import { createDevWork, listDevWorks } from "../api/devWorks";
+import { createDevWork, listDevWorkPage } from "../api/devWorks";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
 import { archiveWorkspace, getWorkspace } from "../api/workspaces";
+import { PaginationControls } from "../components/PaginationControls";
 import { EmptyState, SectionPanel } from "../components/SectionPanel";
 import {
   MOUNT_NAME_RE,
   RepoRefsEditor,
   type RepoRefsEditorRow,
 } from "../components/RepoRefsEditor";
+import { SegmentedControl } from "../components/SegmentedControl";
 import { StatusBadge } from "../components/StatusBadge";
 import { useWorkspacePolling } from "../hooks/useWorkspacePolling";
 import { extractError } from "../lib/extractError";
@@ -26,16 +28,16 @@ import type {
 } from "../types";
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9]|-(?!-)){0,61}[a-z0-9]$|^[a-z0-9]$/;
-const EVENTS_PAGE_SIZE = 50;
-const EVENTS_MAX_LIMIT = 200;
+const WORK_ITEM_PAGE_SIZE = 6;
+const EVENTS_PAGE_SIZE = 20;
 
 const TAB_IDS = ["designs", "devworks", "events"] as const;
 type TabId = (typeof TAB_IDS)[number];
 
 const TAB_LABELS: Record<TabId, string> = {
-  designs: "设计工作",
-  devworks: "开发工作",
-  events: "事件",
+  designs: "Design work",
+  devworks: "Development work",
+  events: "Events",
 };
 
 function DesignWorkRow({ workspaceId, dw }: { workspaceId: string; dw: DesignWork }) {
@@ -48,9 +50,9 @@ function DesignWorkRow({ workspaceId, dw }: { workspaceId: string; dw: DesignWor
         <p className="truncate font-medium text-copy">{dw.title ?? dw.sub_slug ?? dw.id}</p>
         <StatusBadge status={dw.current_state} />
       </div>
-      <p className="text-xs text-muted">mode={dw.mode} · loop={dw.loop}</p>
+      <p className="text-xs text-muted">Mode {dw.mode} / Loop {dw.loop}</p>
       {dw.output_design_doc_id ? (
-        <p className="truncate font-mono text-[11px] text-muted">doc: {dw.output_design_doc_id}</p>
+        <p className="truncate font-mono text-[11px] text-muted">Doc {dw.output_design_doc_id}</p>
       ) : null}
     </Link>
   );
@@ -70,7 +72,7 @@ function DesignDocRow({ doc }: { doc: DesignDoc }) {
       </div>
       {doc.needs_frontend_mockup ? (
         <p className="mt-3 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1 text-[11px] text-warning">
-          需要前端 mockup
+          Frontend mockup required
         </p>
       ) : null}
     </article>
@@ -100,21 +102,23 @@ function DesignWorkCreateForm({
     const trimmedTitle = title.trim();
     const trimmedSlug = slug.trim();
     const trimmedInput = userInput.trim();
-    if (!trimmedTitle) return setError("请填写标题");
-    if (!SLUG_RE.test(trimmedSlug)) return setError("slug 必须为 kebab-case");
-    if (trimmedInput.length === 0) return setError("请填写用户输入");
+    if (!trimmedTitle) return setError("Title is required");
+    if (!SLUG_RE.test(trimmedSlug)) return setError("Slug must be kebab-case");
+    if (trimmedInput.length === 0) return setError("Brief is required");
+
     let designRefs: RepoRef[] | undefined;
     if (showRepos && repoRefs.length > 0) {
       for (const row of repoRefs) {
         if (!row.repo_id || !row.base_branch) {
-          return setError("请为每个仓库选择仓库与 base_branch");
+          return setError("Every linked repository needs a repo and base branch");
         }
       }
-      designRefs = repoRefs.map((r) => ({
-        repo_id: r.repo_id,
-        base_branch: r.base_branch,
+      designRefs = repoRefs.map((row) => ({
+        repo_id: row.repo_id,
+        base_branch: row.base_branch,
       }));
     }
+
     setError(null);
     setSubmitting(true);
     try {
@@ -137,7 +141,7 @@ function DesignWorkCreateForm({
       setOpen(false);
       onCreated(created);
     } catch (err) {
-      setError(extractError(err, "创建失败"));
+      setError(extractError(err, "Failed to create design work"));
     } finally {
       setSubmitting(false);
     }
@@ -146,11 +150,11 @@ function DesignWorkCreateForm({
   if (!open) {
     return (
       <button
-        className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs font-medium text-copy transition hover:border-accent/40 hover:text-accent"
-        onClick={() => setOpen(true)}
         type="button"
+        onClick={() => setOpen(true)}
+        className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs font-medium text-copy transition hover:border-accent/40 hover:text-accent"
       >
-        新建 DesignWork
+        New design work
       </button>
     );
   }
@@ -159,88 +163,92 @@ function DesignWorkCreateForm({
     <form className="space-y-3 rounded-2xl border border-border bg-panel-strong/60 p-4" onSubmit={submit}>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-1 text-xs text-muted">
-          <span>标题</span>
+          <span>Title</span>
           <input
             className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm text-copy outline-none"
-            onChange={(event) => setTitle(event.target.value)}
             value={title}
+            onChange={(event) => setTitle(event.target.value)}
           />
         </label>
         <label className="space-y-1 text-xs text-muted">
           <span>Slug</span>
           <input
             className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 font-mono text-sm text-copy outline-none"
-            onChange={(event) => setSlug(event.target.value.toLowerCase())}
-            placeholder="feature-foo"
             value={slug}
+            placeholder="feature-x"
+            onChange={(event) => setSlug(event.target.value.toLowerCase())}
           />
         </label>
       </div>
+
       <label className="block space-y-1 text-xs text-muted">
-        <span>用户输入</span>
+        <span>Brief</span>
         <textarea
           className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm text-copy outline-none"
-          onChange={(event) => setUserInput(event.target.value)}
-          rows={4}
           value={userInput}
+          rows={4}
+          onChange={(event) => setUserInput(event.target.value)}
         />
       </label>
+
       <div className="grid gap-3 md:grid-cols-2">
         <label className="flex items-center gap-2 text-xs text-muted">
           <input
+            type="checkbox"
             checked={needsFrontendMockup}
             onChange={(event) => setNeedsFrontendMockup(event.target.checked)}
-            type="checkbox"
           />
-          <span>需要前端 mockup</span>
+          <span>Needs frontend mockup</span>
         </label>
         <label className="space-y-1 text-xs text-muted">
           <span>Agent</span>
           <select
             className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none [&_option]:bg-panel-strong"
-            onChange={(event) => setAgent(event.target.value as AgentKind)}
             value={agent}
+            onChange={(event) => setAgent(event.target.value as AgentKind)}
           >
             <option value="claude">Claude</option>
             <option value="codex">Codex</option>
           </select>
         </label>
       </div>
+
       <div className="space-y-2">
         <button
-          aria-expanded={showRepos}
-          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
-          onClick={() => setShowRepos((v) => !v)}
           type="button"
+          aria-expanded={showRepos}
+          onClick={() => setShowRepos((value) => !value)}
+          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
         >
           {showRepos
-            ? "收起仓库绑定"
+            ? "Hide repository bindings"
             : repoRefs.length > 0
-              ? `添加仓库绑定（已配置 ${repoRefs.length} 行，需展开后才会提交）`
-              : "添加仓库绑定（可选）"}
+              ? `Attach repositories (${repoRefs.length} configured)`
+              : "Attach repositories (optional)"}
         </button>
         {showRepos ? (
           <RepoRefsEditor minRows={0} mode="design" onChange={setRepoRefs} value={repoRefs} />
         ) : null}
       </div>
-      <div className="space-y-1">
-        <p className="text-[11px] text-muted-soft">v1 仅支持 mode=new（新增设计）。</p>
-      </div>
+
+      <p className="text-[11px] text-muted-soft">This flow currently creates new design work items only.</p>
+
       {error ? <p className="text-xs text-danger">{error}</p> : null}
+
       <div className="flex gap-2">
         <button
-          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] disabled:opacity-60"
-          disabled={submitting}
           type="submit"
+          disabled={submitting}
+          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] disabled:opacity-60"
         >
-          {submitting ? "创建中..." : "提交"}
+          {submitting ? "Creating..." : "Submit"}
         </button>
         <button
-          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:text-copy"
-          onClick={() => setOpen(false)}
           type="button"
+          onClick={() => setOpen(false)}
+          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:text-copy"
         >
-          取消
+          Cancel
         </button>
       </div>
     </form>
@@ -258,9 +266,9 @@ function DevWorkRow({ workspaceId, dv }: { workspaceId: string; dv: DevWork }) {
         <StatusBadge status={dv.current_step} />
       </div>
       <p className="text-xs text-muted">
-        迭代轮次 {dv.iteration_rounds} · 分数 {dv.last_score ?? "-"}
+        Round {dv.iteration_rounds} / Score {dv.last_score ?? "-"}
       </p>
-      <p className="truncate font-mono text-[11px] text-muted">doc: {dv.design_doc_id}</p>
+      <p className="truncate font-mono text-[11px] text-muted">Doc {dv.design_doc_id}</p>
     </Link>
   );
 }
@@ -286,28 +294,29 @@ function DevWorkCreateForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!designDocId) return setError("请选择已发布的 DesignDoc");
-    if (repoRefs.length === 0) return setError("请至少添加一个仓库");
+    if (!designDocId) return setError("Choose a published design doc");
+    if (repoRefs.length === 0) return setError("Add at least one repository");
+
     const mountSeen = new Set<string>();
-    for (const [i, row] of repoRefs.entries()) {
-      if (!row.repo_id) return setError(`第 ${i + 1} 行：请选择仓库`);
-      if (!row.base_branch) return setError(`第 ${i + 1} 行：请选择 base_branch`);
+    for (const [index, row] of repoRefs.entries()) {
+      if (!row.repo_id) return setError(`Row ${index + 1}: choose a repository`);
+      if (!row.base_branch) return setError(`Row ${index + 1}: choose a base branch`);
       const mount = row.mount_name.trim();
-      if (!mount) return setError(`第 ${i + 1} 行：请填写 mount_name`);
-      if (!MOUNT_NAME_RE.test(mount)) {
-        return setError(`第 ${i + 1} 行：mount_name 不合法`);
-      }
-      if (mountSeen.has(mount)) return setError(`mount_name "${mount}" 重复`);
+      if (!mount) return setError(`Row ${index + 1}: mount_name is required`);
+      if (!MOUNT_NAME_RE.test(mount)) return setError(`Row ${index + 1}: invalid mount_name`);
+      if (mountSeen.has(mount)) return setError(`mount_name "${mount}" is duplicated`);
       mountSeen.add(mount);
     }
-    if (!prompt.trim()) return setError("请填写 prompt");
-    const payloadRefs: DevRepoRef[] = repoRefs.map((r) => ({
-      repo_id: r.repo_id,
-      base_branch: r.base_branch,
-      mount_name: r.mount_name.trim(),
-      base_rev_lock: !!r.base_rev_lock,
-      is_primary: !!r.is_primary,
+    if (!prompt.trim()) return setError("Prompt is required");
+
+    const payloadRefs: DevRepoRef[] = repoRefs.map((row) => ({
+      repo_id: row.repo_id,
+      base_branch: row.base_branch,
+      mount_name: row.mount_name.trim(),
+      base_rev_lock: !!row.base_rev_lock,
+      is_primary: !!row.is_primary,
     }));
+
     setError(null);
     setSubmitting(true);
     try {
@@ -324,7 +333,7 @@ function DevWorkCreateForm({
       setOpen(false);
       onCreated(created);
     } catch (err) {
-      setError(extractError(err, "创建失败"));
+      setError(extractError(err, "Failed to create development work"));
     } finally {
       setSubmitting(false);
     }
@@ -332,30 +341,28 @@ function DevWorkCreateForm({
 
   if (!open) {
     return (
-      <div className="flex items-center gap-2">
-        <button
-          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs font-medium text-copy transition hover:border-accent/40 hover:text-accent disabled:opacity-40"
-          disabled={disabled}
-          onClick={() => setOpen(true)}
-          title={disabled ? "需要至少一个已发布 DesignDoc" : undefined}
-          type="button"
-        >
-          新建 DevWork
-        </button>
-      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        title={disabled ? "A published design doc is required first" : undefined}
+        onClick={() => setOpen(true)}
+        className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs font-medium text-copy transition hover:border-accent/40 hover:text-accent disabled:opacity-40"
+      >
+        New development work
+      </button>
     );
   }
 
   return (
     <form className="space-y-3 rounded-2xl border border-border bg-panel-strong/60 p-4" onSubmit={submit}>
       <label className="block space-y-1 text-xs text-muted">
-        <span>DesignDoc（已发布）</span>
+        <span>Published design doc</span>
         <select
           className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none [&_option]:bg-panel-strong"
-          onChange={(event) => setDesignDocId(event.target.value)}
           value={designDocId}
+          onChange={(event) => setDesignDocId(event.target.value)}
         >
-          <option value="">请选择</option>
+          <option value="">Select one</option>
           {publishedDocs.map((doc) => (
             <option key={doc.id} value={doc.id}>
               {doc.slug}@{doc.version}
@@ -363,46 +370,51 @@ function DevWorkCreateForm({
           ))}
         </select>
       </label>
+
       <div className="block space-y-1 text-xs text-muted">
-        <span>仓库绑定（至少 1 个）</span>
+        <span>Repository bindings</span>
         <RepoRefsEditor minRows={1} mode="dev" onChange={setRepoRefs} value={repoRefs} />
       </div>
+
       <label className="block space-y-1 text-xs text-muted">
-        <span>prompt</span>
+        <span>Prompt</span>
         <textarea
           aria-label="DevWork prompt"
           className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm text-copy outline-none"
-          onChange={(event) => setPrompt(event.target.value)}
           rows={4}
           value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
         />
       </label>
+
       <label className="block space-y-1 text-xs text-muted">
         <span>Agent</span>
         <select
           className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none [&_option]:bg-panel-strong"
-          onChange={(event) => setAgent(event.target.value as AgentKind)}
           value={agent}
+          onChange={(event) => setAgent(event.target.value as AgentKind)}
         >
           <option value="claude">Claude</option>
           <option value="codex">Codex</option>
         </select>
       </label>
+
       {error ? <p className="text-xs text-danger">{error}</p> : null}
+
       <div className="flex gap-2">
         <button
-          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] disabled:opacity-60"
-          disabled={submitting}
           type="submit"
+          disabled={submitting}
+          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] disabled:opacity-60"
         >
-          {submitting ? "创建中..." : "提交"}
+          {submitting ? "Creating..." : "Submit"}
         </button>
         <button
-          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:text-copy"
-          onClick={() => setOpen(false)}
           type="button"
+          onClick={() => setOpen(false)}
+          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:text-copy"
         >
-          取消
+          Cancel
         </button>
       </div>
     </form>
@@ -417,10 +429,10 @@ function EventRow({ event }: { event: WorkspaceEvent }) {
         <span className="text-xs text-muted">{event.ts}</span>
       </div>
       {event.correlation_id ? (
-        <p className="mt-2 text-xs text-muted">corr: {event.correlation_id}</p>
+        <p className="mt-2 text-xs text-muted">Correlation {event.correlation_id}</p>
       ) : null}
       {event.payload ? (
-        <pre className="mt-3 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
+        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-2xl bg-panel-deep p-3 text-[11px] text-copy">
           {JSON.stringify(event.payload, null, 2)}
         </pre>
       ) : null}
@@ -433,7 +445,7 @@ export function WorkspaceDetailPage() {
   if (!wsId) {
     return (
       <section className="rounded-[32px] border border-danger/15 bg-danger/8 p-6 shadow-panel">
-        <h2 className="font-serif text-xl font-medium text-copy">缺少 Workspace ID</h2>
+        <h2 className="font-serif text-xl font-medium text-copy">Missing workspace id</h2>
       </section>
     );
   }
@@ -444,53 +456,55 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate();
   const polling = useWorkspacePolling();
   const [tab, setTab] = useState<TabId>("designs");
-  const [eventLimit, setEventLimit] = useState(EVENTS_PAGE_SIZE);
+  const [designOffset, setDesignOffset] = useState(0);
+  const [devOffset, setDevOffset] = useState(0);
+  const [eventOffset, setEventOffset] = useState(0);
   const [archivePending, setArchivePending] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
 
-  const workspaceQuery = useSWR(
-    ["workspace", workspaceId],
-    () => getWorkspace(workspaceId),
-    polling,
-  );
+  const workspaceQuery = useSWR(["workspace", workspaceId], () => getWorkspace(workspaceId), polling);
   const designWorksQuery = useSWR(
-    ["design-works", workspaceId],
-    () => listDesignWorks(workspaceId),
+    ["design-works-page", workspaceId, designOffset],
+    () =>
+      listDesignWorkPage({
+        workspace_id: workspaceId,
+        sort: "updated_desc",
+        limit: WORK_ITEM_PAGE_SIZE,
+        offset: designOffset,
+      }),
     polling,
   );
-  const allDocsQuery = useSWR(
-    ["design-docs", workspaceId],
-    () => listDesignDocs(workspaceId),
-    polling,
-  );
+  const allDocsQuery = useSWR(["design-docs", workspaceId], () => listDesignDocs(workspaceId), polling);
   const publishedDocsQuery = useSWR(
     ["design-docs", workspaceId, "published"],
     () => listDesignDocs(workspaceId, "published"),
     polling,
   );
   const devWorksQuery = useSWR(
-    ["dev-works", workspaceId],
-    () => listDevWorks(workspaceId),
+    ["dev-works-page", workspaceId, devOffset],
+    () =>
+      listDevWorkPage({
+        workspace_id: workspaceId,
+        sort: "updated_desc",
+        limit: WORK_ITEM_PAGE_SIZE,
+        offset: devOffset,
+      }),
     polling,
   );
   const eventsQuery = useSWR(
-    ["workspace-events", workspaceId, eventLimit],
-    () => listWorkspaceEvents(workspaceId, { limit: eventLimit }),
+    ["workspace-events", workspaceId, eventOffset],
+    () => listWorkspaceEvents(workspaceId, { limit: EVENTS_PAGE_SIZE, offset: eventOffset }),
     polling,
   );
 
-  const designWorks = useMemo(() => designWorksQuery.data ?? [], [designWorksQuery.data]);
+  const designWorks = useMemo(() => designWorksQuery.data?.items ?? [], [designWorksQuery.data]);
   const docs = useMemo(() => allDocsQuery.data ?? [], [allDocsQuery.data]);
-  const publishedDocs = useMemo(
-    () => publishedDocsQuery.data ?? [],
-    [publishedDocsQuery.data],
-  );
-  const devWorks = useMemo(() => devWorksQuery.data ?? [], [devWorksQuery.data]);
+  const publishedDocs = useMemo(() => publishedDocsQuery.data ?? [], [publishedDocsQuery.data]);
+  const devWorks = useMemo(() => devWorksQuery.data?.items ?? [], [devWorksQuery.data]);
   const events = eventsQuery.data?.events ?? [];
-  const hasMore = eventsQuery.data?.pagination.has_more ?? false;
 
   async function handleArchive() {
-    if (typeof window !== "undefined" && !window.confirm("确认归档此 Workspace？")) {
+    if (typeof window !== "undefined" && !window.confirm("Archive this workspace?")) {
       return;
     }
     setArchivePending(true);
@@ -499,7 +513,7 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
       await archiveWorkspace(workspaceId);
       navigate("/workspaces");
     } catch (err) {
-      setArchiveError(extractError(err, "归档失败"));
+      setArchiveError(extractError(err, "Failed to archive workspace"));
     } finally {
       setArchivePending(false);
     }
@@ -510,26 +524,26 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-6">
       <SectionPanel
+        kicker="Workspace"
+        title={workspace?.title ?? "Loading workspace..."}
         actions={
           workspace && workspace.status === "active" ? (
             <button
-              className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs font-medium text-muted transition hover:border-danger/30 hover:text-danger disabled:opacity-50"
+              type="button"
               disabled={archivePending}
               onClick={() => void handleArchive()}
-              type="button"
+              className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs font-medium text-muted transition hover:border-danger/30 hover:text-danger disabled:opacity-50"
             >
-              {archivePending ? "归档中..." : "归档"}
+              {archivePending ? "Archiving..." : "Archive"}
             </button>
           ) : undefined
         }
-        kicker="工作区详情"
-        title={workspace?.title ?? "加载中..."}
       >
         {workspace ? (
           <div className="flex flex-wrap items-center gap-3 text-xs text-muted">
             <StatusBadge status={workspace.status} />
             <span className="font-mono">{workspace.slug}</span>
-            <span>更新于 {workspace.updated_at}</span>
+            <span>Updated {new Date(workspace.updated_at).toLocaleString()}</span>
             <span className="truncate">{workspace.root_path}</span>
           </div>
         ) : null}
@@ -537,66 +551,59 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
       </SectionPanel>
 
       <SectionPanel
-        actions={
-          <div className="flex gap-2" role="tablist" aria-label="详情 tabs">
-            {TAB_IDS.map((id) => {
-              const selected = tab === id;
-              return (
-                <button
-                  aria-controls={`workspace-tabpanel-${id}`}
-                  aria-selected={selected}
-                  className={[
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition",
-                    selected
-                      ? "border-accent/30 bg-accent/15 text-copy"
-                      : "border-border-strong bg-panel-strong/50 text-muted hover:border-copy/20 hover:text-copy",
-                  ].join(" ")}
-                  id={`workspace-tab-${id}`}
-                  key={id}
-                  onClick={() => setTab(id)}
-                  role="tab"
-                  tabIndex={selected ? 0 : -1}
-                  type="button"
-                >
-                  {TAB_LABELS[id]}
-                </button>
-              );
-            })}
-          </div>
-        }
-        kicker="详情面板"
+        kicker="Collections"
         title={TAB_LABELS[tab]}
+        actions={
+          <SegmentedControl
+            ariaLabel="Workspace detail tabs"
+            options={TAB_IDS.map((id) => ({ value: id, label: TAB_LABELS[id] }))}
+            value={tab}
+            onChange={setTab}
+          />
+        }
       >
         {tab === "designs" ? (
-          <div
-            aria-labelledby="workspace-tab-designs"
-            className="grid gap-6 lg:grid-cols-2"
-            id="workspace-tabpanel-designs"
-            role="tabpanel"
-          >
-            <div className="space-y-3">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-4">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">DesignWorks</p>
-                <DesignWorkCreateForm onCreated={() => void designWorksQuery.mutate()} workspaceId={workspaceId} />
+                <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">Design work</p>
+                <DesignWorkCreateForm
+                  workspaceId={workspaceId}
+                  onCreated={() => {
+                    setDesignOffset(0);
+                    void designWorksQuery.mutate();
+                  }}
+                />
               </div>
+
               {designWorks.length === 0 ? (
-                <EmptyState copy="暂无 DesignWork。" />
+                <EmptyState copy="No design work items yet." />
               ) : (
                 <div className="space-y-3">
                   {designWorks.map((dw) => (
-                    <DesignWorkRow dw={dw} key={dw.id} workspaceId={workspaceId} />
+                    <DesignWorkRow key={dw.id} workspaceId={workspaceId} dw={dw} />
                   ))}
                 </div>
               )}
+
+              {designWorksQuery.data ? (
+                <PaginationControls
+                  pagination={designWorksQuery.data.pagination}
+                  itemLabel="Design work"
+                  onPageChange={setDesignOffset}
+                  disabled={designWorksQuery.isLoading}
+                />
+              ) : null}
             </div>
+
             <div className="space-y-3">
-              <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">DesignDocs</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">Design docs</p>
               {docs.length === 0 ? (
-                <EmptyState copy="暂无 DesignDoc。" />
+                <EmptyState copy="No design docs yet." />
               ) : (
                 <div className="space-y-3">
                   {docs.map((doc) => (
-                    <DesignDocRow doc={doc} key={doc.id} />
+                    <DesignDocRow key={doc.id} doc={doc} />
                   ))}
                 </div>
               )}
@@ -605,56 +612,59 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
         ) : null}
 
         {tab === "devworks" ? (
-          <div
-            aria-labelledby="workspace-tab-devworks"
-            className="space-y-4"
-            id="workspace-tabpanel-devworks"
-            role="tabpanel"
-          >
+          <div className="space-y-4">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">DevWorks</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">Development work</p>
               <DevWorkCreateForm
-                onCreated={() => void devWorksQuery.mutate()}
-                publishedDocs={publishedDocs}
                 workspaceId={workspaceId}
+                publishedDocs={publishedDocs}
+                onCreated={() => {
+                  setDevOffset(0);
+                  void devWorksQuery.mutate();
+                }}
               />
             </div>
+
             {devWorks.length === 0 ? (
-              <EmptyState copy="暂无 DevWork。" />
+              <EmptyState copy="No development work items yet." />
             ) : (
               <div className="grid gap-3 md:grid-cols-2">
                 {devWorks.map((dv) => (
-                  <DevWorkRow dv={dv} key={dv.id} workspaceId={workspaceId} />
+                  <DevWorkRow key={dv.id} workspaceId={workspaceId} dv={dv} />
                 ))}
               </div>
             )}
+
+            {devWorksQuery.data ? (
+              <PaginationControls
+                pagination={devWorksQuery.data.pagination}
+                itemLabel="Development work"
+                onPageChange={setDevOffset}
+                disabled={devWorksQuery.isLoading}
+              />
+            ) : null}
           </div>
         ) : null}
 
         {tab === "events" ? (
-          <div
-            aria-labelledby="workspace-tab-events"
-            className="space-y-3"
-            id="workspace-tabpanel-events"
-            role="tabpanel"
-          >
+          <div className="space-y-3">
             {events.length === 0 ? (
-              <EmptyState copy="暂无事件。" />
+              <EmptyState copy="No workspace events yet." />
             ) : (
               <div className="space-y-3">
                 {events.map((event) => (
-                  <EventRow event={event} key={event.event_id} />
+                  <EventRow key={event.event_id} event={event} />
                 ))}
               </div>
             )}
-            {hasMore ? (
-              <button
-                className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:text-copy"
-                onClick={() => setEventLimit((current) => Math.min(current + EVENTS_PAGE_SIZE, EVENTS_MAX_LIMIT))}
-                type="button"
-              >
-                加载更多
-              </button>
+
+            {eventsQuery.data ? (
+              <PaginationControls
+                pagination={eventsQuery.data.pagination}
+                itemLabel="Events"
+                onPageChange={setEventOffset}
+                disabled={eventsQuery.isLoading}
+              />
             ) : null}
           </div>
         ) : null}

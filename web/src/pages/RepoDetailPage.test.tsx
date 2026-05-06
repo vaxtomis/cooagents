@@ -7,10 +7,10 @@ import {
   getRepo,
   repoBlob,
   repoBranches,
-  repoLog,
+  repoLogPage,
   repoTree,
 } from "../api/repos";
-import type { Repo, RepoBlob, RepoBranches, RepoLog, RepoTree } from "../types";
+import type { Repo, RepoBlob, RepoBranches, RepoLogPage, RepoTree } from "../types";
 import { RepoDetailPage } from "./RepoDetailPage";
 
 vi.mock("../api/repos", () => ({
@@ -25,6 +25,7 @@ vi.mock("../api/repos", () => ({
   repoTree: vi.fn(),
   repoBlob: vi.fn(),
   repoLog: vi.fn(),
+  repoLogPage: vi.fn(),
 }));
 
 afterEach(() => {
@@ -228,14 +229,14 @@ describe("RepoDetailPage", () => {
     expect(scripts.length).toBe(0);
   });
 
-  it("log tab calls repoLog(limit=50)", async () => {
+  it("log tab calls repoLogPage(limit=20, offset=0)", async () => {
     vi.mocked(getRepo).mockResolvedValue(repo);
     vi.mocked(repoBranches).mockResolvedValue(branches);
     vi.mocked(repoTree).mockResolvedValue(treeRoot);
-    const log: RepoLog = {
+    const log: RepoLogPage = {
       ref: "main",
       path: null,
-      entries: [
+      items: [
         {
           sha: "abcdef0123456789abcdef0123456789abcdef01",
           author: "Alice",
@@ -244,8 +245,14 @@ describe("RepoDetailPage", () => {
           subject: "feat: add things",
         },
       ],
+      pagination: {
+        limit: 20,
+        offset: 0,
+        total: 1,
+        has_more: false,
+      },
     };
-    vi.mocked(repoLog).mockResolvedValue(log);
+    vi.mocked(repoLogPage).mockResolvedValue(log);
 
     renderAt();
     await screen.findByText("README.md");
@@ -253,9 +260,10 @@ describe("RepoDetailPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Log" }));
 
     await waitFor(() => {
-      expect(repoLog).toHaveBeenCalledWith("repo-aaa111", {
+      expect(repoLogPage).toHaveBeenCalledWith("repo-aaa111", {
         ref: "main",
-        limit: 50,
+        limit: 20,
+        offset: 0,
       });
     });
     expect(await screen.findByText("feat: add things")).toBeInTheDocument();

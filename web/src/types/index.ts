@@ -7,8 +7,13 @@
 export interface Pagination {
   limit: number;
   offset: number;
+  total: number;
   has_more: boolean;
-  total?: number;
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  pagination: Pagination;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +90,8 @@ export interface Workspace {
   updated_at: string;
 }
 
+export type WorkspacePage = PaginatedResult<Workspace>;
+
 export interface DesignWork {
   id: string;
   workspace_id: string;
@@ -102,6 +109,8 @@ export interface DesignWork {
   // Phase 4 (repo-registry): persisted refs from design_work_repos.
   repo_refs: DesignRepoRefView[];
 }
+
+export type DesignWorkPage = PaginatedResult<DesignWork>;
 
 export interface DesignDoc {
   id: string;
@@ -145,6 +154,8 @@ export interface DevWork {
   // repo_refs, additive url / ssh_key_path / push_err.
   repos: WorkerRepoHandoff[];
 }
+
+export type DevWorkPage = PaginatedResult<DevWork>;
 
 export interface DevIterationNote {
   id: string;
@@ -285,6 +296,8 @@ export interface Repo {
   updated_at: string;
 }
 
+export type RepoPage = PaginatedResult<Repo>;
+
 export interface CreateRepoPayload {
   name: string;
   url: string;
@@ -346,6 +359,11 @@ export interface RepoLog {
   ref: string;
   path: string | null;
   entries: RepoLogEntry[];
+}
+
+export interface RepoLogPage extends PaginatedResult<RepoLogEntry> {
+  ref: string;
+  path: string | null;
 }
 
 export interface FetchRepoResponse {

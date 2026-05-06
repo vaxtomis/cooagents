@@ -5,14 +5,38 @@ import type {
   RepoBlob,
   RepoBranches,
   RepoLog,
+  RepoLogPage,
+  RepoPage,
   RepoTree,
   ReposSyncReport,
+  RepoFetchStatus,
+  RepoRole,
   UpdateRepoPayload,
 } from "../types";
 import { apiFetch, apiRequest } from "./client";
 
 export async function listRepos(): Promise<Repo[]> {
   return apiFetch<Repo[]>("/repos");
+}
+
+export interface ListRepoPageParams {
+  role?: RepoRole;
+  fetch_status?: RepoFetchStatus;
+  query?: string;
+  sort?: "name_asc" | "name_desc" | "updated_desc" | "updated_asc" | "last_fetched_desc" | "last_fetched_asc";
+  limit?: number;
+  offset?: number;
+}
+
+export async function listRepoPage(
+  params: ListRepoPageParams = {},
+): Promise<RepoPage> {
+  return apiFetch<RepoPage>("/repos", {
+    query: {
+      ...params,
+      paginate: true,
+    },
+  });
 }
 
 export async function getRepo(id: string): Promise<Repo> {
@@ -74,9 +98,21 @@ export async function repoBlob(
 
 export async function repoLog(
   id: string,
-  params: { ref: string; path?: string; limit?: number },
+  params: { ref: string; path?: string; limit?: number; offset?: number },
 ): Promise<RepoLog> {
   return apiFetch<RepoLog>(`/repos/${encodeURIComponent(id)}/log`, {
     query: params,
+  });
+}
+
+export async function repoLogPage(
+  id: string,
+  params: { ref: string; path?: string; limit?: number; offset?: number },
+): Promise<RepoLogPage> {
+  return apiFetch<RepoLogPage>(`/repos/${encodeURIComponent(id)}/log`, {
+    query: {
+      ...params,
+      paginate: true,
+    },
   });
 }
