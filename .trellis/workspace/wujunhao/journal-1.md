@@ -73,3 +73,39 @@ Tightened the DesignWork DesignDoc contract, updated prompt/validator/templates/
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Workspace-first dashboard pagination wrap-up
+
+**Date**: 2026-05-06
+**Task**: Workspace-first dashboard pagination wrap-up
+**Branch**: `main`
+
+### Summary
+
+Completed the workspace-first dashboard pagination redesign, recorded the backend collection contracts and frontend collection specs, fixed the App shell regression test, and verified backend routes, full frontend tests, and production build.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `74c78a0` | (see git log) |
+| `7cd0db3` | (see git log) |
+| `7d6b1a3` | (see git log) |
+| `516e4af` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
