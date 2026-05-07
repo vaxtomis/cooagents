@@ -28,7 +28,7 @@ from typing import Any
 from src.design_validator import validate_design_markdown
 from src.dev_prompt_composer import MountTableEntry
 from src.dev_work_steps import DevWorkStepHandlersMixin
-from src.exceptions import BadRequestError, NotFoundError
+from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.git_utils import DEVWORK_BRANCH_FMT, ensure_worktree
 from src.llm_runner import IdleTimeoutError, ProgressTick, dw_session_name
 from src.models import (
@@ -125,10 +125,17 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
     # ---- driver ----
 
     def schedule_driver(self, dev_id: str) -> asyncio.Task:
+        existing = self._running.get(dev_id)
+        if existing is not None:
+            if not existing.done():
+                return existing
+            self._running.pop(dev_id, None)
+
         task = asyncio.create_task(self.run_to_completion(dev_id))
 
         def _on_done(t: asyncio.Task) -> None:
-            self._running.pop(dev_id, None)
+            if self._running.get(dev_id) is t:
+                self._running.pop(dev_id, None)
             if t.cancelled():
                 return
             exc = t.exception()
@@ -142,6 +149,15 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         return task
 
     # ---- helpers ----
+
+    def is_running(self, dev_id: str) -> bool:
+        task = self._running.get(dev_id)
+        if task is None:
+            return False
+        if task.done():
+            self._running.pop(dev_id, None)
+            return False
+        return True
 
     @staticmethod
     def _new_id() -> str:
@@ -374,10 +390,15 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             )
         return await self._get(dev_id)
 
-    async def tick(self, dev_id: str) -> dict[str, Any]:
+    async def tick(self, dev_id: str, *, from_driver: bool = False) -> dict[str, Any]:
         dw = await self._get(dev_id)
         if dw is None:
             raise NotFoundError(f"dev_work {dev_id!r} not found")
+        if not from_driver and self.is_running(dev_id):
+            raise ConflictError(
+                f"dev_work {dev_id!r} is already being advanced",
+                current_stage=dw["current_step"],
+            )
         step = DevWorkStep(dw["current_step"])
         handler = {
             DevWorkStep.INIT: self._s0_init,
@@ -404,7 +425,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         see it.
         """
         for _ in range(_MAX_TICKS):
-            dw = await self.tick(dev_id)
+            dw = await self.tick(dev_id, from_driver=True)
             if DevWorkStep(dw["current_step"]) in _TERMINAL:
                 return dw
         logger.error(

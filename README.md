@@ -72,6 +72,8 @@ python scripts/deploy.py bootstrap
 
 它只是 `python scripts/deploy.py bootstrap` 的薄包装。
 
+历史安装说明中的 `/cooagents-setup` 路径仍然保留为兼容示例。
+
 ---
 
 ## 架构总览

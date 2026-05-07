@@ -2,7 +2,7 @@
 
 Endpoint:
     GET /api/v1/workspaces/{workspace_id}/events
-        ?limit=&offset=&event_name=
+        ?limit=&offset=&event_name=&correlation_id=
 
 Read-only: pure SELECT against ``workspace_events``; no mutation.
 """
@@ -26,6 +26,7 @@ async def list_workspace_events(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     event_name: list[str] | None = Query(None, max_length=20),
+    correlation_id: str | None = Query(None, max_length=200),
 ):
     db = request.app.state.db
 
@@ -56,6 +57,10 @@ async def list_workspace_events(
         placeholders = ",".join("?" for _ in unique_names)
         conditions.append(f"event_name IN ({placeholders})")
         params.extend(unique_names)
+
+    if correlation_id:
+        conditions.append("correlation_id = ?")
+        params.append(correlation_id)
 
     where_sql = " WHERE " + " AND ".join(conditions)
 

@@ -108,6 +108,7 @@ export interface DesignWork {
   version: string | null;
   created_at: string;
   updated_at: string;
+  is_running: boolean;
   // Phase 4 (repo-registry): persisted refs from design_work_repos.
   repo_refs: DesignRepoRefView[];
 }
@@ -150,6 +151,8 @@ export interface DevWork {
   worktree_branch: string | null;
   created_at: string;
   updated_at: string;
+  is_running: boolean;
+  progress: DevWorkProgressSnapshot | null;
   // Phase 4 (repo-registry): persisted refs from dev_work_repos.
   repo_refs: DevRepoRefView[];
   // Phase 5 (repo-registry): worker-facing handoff. Same row source as
@@ -158,6 +161,14 @@ export interface DevWork {
 }
 
 export type DevWorkPage = PaginatedResult<DevWork>;
+
+export interface DevWorkProgressSnapshot {
+  last_heartbeat_at: string;
+  elapsed_s: number;
+  step: string;
+  round: number;
+  dispatch_id: string | null;
+}
 
 export interface DevIterationNote {
   id: string;

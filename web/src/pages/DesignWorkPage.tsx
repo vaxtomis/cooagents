@@ -5,13 +5,57 @@ import { ApiError } from "../api/client";
 import { cancelDesignWork, getDesignWork, tickDesignWork } from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
 import { listReviews } from "../api/reviews";
+import { listWorkspaceEvents } from "../api/workspaceEvents";
 import { DesignWorkStateProgress } from "../components/DesignWorkStateProgress";
 import { MarkdownPanel } from "../components/MarkdownPanel";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
 import { StatusBadge } from "../components/StatusBadge";
-import { useWorkspacePolling } from "../hooks/useWorkspacePolling";
+import {
+  useWorkspaceActivePolling,
+  useWorkspaceDetailPolling,
+  useWorkspacePolling,
+} from "../hooks/useWorkspacePolling";
 import { extractError } from "../lib/extractError";
-import type { Review } from "../types";
+import type { DesignWork, Review, WorkspaceEvent } from "../types";
+
+const DESIGN_WORK_EVENT_NAMES = [
+  "design_work.started",
+  "design_work.llm_completed",
+  "design_work.round_completed",
+  "design_work.mockup_recorded",
+  "design_work.escalated",
+] as const;
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function compactPayload(payload: WorkspaceEvent["payload"]) {
+  if (!payload) return null;
+  return Object.entries(payload)
+    .filter(([, value]) => value !== null && value !== undefined)
+    .slice(0, 4)
+    .map(([key, value]) => {
+      const rendered = typeof value === "object" ? JSON.stringify(value) : String(value);
+      return `${key}: ${rendered}`;
+    })
+    .join(" / ");
+}
+
+function ActivityRow({ event }: { event: WorkspaceEvent }) {
+  const payload = compactPayload(event.payload);
+  return (
+    <article className="rounded-2xl border border-border bg-panel-strong/80 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-mono text-xs text-copy">{event.event_name}</p>
+        <span className="text-[11px] text-muted">{formatDateTime(event.ts)}</span>
+      </div>
+      {payload ? <p className="mt-2 break-words text-xs text-muted">{payload}</p> : null}
+    </article>
+  );
+}
 
 function ReviewRow({ review }: { review: Review }) {
   return (
@@ -64,10 +108,11 @@ export function DesignWorkPage() {
 
 function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
   const polling = useWorkspacePolling();
+  const detailPolling = useWorkspaceDetailPolling<DesignWork>((latest) => Boolean(latest?.is_running));
   const [actionPending, setActionPending] = useState<"tick" | "cancel" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const dwQuery = useSWR(["design-work", dwId], () => getDesignWork(dwId), polling);
+  const dwQuery = useSWR(["design-work", dwId], () => getDesignWork(dwId), detailPolling);
   const reviewsQuery = useSWR(
     ["reviews", "design", dwId],
     () => listReviews({ design_work_id: dwId }),
@@ -76,6 +121,21 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
 
   const designWork = dwQuery.data;
   const outputDocId = designWork?.output_design_doc_id ?? null;
+  const escalated = designWork?.current_state === "ESCALATED";
+  const cancelled = designWork?.current_state === "CANCELLED";
+  const terminal =
+    escalated || cancelled || designWork?.current_state === "COMPLETED";
+  const activityPolling = useWorkspaceActivePolling(Boolean(designWork?.is_running && !terminal));
+  const workspaceEventsQuery = useSWR(
+    ["workspace-events", "design-work", wsId, dwId],
+    () =>
+      listWorkspaceEvents(wsId, {
+        limit: 8,
+        event_name: [...DESIGN_WORK_EVENT_NAMES],
+        correlation_id: dwId,
+      }),
+    activityPolling,
+  );
 
   const docContentQuery = useSWR(
     outputDocId ? ["design-doc-content", outputDocId] : null,
@@ -122,9 +182,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
     return <div className="h-[240px] animate-pulse rounded-[32px] border border-border bg-panel" />;
   }
 
-  const escalated = designWork.current_state === "ESCALATED";
-  const cancelled = designWork.current_state === "CANCELLED";
-  const terminal = escalated || cancelled || designWork.current_state === "COMPLETED";
+  const activityEvents = workspaceEventsQuery.data?.events ?? [];
 
   async function runAction(action: "tick" | "cancel") {
     setActionPending(action);
@@ -156,8 +214,14 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
       >
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge status={designWork.current_state} />
+          {designWork.is_running ? (
+            <StatusBadge status="running" label="自动推进中" />
+          ) : null}
           <span className="text-sm text-muted">循环 {designWork.loop}</span>
           <span className="text-sm text-muted">模式 {designWork.mode}</span>
+          <span className="text-sm text-muted">
+            更新时间 {formatDateTime(designWork.updated_at)}
+          </span>
           {designWork.version ? (
             <span className="font-mono text-xs text-muted">{designWork.version}</span>
           ) : null}
@@ -170,6 +234,12 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
         {escalated ? (
           <p className="mt-5 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
             DesignWork 已升级，需人工介入；tick 已禁用。
+          </p>
+        ) : null}
+
+        {designWork.is_running ? (
+          <p className="mt-5 rounded-2xl border border-success/25 bg-success/10 p-4 text-sm text-success">
+            后台驱动正在推进此 DesignWork，手动推进会暂时锁定，页面会自动刷新最新状态。
           </p>
         ) : null}
 
@@ -192,7 +262,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
         <div className="mt-5 flex flex-wrap gap-2">
           <button
             className="rounded-lg bg-copy px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] disabled:opacity-50"
-            disabled={actionPending !== null || escalated || terminal}
+            disabled={actionPending !== null || designWork.is_running || terminal}
             onClick={() => void runAction("tick")}
             type="button"
           >
@@ -211,11 +281,30 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
       </SectionPanel>
 
       <SectionPanel kicker="摘要" title="状态与产物">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-4">
           <MetricCard label="状态" value={designWork.current_state} />
           <MetricCard label="循环轮次" value={String(designWork.loop)} />
           <MetricCard label="DesignDoc" value={designWork.output_design_doc_id ?? "-"} />
+          <MetricCard label="更新时间" value={formatDateTime(designWork.updated_at)} />
         </div>
+      </SectionPanel>
+
+      <SectionPanel kicker="最近活动" title="DesignWork 活动">
+        {workspaceEventsQuery.error ? (
+          <p className="text-xs text-danger">
+            {extractError(workspaceEventsQuery.error, "活动加载失败")}
+          </p>
+        ) : activityEvents.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+            暂无 DesignWork 活动。
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {activityEvents.map((event) => (
+              <ActivityRow event={event} key={event.event_id} />
+            ))}
+          </div>
+        )}
       </SectionPanel>
 
       <SectionPanel kicker="设计文档" title="最终交付">

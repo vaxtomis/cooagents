@@ -52,6 +52,12 @@ const FORM_SELECT_CLASSNAME =
 const DIALOG_FOOTER_CLASSNAME =
   "flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end";
 
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
 function DesignWorkRow({ workspaceId, dw }: { workspaceId: string; dw: DesignWork }) {
   return (
     <Link
@@ -60,9 +66,13 @@ function DesignWorkRow({ workspaceId, dw }: { workspaceId: string; dw: DesignWor
     >
       <div className="flex items-start justify-between gap-3">
         <p className="truncate font-medium text-copy">{dw.title ?? dw.sub_slug ?? dw.id}</p>
-        <StatusBadge status={dw.current_state} />
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <StatusBadge status={dw.current_state} />
+          {dw.is_running ? <StatusBadge status="running" label="自动推进中" /> : null}
+        </div>
       </div>
       <p className="text-xs text-muted">模式 {dw.mode} / 循环 {dw.loop}</p>
+      <p className="text-xs text-muted">更新时间 {formatDateTime(dw.updated_at)}</p>
       {dw.output_design_doc_id ? (
         <p className="truncate font-mono text-[11px] text-muted">文档 {dw.output_design_doc_id}</p>
       ) : null}
@@ -263,12 +273,16 @@ function DevWorkRow({ workspaceId, dv }: { workspaceId: string; dv: DevWork }) {
     >
       <div className="flex items-start justify-between gap-3">
         <p className="truncate font-mono text-xs text-copy">{dv.id}</p>
-        <StatusBadge status={dv.current_step} />
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <StatusBadge status={dv.current_step} />
+          {dv.is_running ? <StatusBadge status="running" label="自动推进中" /> : null}
+        </div>
       </div>
       <p className="text-xs text-muted">
         轮次 {dv.iteration_rounds} / 分数 {dv.last_score ?? "-"}
       </p>
       <p className="truncate font-mono text-[11px] text-muted">文档 {dv.design_doc_id}</p>
+      <p className="text-xs text-muted">更新时间 {formatDateTime(dv.updated_at)}</p>
     </Link>
   );
 }
@@ -574,10 +588,11 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
         <DesignWorkCreateForm
           workspaceId={workspaceId}
           onCancel={() => setDesignDialogOpen(false)}
-          onCreated={() => {
+          onCreated={(created) => {
             setDesignDialogOpen(false);
             setDesignOffset(0);
             void designWorksQuery.mutate();
+            navigate(`/workspaces/${workspaceId}/design-works/${created.id}`);
           }}
         />
       </AppDialog>
@@ -593,10 +608,11 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
           workspaceId={workspaceId}
           publishedDocs={publishedDocs}
           onCancel={() => setDevDialogOpen(false)}
-          onCreated={() => {
+          onCreated={(created) => {
             setDevDialogOpen(false);
             setDevOffset(0);
             void devWorksQuery.mutate();
+            navigate(`/workspaces/${workspaceId}/dev-works/${created.id}`);
           }}
         />
       </AppDialog>

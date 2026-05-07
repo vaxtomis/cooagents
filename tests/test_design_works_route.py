@@ -150,6 +150,7 @@ async def client(tmp_path):
     async with AsyncClient(
         transport=ASGITransport(app=test_app), base_url="http://test"
     ) as ac:
+        ac._app = test_app
         yield ac
 
     await db.close()
@@ -269,6 +270,45 @@ async def test_list_paginated_envelope(client):
 async def test_get_missing_returns_404(client):
     r = await client.get("/api/v1/design-works/desw-nope")
     assert r.status_code == 404
+
+
+async def test_get_projects_running_state_and_tick_rejects_live_driver(client):
+    ws = await _create_workspace(client, slug="running")
+    create = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Running",
+            "slug": "running",
+            "user_input": "x" * 30,
+        },
+    )
+    assert create.status_code == 201, create.text
+    dw_id = create.json()["id"]
+    final = await _wait_for_terminal(client, dw_id)
+    assert final["is_running"] is False
+
+    task = asyncio.create_task(asyncio.sleep(60))
+    client._app.state.design_work_sm._running[dw_id] = task
+    try:
+        projected = await client.get(f"/api/v1/design-works/{dw_id}")
+        assert projected.status_code == 200
+        assert projected.json()["is_running"] is True
+
+        blocked = await client.post(f"/api/v1/design-works/{dw_id}/tick")
+        assert blocked.status_code == 409
+        assert blocked.json()["current_stage"] == final["current_state"]
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        client._app.state.design_work_sm._running.pop(dw_id, None)
+
+    projected = await client.get(f"/api/v1/design-works/{dw_id}")
+    assert projected.status_code == 200
+    assert projected.json()["is_running"] is False
+
+    resumed = await client.post(f"/api/v1/design-works/{dw_id}/tick")
+    assert resumed.status_code == 200
 
 
 async def test_cancel_moves_to_cancelled(client):

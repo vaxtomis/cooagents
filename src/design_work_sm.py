@@ -23,7 +23,7 @@ from pathlib import Path
 
 from src.design_prompt_composer import PromptInputs, compose_prompt
 from src.design_validator import validate_design_markdown
-from src.exceptions import BadRequestError, NotFoundError
+from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.mockup_renderer import MockupSpec, PathMockupRenderer
 from src.models import DesignWorkMode, DesignWorkState, RepoRef
 from src.semver import next_version
@@ -69,10 +69,17 @@ class DesignWorkStateMachine:
         the stubbed optimize branch is expected) and clears ``_running`` so
         the dict doesn't grow unbounded over the life of the process.
         """
+        existing = self._running.get(dw_id)
+        if existing is not None:
+            if not existing.done():
+                return existing
+            self._running.pop(dw_id, None)
+
         task = asyncio.create_task(self.run_to_completion(dw_id))
 
         def _on_done(t: asyncio.Task) -> None:
-            self._running.pop(dw_id, None)
+            if self._running.get(dw_id) is t:
+                self._running.pop(dw_id, None)
             if t.cancelled():
                 return
             exc = t.exception()
@@ -86,6 +93,15 @@ class DesignWorkStateMachine:
         return task
 
     # ---- helpers ----
+
+    def is_running(self, dw_id: str) -> bool:
+        task = self._running.get(dw_id)
+        if task is None:
+            return False
+        if task.done():
+            self._running.pop(dw_id, None)
+            return False
+        return True
 
     @staticmethod
     def _new_id() -> str:
@@ -287,11 +303,16 @@ class DesignWorkStateMachine:
             logger.exception("initial regenerate_workspace_md failed for %s", workspace_id)
         return await self._get(wid)
 
-    async def tick(self, dw_id: str) -> dict:
+    async def tick(self, dw_id: str, *, from_driver: bool = False) -> dict:
         """Advance the DesignWork one step; idempotent."""
         dw = await self._get(dw_id)
         if dw is None:
             raise NotFoundError(f"design_work {dw_id!r} not found")
+        if not from_driver and self.is_running(dw_id):
+            raise ConflictError(
+                f"design_work {dw_id!r} is already being advanced",
+                current_stage=dw["current_state"],
+            )
 
         state = DesignWorkState(dw["current_state"])
         handler = {
@@ -320,7 +341,7 @@ class DesignWorkStateMachine:
             DesignWorkState.CANCELLED,
         }
         while True:
-            dw = await self.tick(dw_id)
+            dw = await self.tick(dw_id, from_driver=True)
             if DesignWorkState(dw["current_state"]) in terminal:
                 return dw
 

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -86,6 +86,7 @@ const designWork: DesignWork = {
   version: null,
   created_at: "2026-04-01T00:00:00Z",
   updated_at: "2026-04-23T00:00:00Z",
+  is_running: false,
   repo_refs: [],
 };
 
@@ -104,6 +105,8 @@ const devWork: DevWork = {
   worktree_branch: null,
   created_at: "2026-04-01T00:00:00Z",
   updated_at: "2026-04-23T00:00:00Z",
+  is_running: false,
+  progress: null,
   repo_refs: [],
   repos: [],
 };
@@ -167,11 +170,18 @@ const eventsEnvelope: WorkspaceEventsEnvelope = {
 };
 
 function renderPage() {
+  function LocationProbe() {
+    const location = useLocation();
+    return <div data-testid="location-probe">{location.pathname}</div>;
+  }
+
   render(
     <SWRConfig value={{ dedupingInterval: 0, provider: () => new Map(), revalidateOnFocus: false }}>
       <MemoryRouter initialEntries={["/workspaces/ws-1"]}>
         <Routes>
           <Route path="/workspaces/:wsId" element={<WorkspaceDetailPage />} />
+          <Route path="/workspaces/:wsId/design-works/:dwId" element={<LocationProbe />} />
+          <Route path="/workspaces/:wsId/dev-works/:dvId" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
     </SWRConfig>,
@@ -373,5 +383,81 @@ describe("WorkspaceDetailPage", () => {
       const args = vi.mocked(createDesignWork).mock.calls[0][0];
       expect(args.repo_refs).toBeUndefined();
     });
+  });
+
+  it("redirects to the created DesignWork detail page after submit", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listDesignDocs).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
+    vi.mocked(createDesignWork).mockResolvedValue({ ...designWork, id: "dw-created" });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "新建设计工作" }));
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Hello" } });
+    fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "feature-x" } });
+    fireEvent.change(screen.getByLabelText("需求说明"), { target: { value: "do something" } });
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        "/workspaces/ws-1/design-works/dw-created",
+      );
+    });
+  });
+
+  it("redirects to the created DevWork detail page after submit", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
+    vi.mocked(repoBranches).mockResolvedValue(branchesMain);
+    vi.mocked(createDevWork).mockResolvedValue({ ...devWork, id: "dv-created" });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建开发工作" }));
+
+    const docSelect = await screen.findByDisplayValue("请选择");
+    fireEvent.change(docSelect, { target: { value: "doc-1" } });
+
+    const selects = await screen.findAllByRole("combobox");
+    fireEvent.change(selects[1], { target: { value: "repo-aaa111" } });
+    await waitFor(() => expect(repoBranches).toHaveBeenCalled());
+    fireEvent.change((await screen.findAllByRole("combobox"))[2], { target: { value: "main" } });
+    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        "/workspaces/ws-1/dev-works/dv-created",
+      );
+    });
+  });
+
+  it("shows running badges in design and dev work rows", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({
+      items: [{ ...designWork, is_running: true }],
+      pagination: { limit: 6, offset: 0, total: 1, has_more: false },
+    });
+    vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({
+      items: [{ ...devWork, is_running: true }],
+      pagination: { limit: 6, offset: 0, total: 1, has_more: false },
+    });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+
+    renderPage();
+
+    expect(await screen.findByText("自动推进中")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "开发工作" }));
+    expect(await screen.findByText("自动推进中")).toBeInTheDocument();
   });
 });

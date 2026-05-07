@@ -334,6 +334,7 @@ class DesignWorkProgress(BaseModel):
     version: str | None = None
     created_at: str
     updated_at: str
+    is_running: bool = False
     # Phase 4 (repo-registry): persisted refs from design_work_repos.
     repo_refs: list["DesignRepoRefView"] = Field(default_factory=list)
 
@@ -409,6 +410,7 @@ class DevWorkProgress(BaseModel):
     worktree_branch: str | None = None
     created_at: str
     updated_at: str
+    is_running: bool = False
     # Phase 3 (devwork-acpx-overhaul): latest heartbeat tick from the
     # in-flight LLM call. ``None`` when no call is running (or this DevWork
     # has never reached an LLM step).

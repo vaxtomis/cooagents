@@ -13,9 +13,9 @@ import { RepoPushStatusGrid } from "../components/RepoPushStatusGrid";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
 import { ScoreBadge } from "../components/ScoreBadge";
 import { StatusBadge } from "../components/StatusBadge";
-import { useWorkspacePolling } from "../hooks/useWorkspacePolling";
+import { useWorkspaceDetailPolling, useWorkspacePolling } from "../hooks/useWorkspacePolling";
 import { extractError } from "../lib/extractError";
-import type { DevIterationNote, Review } from "../types";
+import type { DevIterationNote, DevWork, Review } from "../types";
 
 const TAB_IDS = ["notes", "reviews", "gate"] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -28,6 +28,12 @@ const TAB_LABELS: Record<TabId, string> = {
 // Path-segment shape for DevWork ids — the gate_id is composed from this and
 // is then sent through encodeURIComponent in the API client. The validation is
 // defence-in-depth so a malformed URL never produces a surprising gate key.
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
 const DEV_WORK_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
 function ReviewRow({ review }: { review: Review }) {
@@ -124,12 +130,13 @@ export function DevWorkPage() {
 
 function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const polling = useWorkspacePolling();
+  const detailPolling = useWorkspaceDetailPolling<DevWork>((latest) => Boolean(latest?.is_running));
   const [tab, setTab] = useState<TabId>("notes");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState<"tick" | "cancel" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const dvQuery = useSWR(["dev-work", dvId], () => getDevWork(dvId), polling);
+  const dvQuery = useSWR(["dev-work", dvId], () => getDevWork(dvId), detailPolling);
   const notesQuery = useSWR(
     ["iteration-notes", dvId],
     () => listIterationNotes(dvId),
@@ -234,9 +241,15 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
       >
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge status={devWork.current_step} />
+          {devWork.is_running ? (
+            <StatusBadge status="running" label="自动推进中" />
+          ) : null}
           <span className="font-mono text-xs text-muted">文档：{devWork.design_doc_id}</span>
           <span className="text-sm text-muted">
             轮次 {devWork.iteration_rounds}
+          </span>
+          <span className="text-sm text-muted">
+            更新时间 {formatDateTime(devWork.updated_at)}
           </span>
           <ScoreBadge score={devWork.last_score} />
         </div>
@@ -251,10 +264,16 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
           </p>
         ) : null}
 
+        {devWork.is_running ? (
+          <p className="mt-5 rounded-2xl border border-success/25 bg-success/10 p-4 text-sm text-success">
+            后台驱动正在推进此 DevWork，手动推进会暂时锁定，心跳进度会随轮询刷新。
+          </p>
+        ) : null}
+
         <div className="mt-5 flex flex-wrap gap-2">
           <button
             className="rounded-lg bg-copy px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] disabled:opacity-50"
-            disabled={actionPending !== null || escalated || terminal}
+            disabled={actionPending !== null || devWork.is_running || terminal}
             onClick={() => void runAction("tick")}
             type="button"
           >
@@ -284,7 +303,26 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
           />
           <MetricCard label="工作分支" value={devWork.worktree_branch ?? "-"} />
           <MetricCard label="工作目录" value={devWork.worktree_path ?? "-"} />
+          <MetricCard label="更新时间" value={formatDateTime(devWork.updated_at)} />
         </div>
+      </SectionPanel>
+
+      <SectionPanel kicker="当前进度" title="运行心跳">
+        {devWork.progress ? (
+          <div className="grid gap-3 md:grid-cols-4">
+            <MetricCard label="Step" value={devWork.progress.step} />
+            <MetricCard label="Round" value={String(devWork.progress.round)} />
+            <MetricCard label="Elapsed" value={`${devWork.progress.elapsed_s}s`} />
+            <MetricCard
+              label="Heartbeat"
+              value={formatDateTime(devWork.progress.last_heartbeat_at)}
+            />
+          </div>
+        ) : (
+          <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+            暂无心跳快照；后台驱动可能处于非 LLM 子步骤或已经空闲。
+          </p>
+        )}
       </SectionPanel>
 
       <SectionPanel kicker="仓库" title="仓库与推送状态">

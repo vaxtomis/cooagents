@@ -7,6 +7,7 @@ export interface ListWorkspaceEventsParams {
   limit?: number;
   offset?: number;
   event_name?: string[]; // repeatable; server-side dedupes
+  correlation_id?: string;
 }
 
 export async function listWorkspaceEvents(
@@ -25,6 +26,7 @@ export async function listWorkspaceEvents(
         limit: clampedLimit,
         offset: params.offset,
         event_name: params.event_name,
+        correlation_id: params.correlation_id,
       },
     },
   );

@@ -62,12 +62,13 @@ async def _seed_event(
     name: str,
     ts: str,
     workspace_id: str = "ws-aaa",
+    correlation_id: str | None = None,
     payload: dict | None = None,
 ):
     await db.execute(
         "INSERT INTO workspace_events(event_id,event_name,workspace_id,"
         "correlation_id,payload_json,ts) VALUES(?,?,?,?,?,?)",
-        (event_id, name, workspace_id, None,
+        (event_id, name, workspace_id, correlation_id,
          json.dumps(payload) if payload is not None else None, ts),
     )
 
@@ -182,6 +183,70 @@ async def test_unknown_event_name_returns_empty(client):
     )
     body = r.json()
     assert body["events"] == []
+
+
+async def test_correlation_id_filter(client):
+    await _seed_workspace(client.db)
+    await _seed_event(
+        client.db,
+        event_id="dw-1-start",
+        name="design_work.started",
+        ts=_ts(1),
+        correlation_id="desw-1",
+    )
+    await _seed_event(
+        client.db,
+        event_id="dw-2-start",
+        name="design_work.started",
+        ts=_ts(2),
+        correlation_id="desw-2",
+    )
+
+    r = await client.get(
+        "/api/v1/workspaces/ws-aaa/events",
+        params={"correlation_id": "desw-1"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert [event["event_id"] for event in body["events"]] == ["dw-1-start"]
+    assert body["pagination"]["total"] == 1
+
+
+async def test_correlation_id_combines_with_event_name(client):
+    await _seed_workspace(client.db)
+    await _seed_event(
+        client.db,
+        event_id="dw-1-start",
+        name="design_work.started",
+        ts=_ts(1),
+        correlation_id="desw-1",
+    )
+    await _seed_event(
+        client.db,
+        event_id="dw-1-review",
+        name="review.created",
+        ts=_ts(2),
+        correlation_id="desw-1",
+    )
+    await _seed_event(
+        client.db,
+        event_id="dw-2-start",
+        name="design_work.started",
+        ts=_ts(3),
+        correlation_id="desw-2",
+    )
+
+    r = await client.get(
+        "/api/v1/workspaces/ws-aaa/events",
+        params={
+            "correlation_id": "desw-1",
+            "event_name": "design_work.started",
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert [event["event_id"] for event in body["events"]] == ["dw-1-start"]
+    assert body["pagination"]["total"] == 1
 
 
 async def test_payload_decoded(client):

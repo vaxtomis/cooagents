@@ -149,6 +149,8 @@ def _row_to_progress(
     row: dict,
     repo_refs: list[DevRepoRefView] | None = None,
     repos: list[WorkerRepoHandoff] | None = None,
+    *,
+    is_running: bool = False,
 ) -> DevWorkProgress:
     fps = row.get("first_pass_success")
     return DevWorkProgress(
@@ -166,6 +168,7 @@ def _row_to_progress(
         worktree_branch=row.get("worktree_branch"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        is_running=is_running,
         progress=_decode_progress(row.get("current_progress_json")),
         repo_refs=repo_refs or [],
         repos=repos or [],
@@ -222,7 +225,7 @@ async def create_dev_work(
     state_repo = request.app.state.dev_work_repo_state
     repos = await _load_worker_repos(state_repo, dw["id"])
     refs = [_handoff_to_repo_ref(h) for h in repos]
-    return _row_to_progress(dw, refs, repos)
+    return _row_to_progress(dw, refs, repos, is_running=sm.is_running(dw["id"]))
 
 
 @router.get("/dev-works")
@@ -238,6 +241,7 @@ async def list_dev_works(
 ) -> list[DevWorkProgress] | DevWorkPage:
     db = request.app.state.db
     state_repo = request.app.state.dev_work_repo_state
+    sm = request.app.state.dev_work_sm
     if step and step not in {s.value for s in DevWorkStep}:
         raise BadRequestError(
             f"step must be one of {sorted(s.value for s in DevWorkStep)}"
@@ -277,6 +281,7 @@ async def list_dev_works(
                     r,
                     [_handoff_to_repo_ref(h) for h in repos_by_id.get(r["id"], [])],
                     repos_by_id.get(r["id"], []),
+                    is_running=sm.is_running(r["id"]),
                 )
                 for r in rows
             ],
@@ -295,6 +300,7 @@ async def list_dev_works(
             r,
             [_handoff_to_repo_ref(h) for h in repos_by_id.get(r["id"], [])],
             repos_by_id.get(r["id"], []),
+            is_running=sm.is_running(r["id"]),
         )
         for r in rows
     ]
@@ -309,7 +315,8 @@ async def get_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
         raise NotFoundError(f"dev_work {dev_id!r} not found")
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
-    return _row_to_progress(row, refs, repos)
+    sm = request.app.state.dev_work_sm
+    return _row_to_progress(row, refs, repos, is_running=sm.is_running(dev_id))
 
 
 @router.post("/dev-works/{dev_id}/tick")
@@ -320,7 +327,7 @@ async def tick_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
     dw = await sm.tick(dev_id)
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
-    return _row_to_progress(dw, refs, repos)
+    return _row_to_progress(dw, refs, repos, is_running=sm.is_running(dev_id))
 
 
 @router.post("/dev-works/{dev_id}/cancel", status_code=204)
@@ -364,4 +371,5 @@ async def update_repo_push_state(
     )
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
-    return _row_to_progress(dw, refs, repos)
+    sm = request.app.state.dev_work_sm
+    return _row_to_progress(dw, refs, repos, is_running=sm.is_running(dev_id))

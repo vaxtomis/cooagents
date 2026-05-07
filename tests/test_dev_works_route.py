@@ -617,6 +617,51 @@ async def test_get_dev_work_progress_field_populated(client):
     assert progress["dispatch_id"] == "ad-test1234"
 
 
+async def test_get_projects_running_state_and_tick_rejects_live_driver(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    assert create.status_code == 201, create.text
+    dev_id = create.json()["id"]
+    final = await _wait_for_terminal(client, dev_id)
+    assert final["is_running"] is False
+
+    payload = {
+        "step": "STEP4_DEVELOP",
+        "round": 2,
+        "elapsed_s": 45,
+        "last_heartbeat_at": "2026-04-28T01:23:45+00:00",
+        "dispatch_id": "ad-test1234",
+    }
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_progress_json=? WHERE id=?",
+        (json.dumps(payload, ensure_ascii=False), dev_id),
+    )
+
+    task = asyncio.create_task(asyncio.sleep(60))
+    app.state.dev_work_sm._running[dev_id] = task
+    try:
+        projected = await client.get(f"/api/v1/dev-works/{dev_id}")
+        assert projected.status_code == 200
+        body = projected.json()
+        assert body["is_running"] is True
+        assert body["progress"]["elapsed_s"] == 45
+
+        blocked = await client.post(f"/api/v1/dev-works/{dev_id}/tick")
+        assert blocked.status_code == 409
+        assert blocked.json()["current_stage"] == final["current_step"]
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        app.state.dev_work_sm._running.pop(dev_id, None)
+
+    projected = await client.get(f"/api/v1/dev-works/{dev_id}")
+    assert projected.status_code == 200
+    assert projected.json()["is_running"] is False
+
+    resumed = await client.post(f"/api/v1/dev-works/{dev_id}/tick")
+    assert resumed.status_code == 200
+
+
 async def test_get_dev_work_progress_field_tolerates_malformed_json(client):
     """Garbage in current_progress_json yields progress=None, not 500."""
     app = client._app

@@ -46,6 +46,8 @@ const devWork: DevWork = {
   worktree_branch: "feat/dv-1",
   created_at: "2026-04-01T00:00:00Z",
   updated_at: "2026-04-23T00:00:00Z",
+  is_running: false,
+  progress: null,
   repo_refs: [],
   repos: [],
 };
@@ -150,5 +152,30 @@ describe("DevWorkPage", () => {
     await waitFor(() => {
       expect(screen.getByText("当前未进入闸门。")).toBeInTheDocument();
     });
+  });
+
+  it("renders running banner, disables tick, and shows heartbeat progress", async () => {
+    vi.mocked(getDevWork).mockResolvedValue({
+      ...devWork,
+      is_running: true,
+      progress: {
+        step: "STEP4_DEVELOP",
+        round: 2,
+        elapsed_s: 45,
+        last_heartbeat_at: "2026-04-23T00:00:01Z",
+        dispatch_id: "ad-1",
+      },
+    });
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    expect(await screen.findByText("自动推进中")).toBeInTheDocument();
+    expect(screen.getByText(/后台驱动正在推进此 DevWork/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "推进" })).toBeDisabled();
+    expect(screen.getByText("STEP4_DEVELOP")).toBeInTheDocument();
+    expect(screen.getByText("45s")).toBeInTheDocument();
   });
 });

@@ -79,7 +79,10 @@ async def _load_repo_refs_batch(
 
 
 def _row_to_progress(
-    row: dict, repo_refs: list[DesignRepoRefView] | None = None
+    row: dict,
+    repo_refs: list[DesignRepoRefView] | None = None,
+    *,
+    is_running: bool = False,
 ) -> DesignWorkProgress:
     missing = None
     if row.get("missing_sections_json"):
@@ -103,6 +106,7 @@ def _row_to_progress(
         version=row.get("version"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        is_running=is_running,
         repo_refs=repo_refs or [],
     )
 
@@ -141,7 +145,7 @@ async def create_design_work(
     sm.schedule_driver(dw["id"])
     response.headers["Location"] = f"/api/v1/design-works/{dw['id']}"
     refs = await _load_repo_refs(request.app.state.db, dw["id"])
-    return _row_to_progress(dw, refs)
+    return _row_to_progress(dw, refs, is_running=sm.is_running(dw["id"]))
 
 
 @router.get("/design-works")
@@ -162,6 +166,7 @@ async def list_design_works(
     the param triggers FastAPI's 422 (missing query param).
     """
     db = request.app.state.db
+    sm = request.app.state.design_work_sm
     if state and state not in {s.value for s in DesignWorkState}:
         raise BadRequestError(
             f"state must be one of {sorted(s.value for s in DesignWorkState)}"
@@ -199,7 +204,14 @@ async def list_design_works(
         )
         refs_by_id = await _load_repo_refs_batch(db, [r["id"] for r in rows])
         return DesignWorkPage(
-            items=[_row_to_progress(r, refs_by_id.get(r["id"], [])) for r in rows],
+            items=[
+                _row_to_progress(
+                    r,
+                    refs_by_id.get(r["id"], []),
+                    is_running=sm.is_running(r["id"]),
+                )
+                for r in rows
+            ],
             pagination={
                 "limit": limit,
                 "offset": offset,
@@ -209,7 +221,14 @@ async def list_design_works(
         )
     rows = await db.fetchall(sql, tuple(params))
     refs_by_id = await _load_repo_refs_batch(db, [r["id"] for r in rows])
-    return [_row_to_progress(r, refs_by_id.get(r["id"], [])) for r in rows]
+    return [
+        _row_to_progress(
+            r,
+            refs_by_id.get(r["id"], []),
+            is_running=sm.is_running(r["id"]),
+        )
+        for r in rows
+    ]
 
 
 @router.get("/design-works/{dw_id}")
@@ -219,7 +238,8 @@ async def get_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
     if not row:
         raise NotFoundError(f"design_work {dw_id!r} not found")
     refs = await _load_repo_refs(db, dw_id)
-    return _row_to_progress(row, refs)
+    sm = request.app.state.design_work_sm
+    return _row_to_progress(row, refs, is_running=sm.is_running(dw_id))
 
 
 @router.post("/design-works/{dw_id}/tick")
@@ -228,7 +248,7 @@ async def tick_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
     sm = request.app.state.design_work_sm
     dw = await sm.tick(dw_id)
     refs = await _load_repo_refs(request.app.state.db, dw_id)
-    return _row_to_progress(dw, refs)
+    return _row_to_progress(dw, refs, is_running=sm.is_running(dw_id))
 
 
 @router.post("/design-works/{dw_id}/cancel", status_code=204)

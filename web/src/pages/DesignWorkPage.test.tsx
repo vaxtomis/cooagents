@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import type { DesignWork } from "../types";
+import type { DesignWork, WorkspaceEventsEnvelope } from "../types";
 import { DesignWorkPage } from "./DesignWorkPage";
 
 vi.mock("../api/designWorks", () => ({
@@ -17,10 +17,14 @@ vi.mock("../api/designDocs", () => ({
 vi.mock("../api/reviews", () => ({
   listReviews: vi.fn(),
 }));
+vi.mock("../api/workspaceEvents", () => ({
+  listWorkspaceEvents: vi.fn(),
+}));
 
 import { getDesignWork } from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
 import { listReviews } from "../api/reviews";
+import { listWorkspaceEvents } from "../api/workspaceEvents";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -52,12 +56,20 @@ const baseDesignWork: DesignWork = {
   version: null,
   created_at: "2026-04-01T00:00:00Z",
   updated_at: "2026-04-23T00:00:00Z",
+  is_running: false,
+  repo_refs: [],
+};
+
+const eventsEnvelope: WorkspaceEventsEnvelope = {
+  events: [],
+  pagination: { limit: 8, offset: 0, total: 0, has_more: false },
 };
 
 describe("DesignWorkPage", () => {
   it("renders escalated banner and missing_sections chips when state=ESCALATED", async () => {
     vi.mocked(getDesignWork).mockResolvedValue({ ...baseDesignWork, current_state: "ESCALATED" });
     vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     renderPage();
 
     expect(await screen.findByText(/DesignWork 已升级/)).toBeInTheDocument();
@@ -74,6 +86,7 @@ describe("DesignWorkPage", () => {
       output_design_doc_id: "doc-1",
     });
     vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     vi.mocked(getDesignDocContent).mockRejectedValue(
       new ApiError(410, "file missing", null),
     );
@@ -83,5 +96,41 @@ describe("DesignWorkPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/源文件已缺失/)).toBeInTheDocument();
     });
+  });
+
+  it("renders running banner, disables tick, and shows scoped activity", async () => {
+    vi.mocked(getDesignWork).mockResolvedValue({
+      ...baseDesignWork,
+      is_running: true,
+    });
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue({
+      events: [
+        {
+          id: 1,
+          event_id: "evt-1",
+          event_name: "design_work.started",
+          workspace_id: "ws-1",
+          correlation_id: "dw-1",
+          payload: { title: "Feature", mode: "new" },
+          ts: "2026-04-23T00:00:01Z",
+        },
+      ],
+      pagination: { limit: 8, offset: 0, total: 1, has_more: false },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("自动推进中")).toBeInTheDocument();
+    expect(screen.getByText(/后台驱动正在推进此 DesignWork/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "推进" })).toBeDisabled();
+    expect(await screen.findByText("design_work.started")).toBeInTheDocument();
+    expect(listWorkspaceEvents).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({
+        correlation_id: "dw-1",
+        event_name: expect.arrayContaining(["design_work.started"]),
+      }),
+    );
   });
 });
