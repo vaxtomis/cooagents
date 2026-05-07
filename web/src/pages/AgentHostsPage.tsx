@@ -64,6 +64,8 @@ const DANGER_ACTION_BUTTON_CLASSNAME =
   "inline-flex items-center justify-center gap-2 rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition hover:border-danger/45 hover:bg-danger/10 hover:text-danger disabled:opacity-50";
 const FORM_FIELD_CLASSNAME =
   "w-full rounded-2xl border border-border-strong bg-panel px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]";
+const FILTER_DECK_CLASSNAME =
+  "grid gap-4 rounded-[24px] border border-border bg-panel-strong/42 p-4 shadow-[0_16px_30px_rgba(0,0,0,0.18)] xl:max-w-[34rem] xl:justify-self-end xl:grid-cols-[minmax(15rem,18rem)_auto] xl:items-end";
 
 function LoadingSkeleton() {
   return (
@@ -442,8 +444,8 @@ export function AgentHostsPage() {
         }
       >
         <div className="space-y-4">
-          <div className="space-y-4">
-            <label className="space-y-1 text-sm text-muted">
+          <div className="grid gap-4 xl:grid-cols-[minmax(22rem,40rem)_minmax(22rem,1fr)] xl:items-start">
+            <label className="space-y-1.5 text-sm text-muted xl:max-w-[40rem]">
               <span>搜索</span>
               <input
                 className={FORM_FIELD_CLASSNAME}
@@ -452,8 +454,8 @@ export function AgentHostsPage() {
                 value={search}
               />
             </label>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <label className="space-y-1 text-sm text-muted">
+            <div className={FILTER_DECK_CLASSNAME}>
+              <label className="space-y-1.5 text-sm text-muted">
                 <span>Agent 类型</span>
                 <select
                   className={FORM_FIELD_CLASSNAME}
@@ -466,14 +468,16 @@ export function AgentHostsPage() {
                   <option value="codex">Codex</option>
                 </select>
               </label>
-              <div className="space-y-2">
-                <span className="text-sm text-muted">健康状态</span>
-                <SegmentedControl
-                  ariaLabel="Agent Host 健康状态"
-                  options={HEALTH_OPTIONS}
-                  onChange={(value) => setHealth(value)}
-                  value={health}
-                />
+              <div className="space-y-1.5 text-sm text-muted">
+                <span className="block">健康状态</span>
+                <div className="flex flex-wrap">
+                  <SegmentedControl
+                    ariaLabel="Agent Host 健康状态"
+                    options={HEALTH_OPTIONS}
+                    onChange={(value) => setHealth(value)}
+                    value={health}
+                  />
+                </div>
               </div>
             </div>
           </div>

@@ -28,6 +28,17 @@ const STATUS_OPTIONS = [
   { value: "all", label: "全部" },
 ] as const satisfies readonly { value: StatusFilter; label: string }[];
 
+const PRIMARY_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-soft/70 bg-[linear-gradient(180deg,rgba(208,160,90,0.98),rgba(169,112,45,0.92))] px-5 py-3 text-sm font-semibold text-ink-invert shadow-[0_18px_34px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.16)] transition hover:-translate-y-0.5 hover:brightness-105 disabled:opacity-60 disabled:hover:translate-y-0";
+const SECONDARY_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition hover:border-accent/50 hover:bg-panel hover:text-copy disabled:opacity-50";
+const NEUTRAL_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-copy/20 bg-copy px-4 py-3 text-sm font-semibold text-ink-invert shadow-[0_16px_30px_rgba(0,0,0,0.26)] transition hover:-translate-y-0.5 hover:bg-copy/92 disabled:opacity-60 disabled:hover:translate-y-0";
+const FORM_FIELD_CLASSNAME =
+  "w-full rounded-2xl border border-border-strong bg-panel px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]";
+const FILTER_DECK_CLASSNAME =
+  "grid gap-4 rounded-[24px] border border-border bg-panel-strong/42 p-4 shadow-[0_16px_30px_rgba(0,0,0,0.18)] xl:max-w-[32rem] xl:justify-self-end xl:grid-cols-[minmax(15rem,17rem)_auto] xl:items-end";
+
 function LoadingSkeleton() {
   return (
     <div className="space-y-3">
@@ -50,10 +61,10 @@ function WorkspaceRow({
   busy: boolean;
 }) {
   return (
-    <article className="rounded-2xl border border-border bg-panel-strong/70 p-3 shadow-[0_0_0_1px_rgba(209,207,197,0.2)]">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-3">
+    <article className="rounded-[26px] border border-border bg-panel-strong/72 p-4 shadow-[0_0_0_1px_rgba(209,207,197,0.2),0_18px_36px_rgba(0,0,0,0.24)]">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-3.5">
             <h3 className="font-serif text-xl font-medium text-copy">{workspace.title}</h3>
             <StatusBadge status={workspace.status} />
           </div>
@@ -65,11 +76,11 @@ function WorkspaceRow({
           <p className="text-[11px] uppercase tracking-[0.22em] text-muted-soft">
             更新于 {new Date(workspace.updated_at).toLocaleString()}
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-3">
             <button
               type="button"
               onClick={() => onOpen(workspace.id)}
-              className="rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90"
+              className={NEUTRAL_ACTION_BUTTON_CLASSNAME}
             >
               打开
             </button>
@@ -78,7 +89,7 @@ function WorkspaceRow({
                 type="button"
                 disabled={busy}
                 onClick={() => onArchive(workspace.id)}
-                className="rounded-xl border border-border-strong bg-panel px-4 py-2 text-sm font-medium text-muted transition hover:border-danger/30 hover:text-danger disabled:opacity-50"
+                className={SECONDARY_ACTION_BUTTON_CLASSNAME}
               >
                 归档
               </button>
@@ -123,35 +134,37 @@ function CreateForm({ onCreated }: { onCreated: (workspace: Workspace) => void }
   }
 
   return (
-    <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={handleSubmit}>
-      <label className="space-y-1 text-sm text-muted">
+    <form className="space-y-5" onSubmit={handleSubmit}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="space-y-1.5 text-sm text-muted">
           <span>标题</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder="Workspace 标题"
-          value={title}
-        />
-      </label>
-      <label className="space-y-1 text-sm text-muted">
+          <input
+            className={FORM_FIELD_CLASSNAME}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Workspace 标题"
+            value={title}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted">
           <span>Slug 标识</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setSlug(event.target.value.toLowerCase())}
-          placeholder="my-workspace"
-          value={slug}
-        />
-      </label>
-      <div className="flex items-end">
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setSlug(event.target.value.toLowerCase())}
+            placeholder="my-workspace"
+            value={slug}
+          />
+        </label>
+      </div>
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+      <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end">
         <button
-          className="w-full rounded-xl bg-accent px-4 py-3 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft disabled:opacity-60 md:w-auto"
+          className={`${PRIMARY_ACTION_BUTTON_CLASSNAME} w-full sm:w-auto`}
           disabled={submitting}
           type="submit"
         >
           {submitting ? "创建中..." : "创建 Workspace"}
         </button>
       </div>
-      {error ? <p className="text-xs text-danger md:col-span-3">{error}</p> : null}
     </form>
   );
 }
@@ -217,6 +230,7 @@ export function WorkspacesPage() {
   return (
     <div className="space-y-6">
       <AppDialog
+        size="wide"
         description="填写标题和稳定 slug，创建后会直接进入该 Workspace。"
         onClose={() => setCreateOpen(false)}
         open={createOpen}
@@ -228,7 +242,7 @@ export function WorkspacesPage() {
       <SectionPanel
         actions={
           <button
-            className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft"
+            className={PRIMARY_ACTION_BUTTON_CLASSNAME}
             onClick={() => setCreateOpen(true)}
             type="button"
           >
@@ -239,39 +253,43 @@ export function WorkspacesPage() {
         title="Workspace 工作台"
       >
         <div className="space-y-4">
-          <div className="grid gap-3 xl:grid-cols-[1.2fr_auto_auto]">
-            <label className="space-y-1 text-sm text-muted">
+          <div className="grid gap-4 xl:grid-cols-[minmax(22rem,40rem)_minmax(20rem,1fr)] xl:items-start">
+            <label className="space-y-1.5 text-sm text-muted xl:max-w-[40rem]">
               <span>搜索</span>
               <input
-                className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
+                className={FORM_FIELD_CLASSNAME}
                 value={search}
                 onChange={(event) => updateFilters({ search: event.target.value, offset: 0 })}
                 placeholder="按标题或 slug 搜索"
               />
             </label>
 
-            <label className="space-y-1 text-sm text-muted">
-              <span>排序</span>
-              <select
-                className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-                value={sort}
-                onChange={(event) => updateFilters({ sort: event.target.value as WorkspaceSort, offset: 0 })}
-              >
-                <option value="updated_desc">最近更新</option>
-                <option value="created_desc">最近创建</option>
-                <option value="title_asc">标题 A-Z</option>
-                <option value="title_desc">标题 Z-A</option>
-              </select>
-            </label>
+            <div className={FILTER_DECK_CLASSNAME}>
+              <label className="space-y-1.5 text-sm text-muted">
+                <span>排序</span>
+                <select
+                  className={FORM_FIELD_CLASSNAME}
+                  value={sort}
+                  onChange={(event) => updateFilters({ sort: event.target.value as WorkspaceSort, offset: 0 })}
+                >
+                  <option value="updated_desc">最近更新</option>
+                  <option value="created_desc">最近创建</option>
+                  <option value="title_asc">标题 A-Z</option>
+                  <option value="title_desc">标题 Z-A</option>
+                  </select>
+              </label>
 
-            <div className="space-y-1">
-              <span className="text-sm text-muted">状态</span>
-              <SegmentedControl
-                ariaLabel="Workspace 状态"
-                options={STATUS_OPTIONS}
-                value={status}
-                onChange={(value) => updateFilters({ status: value, offset: 0 })}
-              />
+              <div className="space-y-1.5 text-sm text-muted">
+                <span className="block">状态</span>
+                <div className="flex flex-wrap">
+                  <SegmentedControl
+                    ariaLabel="Workspace 状态"
+                    options={STATUS_OPTIONS}
+                    value={status}
+                    onChange={(value) => updateFilters({ status: value, offset: 0 })}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 

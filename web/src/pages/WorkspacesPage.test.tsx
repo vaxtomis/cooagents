@@ -66,6 +66,7 @@ describe("WorkspacesPage", () => {
     await waitFor(() => expect(listWorkspacePage).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: "新建 Workspace" }));
+    expect(document.querySelector('[data-dialog-size="wide"]')).not.toBeNull();
     fireEvent.change(screen.getByLabelText("标题"), { target: { value: "New WS" } });
     fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "new-ws" } });
     fireEvent.click(screen.getByRole("button", { name: "创建 Workspace" }));

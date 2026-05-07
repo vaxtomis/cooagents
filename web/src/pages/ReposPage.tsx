@@ -63,6 +63,8 @@ const DANGER_ACTION_BUTTON_CLASSNAME =
   "inline-flex items-center justify-center gap-2 rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition hover:border-danger/45 hover:bg-danger/10 hover:text-danger disabled:opacity-50";
 const FORM_FIELD_CLASSNAME =
   "w-full rounded-2xl border border-border-strong bg-panel px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]";
+const FILTER_DECK_CLASSNAME =
+  "grid gap-4 rounded-[24px] border border-border bg-panel-strong/42 p-4 shadow-[0_16px_30px_rgba(0,0,0,0.18)] xl:max-w-[42rem] xl:justify-self-end xl:grid-cols-[minmax(13rem,15rem)_minmax(15rem,17rem)_auto] xl:items-end";
 
 function LoadingSkeleton() {
   return (
@@ -405,8 +407,8 @@ export function ReposPage() {
         }
       >
         <div className="space-y-4">
-          <div className="space-y-4">
-            <label className="space-y-1 text-sm text-muted">
+          <div className="grid gap-4 xl:grid-cols-[minmax(22rem,38rem)_minmax(24rem,1fr)] xl:items-start">
+            <label className="space-y-1.5 text-sm text-muted xl:max-w-[38rem]">
               <span>搜索</span>
               <input
                 className={FORM_FIELD_CLASSNAME}
@@ -416,8 +418,8 @@ export function ReposPage() {
               />
             </label>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <label className="space-y-1 text-sm text-muted">
+            <div className={FILTER_DECK_CLASSNAME}>
+              <label className="space-y-1.5 text-sm text-muted">
                 <span>角色</span>
                 <select
                   className={FORM_FIELD_CLASSNAME}
@@ -430,10 +432,10 @@ export function ReposPage() {
                       {ROLE_LABELS[option]}
                     </option>
                   ))}
-                </select>
+                  </select>
               </label>
 
-              <label className="space-y-1 text-sm text-muted">
+              <label className="space-y-1.5 text-sm text-muted">
                 <span>排序</span>
                 <select
                   className={FORM_FIELD_CLASSNAME}
@@ -444,18 +446,20 @@ export function ReposPage() {
                   <option value="last_fetched_desc">最近 fetch</option>
                   <option value="name_asc">名称 A-Z</option>
                   <option value="name_desc">名称 Z-A</option>
-                </select>
+                  </select>
               </label>
-            </div>
 
-            <div className="space-y-2">
-              <span className="text-sm text-muted">健康度</span>
-              <SegmentedControl
-                ariaLabel="仓库 fetch 状态"
-                options={STATUS_OPTIONS}
-                value={status}
-                onChange={(value) => updateFilters({ status: value, offset: 0 })}
-              />
+              <div className="space-y-1.5 text-sm text-muted">
+                <span className="block">健康度</span>
+                <div className="flex flex-wrap">
+                  <SegmentedControl
+                    ariaLabel="仓库 fetch 状态"
+                    options={STATUS_OPTIONS}
+                    value={status}
+                    onChange={(value) => updateFilters({ status: value, offset: 0 })}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
