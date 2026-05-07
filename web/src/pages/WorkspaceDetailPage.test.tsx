@@ -364,6 +364,39 @@ describe("WorkspaceDetailPage", () => {
     });
   });
 
+  it("DevWork form sends policy overrides when provided", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
+    vi.mocked(repoBranches).mockResolvedValue(branchesMain);
+    vi.mocked(createDevWork).mockResolvedValue(devWork);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建开发工作" }));
+
+    fireEvent.change(await screen.findByDisplayValue("请选择"), { target: { value: "doc-1" } });
+    const selects = await screen.findAllByRole("combobox");
+    fireEvent.change(selects[1], { target: { value: "repo-aaa111" } });
+    await waitFor(() => expect(repoBranches).toHaveBeenCalled());
+    fireEvent.change((await screen.findAllByRole("combobox"))[2], { target: { value: "main" } });
+
+    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
+    fireEvent.change(screen.getByLabelText("DevWork max rounds"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("DevWork rubric threshold"), { target: { value: "92" } });
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => {
+      const args = vi.mocked(createDevWork).mock.calls[0][0];
+      expect(args.max_rounds).toBe(2);
+      expect(args.rubric_threshold).toBe(92);
+    });
+  });
+
   it("DevWork form blocks submit when two rows share a mount_name", async () => {
     vi.mocked(getWorkspace).mockResolvedValue(workspace);
     vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
@@ -475,6 +508,33 @@ describe("WorkspaceDetailPage", () => {
     await waitFor(() => {
       const args = vi.mocked(createDesignWork).mock.calls[0][0];
       expect(args.agent).toBe("codex");
+    });
+  });
+
+  it("DesignWork form sends policy overrides when provided", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listDesignDocs).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
+    vi.mocked(createDesignWork).mockResolvedValue(designWork);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "新建设计工作" }));
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Hello" } });
+    fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "feature-x" } });
+    fireEvent.change(screen.getByLabelText("需求说明"), { target: { value: "do something" } });
+    fireEvent.change(screen.getByLabelText("DesignWork max loops"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("DesignWork rubric threshold"), { target: { value: "88" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => {
+      const args = vi.mocked(createDesignWork).mock.calls[0][0];
+      expect(args.max_loops).toBe(1);
+      expect(args.rubric_threshold).toBe(88);
     });
   });
 

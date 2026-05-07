@@ -14,6 +14,7 @@ from src.database import Database
 from src.design_doc_manager import DesignDocManager
 from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
+from src.exceptions import BadRequestError
 from src.storage import LocalFileStore
 from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.git_utils import run_git
@@ -402,6 +403,74 @@ async def test_happy_path_first_pass(env):
         (dw["id"],),
     )
     assert ev is not None
+
+
+async def test_rubric_threshold_override_wins_over_design_doc(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor)
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+        rubric_threshold=95,
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "ESCALATED"
+    assert final["last_score"] == 90
+    gates = json.loads(final["gates_json"])
+    assert gates["rubric_threshold_override"] == 95
+
+
+async def test_max_rounds_override_wins_over_config(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        _step5_writer(
+            {
+                "score": 40,
+                "issues": [{"message": "needs work"}],
+                "problem_category": "req_gap",
+            }
+        ),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor, cfg=_build_config(max_rounds=5))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+        max_rounds=0,
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "ESCALATED"
+    assert final["iteration_rounds"] == 0
+    gates = json.loads(final["gates_json"])
+    assert gates["max_rounds_override"] == 0
+
+
+async def test_create_rejects_max_rounds_override_above_config(env):
+    sm = _make_sm(
+        env,
+        ScriptedExecutor([]),
+        cfg=_build_config(max_rounds=1),
+    )
+    with pytest.raises(BadRequestError, match="exceeds configured cap"):
+        await sm.create(
+            workspace_id=env["ws"]["id"],
+            design_doc_id=env["dd"]["id"],
+            repo_refs=_refs_arg(env),
+            prompt="build login",
+            max_rounds=2,
+        )
 
 
 async def test_req_gap_routes_to_step2(env):

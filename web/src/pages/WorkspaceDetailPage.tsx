@@ -8,6 +8,7 @@ import { listWorkspaceEvents } from "../api/workspaceEvents";
 import { archiveWorkspace, getWorkspace } from "../api/workspaces";
 import { AppDialog } from "../components/AppDialog";
 import { PaginationControls } from "../components/PaginationControls";
+import { PolicyOverrideFields, parsePolicyOverrides } from "../components/PolicyOverrideFields";
 import { EmptyState, SectionPanel } from "../components/SectionPanel";
 import {
   MOUNT_NAME_RE,
@@ -118,6 +119,8 @@ function DesignWorkCreateForm({
   const [userInput, setUserInput] = useState("");
   const [needsFrontendMockup, setNeedsFrontendMockup] = useState(false);
   const [agent, setAgent] = useState<AgentKind | "">("");
+  const [maxLoops, setMaxLoops] = useState("");
+  const [rubricThreshold, setRubricThreshold] = useState("");
   const [showRepos, setShowRepos] = useState(false);
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -131,6 +134,9 @@ function DesignWorkCreateForm({
     if (!trimmedTitle) return setError("标题不能为空");
     if (!SLUG_RE.test(trimmedSlug)) return setError("Slug 标识必须是 kebab-case");
     if (trimmedInput.length === 0) return setError("需求说明不能为空");
+
+    const policyOverrides = parsePolicyOverrides({ maxLabel: "DesignWork max loops", maxRaw: maxLoops, thresholdLabel: "DesignWork rubric threshold", thresholdRaw: rubricThreshold });
+    if (policyOverrides.error) return setError(policyOverrides.error);
 
     let designRefs: RepoRef[] | undefined;
     if (showRepos && repoRefs.length > 0) {
@@ -156,12 +162,16 @@ function DesignWorkCreateForm({
         mode: "new",
         needs_frontend_mockup: needsFrontendMockup,
         agent: agent || undefined,
+        ...(policyOverrides.maxValue !== undefined ? { max_loops: policyOverrides.maxValue } : {}),
+        ...(policyOverrides.thresholdValue !== undefined ? { rubric_threshold: policyOverrides.thresholdValue } : {}),
         repo_refs: designRefs,
       });
       setTitle("");
       setSlug("");
       setUserInput("");
       setNeedsFrontendMockup(false);
+      setMaxLoops("");
+      setRubricThreshold("");
       setShowRepos(false);
       setRepoRefs([]);
       onCreated(created);
@@ -226,6 +236,8 @@ function DesignWorkCreateForm({
           </select>
         </label>
       </div>
+
+      <PolicyOverrideFields fieldClassName={FORM_FIELD_CLASSNAME} maxAriaLabel="DesignWork max loops" maxValue={maxLoops} onMaxChange={setMaxLoops} thresholdAriaLabel="DesignWork rubric threshold" thresholdValue={rubricThreshold} onThresholdChange={setRubricThreshold} />
 
       <div className="space-y-3">
         <button
@@ -306,6 +318,8 @@ function DevWorkCreateForm({
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
   const [prompt, setPrompt] = useState("");
   const [agent, setAgent] = useState<AgentKind | "">("");
+  const [maxRounds, setMaxRounds] = useState("");
+  const [rubricThreshold, setRubricThreshold] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -326,6 +340,9 @@ function DevWorkCreateForm({
     }
     if (!prompt.trim()) return setError("执行提示不能为空");
 
+    const policyOverrides = parsePolicyOverrides({ maxLabel: "DevWork max rounds", maxRaw: maxRounds, thresholdLabel: "DevWork rubric threshold", thresholdRaw: rubricThreshold });
+    if (policyOverrides.error) return setError(policyOverrides.error);
+
     const payloadRefs: DevRepoRef[] = repoRefs.map((row) => ({
       repo_id: row.repo_id,
       base_branch: row.base_branch,
@@ -343,10 +360,14 @@ function DevWorkCreateForm({
           repo_refs: payloadRefs,
           prompt: prompt.trim(),
           agent: agent || undefined,
+          ...(policyOverrides.maxValue !== undefined ? { max_rounds: policyOverrides.maxValue } : {}),
+          ...(policyOverrides.thresholdValue !== undefined ? { rubric_threshold: policyOverrides.thresholdValue } : {}),
       });
       setDesignDocId("");
       setRepoRefs([]);
       setPrompt("");
+      setMaxRounds("");
+      setRubricThreshold("");
       onCreated(created);
     } catch (err) {
       setError(extractError(err, "创建开发工作失败"));
@@ -401,6 +422,8 @@ function DevWorkCreateForm({
             <option value="codex">Codex</option>
           </select>
       </label>
+
+      <PolicyOverrideFields fieldClassName={FORM_FIELD_CLASSNAME} maxAriaLabel="DevWork max rounds" maxValue={maxRounds} onMaxChange={setMaxRounds} thresholdAriaLabel="DevWork rubric threshold" thresholdValue={rubricThreshold} onThresholdChange={setRubricThreshold} />
 
       {error ? <p className="text-xs text-danger">{error}</p> : null}
 

@@ -78,7 +78,7 @@ class DesignConfig(BaseModel):
     from ``devwork.max_rounds``; the two loops are semantically different.
     """
 
-    max_loops: int = 3
+    max_loops: int = Field(default=3, ge=0, le=50)
     # Per-LLM-call timeout for D4 LLM_GENERATE. Decoupled from the legacy
     # ``TimeoutConfig.design_execution`` (1800s) because that value was tuned
     # for the old 15-stage design phase (agent session lifecycle); the
@@ -110,7 +110,7 @@ class DevWorkConfig(BaseModel):
     different (requirements refinement vs. code-quality scoring).
     """
 
-    max_rounds: int = 5
+    max_rounds: int = Field(default=5, ge=0, le=50)
     # Per-step LLM wall-clock timeouts (seconds). Step2 plans the
     # iteration design (F2=B); Step3 is prompt-side context retrieval;
     # Step5 is rubric scoring. Step4 is intentionally absent here — it

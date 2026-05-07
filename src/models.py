@@ -296,6 +296,9 @@ class CreateDesignWorkRequest(BaseModel):
     # first to the LLM-produced front-matter, then to
     # config.scoring.default_threshold (=80). (U2)
     rubric_threshold: int | None = Field(default=None, ge=1, le=100)
+    # Optional per-DesignWork override for D3 <-> D5 retry loops. None uses
+    # config.design.max_loops.
+    max_loops: int | None = Field(default=None, ge=0, le=50)
     # Phase 4 (repo-registry): optional repo binding. Empty list keeps
     # pure-doc DesignWorks creatable.
     repo_refs: list["RepoRef"] = Field(default_factory=list)
@@ -411,6 +414,10 @@ class CreateDevWorkRequest(BaseModel):
     design_doc_id: str
     prompt: str = Field(..., min_length=1, max_length=20000)
     agent: AgentKind | None = None
+    # Optional per-DevWork overrides. None means use the design_doc/global
+    # threshold and config.devwork.max_rounds defaults.
+    rubric_threshold: int | None = Field(default=None, ge=1, le=100)
+    max_rounds: int | None = Field(default=None, ge=0, le=50)
     # Phase 4 (repo-registry): replaces the free-form ``repo_path`` field.
     # At least one ref required; ``mount_name`` must be unique within the
     # payload, and at most one ref may carry ``is_primary=True``. The

@@ -53,6 +53,9 @@ design:
 scoring:
   default_threshold: 80         # fallback when API + LLM both omit rubric_threshold (U2)
 
+devwork:
+  max_rounds: 5
+
 preferred_design_agent: "claude"
 preferred_dev_agent: "claude"
 

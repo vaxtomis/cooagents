@@ -12,6 +12,7 @@ from src.database import Database
 from src.agent_hosts.repo import AgentHostRepo
 from src.design_doc_manager import DesignDocManager
 from src.design_work_sm import DesignWorkStateMachine
+from src.exceptions import BadRequestError
 from src.models import DesignWorkMode
 from src.storage import LocalFileStore
 from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
@@ -288,6 +289,42 @@ async def test_escalate_on_max_loops(env):
     payload = json.loads(ev["payload_json"])
     assert payload["reason"] == "post-validate failed"
     assert payload["missing_sections"]
+
+
+async def test_create_max_loops_override_wins_over_config(env):
+    stub = StubExecutor(FIXTURES / "always_missing")
+    sm = DesignWorkStateMachine(
+        db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
+        executor=stub, config=_build_config(max_loops=3),
+        registry=env["registry"],
+    )
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], title="T", sub_slug="demo-override",
+        user_input="x" * 50, mode=DesignWorkMode.new, parent_version=None,
+        needs_frontend_mockup=False, agent="claude", max_loops=1,
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_state"] == "ESCALATED"
+    assert stub.call_count == 2
+    row = await env["db"].fetchone(
+        "SELECT gates_json FROM design_works WHERE id=?", (dw["id"],)
+    )
+    assert json.loads(row["gates_json"])["max_loops_override"] == 1
+
+
+async def test_create_rejects_max_loops_override_above_config(env):
+    sm = DesignWorkStateMachine(
+        db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
+        executor=StubExecutor(FIXTURES / "perfect"),
+        config=_build_config(max_loops=1), registry=env["registry"],
+    )
+    with pytest.raises(BadRequestError, match="exceeds configured cap"):
+        await sm.create(
+            workspace_id=env["ws"]["id"], title="T",
+            sub_slug="demo-too-many-loops", user_input="x" * 50,
+            mode=DesignWorkMode.new, parent_version=None,
+            needs_frontend_mockup=False, agent="claude", max_loops=2,
+        )
 
 
 async def test_optimize_mode_stubbed(env):

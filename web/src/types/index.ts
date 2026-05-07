@@ -314,6 +314,7 @@ export interface CreateDesignWorkPayload {
   needs_frontend_mockup?: boolean;
   agent?: AgentKind;
   rubric_threshold?: number;
+  max_loops?: number;
   // Phase 4 (repo-registry): optional repo binding. Empty list keeps
   // pure-doc DesignWorks creatable; omit (or send `[]`) when none.
   repo_refs?: RepoRef[];
@@ -336,6 +337,8 @@ export interface CreateDevWorkPayload {
   repo_refs: DevRepoRef[];
   prompt: string;
   agent?: AgentKind;
+  rubric_threshold?: number;
+  max_rounds?: number;
 }
 
 // ---------------------------------------------------------------------------

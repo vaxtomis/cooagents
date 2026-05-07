@@ -212,6 +212,21 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         row = await self._get(dev_id)
         return _decode_gates(row.get("gates_json") if row else None)
 
+    def _resolve_max_rounds(self, dw: dict[str, Any]) -> int:
+        gates = _decode_gates(dw.get("gates_json"))
+        override = gates.get("max_rounds_override")
+        if isinstance(override, int) and 0 <= override <= 50:
+            return override
+        return self.config.devwork.max_rounds
+
+    def _validate_max_rounds_override(self, max_rounds: int | None) -> None:
+        configured_cap = self.config.devwork.max_rounds
+        if max_rounds is not None and not 0 <= max_rounds <= configured_cap:
+            raise BadRequestError(
+                f"max_rounds override {max_rounds} exceeds configured cap "
+                f"{configured_cap}"
+            )
+
     # ---- Phase 8a host dispatch helpers ----
 
     async def _pick_host(self, agent: str) -> str:
@@ -287,6 +302,8 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         repo_refs: list[tuple[DevRepoRef, str | None]],
         prompt: str,
         agent: str | None = None,
+        rubric_threshold: int | None = None,
+        max_rounds: int | None = None,
     ) -> dict[str, Any]:
         """Create a DevWork plus its ``dev_work_repos`` rows atomically.
 
@@ -319,6 +336,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 f"design_doc {design_doc_id!r} belongs to workspace "
                 f"{dd['workspace_id']!r}, not {workspace_id!r}"
             )
+        self._validate_max_rounds_override(max_rounds)
 
         if not repo_refs:
             raise BadRequestError(
@@ -333,6 +351,14 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         devwork_branch = DEVWORK_BRANCH_FMT.format(
             slug=ws["slug"], dw_short=dw_short
         )
+        gates_payload = {
+            key: value
+            for key, value in (
+                ("rubric_threshold_override", rubric_threshold),
+                ("max_rounds_override", max_rounds),
+            )
+            if value is not None
+        }
 
         async with self.db.transaction():
             await self.db.execute(
@@ -357,7 +383,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                     None,
                     resolved_agent,
                     host_id,
-                    None,
+                    json.dumps(gates_payload) if gates_payload else None,
                     None,
                     None,
                     now,
@@ -1151,7 +1177,11 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         )
 
     async def _resolve_rubric_threshold(self, dw: dict[str, Any]) -> int:
-        """Prefer design_doc.rubric_threshold; fall back to scoring default."""
+        """Prefer per-DevWork override, then design_doc, then scoring default."""
+        gates = _decode_gates(dw.get("gates_json"))
+        override = gates.get("rubric_threshold_override")
+        if isinstance(override, int) and 1 <= override <= 100:
+            return override
         row = await self.db.fetchone(
             "SELECT rubric_threshold FROM design_docs WHERE id=?",
             (dw["design_doc_id"],),
@@ -1315,7 +1345,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         problem_category: ProblemCategory | None,
     ) -> None:
         next_round = dw["iteration_rounds"] + 1
-        if next_round > self.config.devwork.max_rounds:
+        if next_round > self._resolve_max_rounds(dw):
             await self._escalate(
                 dw, reason=reason, problem_category=problem_category
             )

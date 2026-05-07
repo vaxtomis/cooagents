@@ -207,6 +207,32 @@ def test_create_dev_work_request_happy_one_primary():
     assert req.agent is None
 
 
+def test_create_dev_work_request_accepts_policy_overrides():
+    req = CreateDevWorkRequest(
+        workspace_id="ws-1", design_doc_id="des-1", prompt="p",
+        repo_refs=[_ref("frontend")],
+        max_rounds=2,
+        rubric_threshold=92,
+    )
+    assert req.max_rounds == 2
+    assert req.rubric_threshold == 92
+
+
+def test_create_dev_work_request_rejects_invalid_policy_overrides():
+    with pytest.raises(ValidationError):
+        CreateDevWorkRequest(
+            workspace_id="ws-1", design_doc_id="des-1", prompt="p",
+            repo_refs=[_ref("frontend")],
+            max_rounds=-1,
+        )
+    with pytest.raises(ValidationError):
+        CreateDevWorkRequest(
+            workspace_id="ws-1", design_doc_id="des-1", prompt="p",
+            repo_refs=[_ref("frontend")],
+            rubric_threshold=101,
+        )
+
+
 def test_create_design_work_request_optional_repo_refs_default_empty():
     req = CreateDesignWorkRequest(
         workspace_id="ws-1", title="T", slug="t",
@@ -223,6 +249,15 @@ def test_create_design_work_request_with_repo_refs():
         repo_refs=[RepoRef(repo_id="repo-aaa", base_branch="main")],
     )
     assert len(req.repo_refs) == 1
+
+
+def test_create_design_work_request_accepts_max_loops_override():
+    req = CreateDesignWorkRequest(
+        workspace_id="ws-1", title="T", slug="t",
+        user_input="hello", mode=DesignWorkMode.new,
+        max_loops=1,
+    )
+    assert req.max_loops == 1
 
 
 def test_retry_design_work_request_allows_null_agent_and_empty_repo_refs():

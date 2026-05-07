@@ -220,6 +220,17 @@ class DesignWorkStateMachine:
             (json.dumps(gates, ensure_ascii=False), self._now(), dw_id),
         )
 
+    def _resolve_max_loops(self, dw: dict) -> int:
+        gates = _decode_gates(dw.get("gates_json"))
+        override = gates.get("max_loops_override")
+        if isinstance(override, int) and 0 <= override <= 50:
+            return override
+        return self.config.design.max_loops
+
+    def _validate_max_loops_override(self, max_loops: int | None) -> None:
+        cap = self.config.design.max_loops
+        if max_loops is not None and not 0 <= max_loops <= cap:
+            raise BadRequestError(f"max_loops override {max_loops} exceeds configured cap {cap}")
     # ---- public API ----
 
     async def create(
@@ -234,6 +245,7 @@ class DesignWorkStateMachine:
         needs_frontend_mockup: bool,
         agent: str | None,
         rubric_threshold: int | None = None,
+        max_loops: int | None = None,
         repo_refs: list[tuple[RepoRef, str | None]] | None = None,
     ) -> dict:
         """Create a DesignWork plus its ``design_work_repos`` rows atomically.
@@ -250,6 +262,7 @@ class DesignWorkStateMachine:
             raise BadRequestError(
                 f"workspace {workspace_id!r} is archived; cannot create DesignWork"
             )
+        self._validate_max_loops_override(max_loops)
 
         wid = self._new_id()
         now = self._now()
@@ -268,11 +281,14 @@ class DesignWorkStateMachine:
         output_rel = (
             f"designs/DES-{sub_slug}-{version}.md" if version else None
         )
-        gates_payload = (
-            {"rubric_threshold_override": rubric_threshold}
-            if rubric_threshold is not None
-            else None
-        )
+        gates_payload = {
+            key: value
+            for key, value in (
+                ("rubric_threshold_override", rubric_threshold),
+                ("max_loops_override", max_loops),
+            )
+            if value is not None
+        }
 
         resolved_agent = await self._resolve_agent(agent)
         host_id = await self._pick_host(resolved_agent)
@@ -775,7 +791,7 @@ class DesignWorkStateMachine:
         self, dw: dict, missing: list[str], reason: str
     ) -> None:
         next_loop = dw["loop"] + 1
-        if next_loop > self.config.design.max_loops:
+        if next_loop > self._resolve_max_loops(dw):
             await self._escalate(dw, reason=reason, missing=missing)
             return
         await self.db.execute(

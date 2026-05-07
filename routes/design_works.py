@@ -181,6 +181,7 @@ async def create_design_work(
         needs_frontend_mockup=req.needs_frontend_mockup,
         agent=req.agent.value if req.agent is not None else None,
         rubric_threshold=req.rubric_threshold,  # U2 API override
+        max_loops=req.max_loops,
         repo_refs=validated,
     )
     # Fire-and-forget background driver; errors are logged inside the SM,
