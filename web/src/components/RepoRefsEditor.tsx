@@ -126,7 +126,7 @@ export function RepoRefsEditor({ mode, value, onChange, minRows }: Props) {
   const hiddenCount = allRepos.length - healthyRepos.length;
 
   return (
-    <div className="space-y-3 rounded-2xl border border-border bg-panel-strong/40 p-3">
+    <div className="space-y-4 rounded-[24px] border border-border bg-panel-strong/45 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-5">
       {reposQuery.isLoading ? (
         <p className="text-xs text-muted">加载仓库列表...</p>
       ) : null}
@@ -141,7 +141,7 @@ export function RepoRefsEditor({ mode, value, onChange, minRows }: Props) {
         </p>
       ) : null}
 
-      <ul className="space-y-2">
+      <ul className="space-y-3">
         {renderedRows.map((row, index) => (
           <li key={index}>
             <RowEditor
@@ -167,18 +167,18 @@ export function RepoRefsEditor({ mode, value, onChange, minRows }: Props) {
         ))}
       </ul>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+      <div className="flex flex-col gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
         <button
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-panel-strong/60 px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-border-dark/60 bg-panel-strong/75 px-4 py-2.5 text-sm font-medium text-copy-soft shadow-[0_12px_24px_rgba(0,0,0,0.24)] transition hover:border-accent/45 hover:bg-panel hover:text-copy disabled:opacity-50"
           disabled={allRepos.length === 0}
           onClick={addRow}
           type="button"
         >
-          <Plus className="size-3.5" />
+          <Plus className="size-4" />
           添加仓库
         </button>
         {hiddenCount > 0 ? (
-          <label className="flex items-center gap-2 text-[11px] text-muted-soft">
+          <label className="flex items-center gap-2.5 text-[11px] text-muted-soft sm:justify-end">
             <input
               checked={showUnhealthy}
               onChange={(event) => setShowUnhealthy(event.target.checked)}
@@ -211,7 +211,7 @@ function RowEditor({
   const branches = branchesQuery.data?.branches ?? [];
 
   return (
-    <div className="space-y-2 rounded-xl border border-border bg-panel-strong/70 p-3">
+    <div className="space-y-3 rounded-[20px] border border-border bg-panel-strong/72 p-4 shadow-[0_10px_24px_rgba(0,0,0,0.18)]">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] uppercase tracking-[0.2em] text-muted-soft">
           仓库 #{index + 1}
@@ -219,7 +219,7 @@ function RowEditor({
         {removable ? (
           <button
             aria-label={`移除仓库 #${index + 1}`}
-            className="inline-flex items-center gap-1 rounded-md border border-border-strong bg-panel-strong/40 px-2 py-1 text-[11px] text-muted transition hover:border-danger/40 hover:text-danger"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border-dark/60 bg-panel-strong/50 px-2.5 py-1.5 text-xs font-medium text-copy-soft transition hover:border-danger/40 hover:bg-danger/10 hover:text-danger"
             onClick={onRemove}
             type="button"
           >
@@ -229,11 +229,11 @@ function RowEditor({
         ) : null}
       </div>
 
-      <label className="block space-y-1 text-xs text-muted">
+      <label className="block space-y-1.5 text-sm text-muted">
         <span>仓库</span>
         <select
           aria-label={`仓库选择 #${index + 1}`}
-          className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none [&_option]:bg-panel-strong"
+          className="w-full rounded-2xl border border-border-strong bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)] [&_option]:bg-panel-strong"
           onChange={(event) => onPatch({ repo_id: event.target.value })}
           value={row.repo_id}
         >
@@ -251,12 +251,12 @@ function RowEditor({
         </select>
       </label>
 
-      <div className="grid gap-2 md:grid-cols-2">
-        <label className="space-y-1 text-xs text-muted">
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-1.5 text-sm text-muted">
           <span>基准分支</span>
           <select
             aria-label={`base_branch #${index + 1}`}
-            className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none disabled:opacity-50 [&_option]:bg-panel-strong"
+            className="w-full rounded-2xl border border-border-strong bg-panel-strong px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)] disabled:opacity-50 [&_option]:bg-panel-strong"
             disabled={!row.repo_id || branchesQuery.isLoading || !!branchesQuery.error}
             onChange={(event) => onPatch({ base_branch: event.target.value })}
             value={row.base_branch}
@@ -282,11 +282,11 @@ function RowEditor({
         </label>
 
         {mode === "dev" ? (
-          <label className="space-y-1 text-xs text-muted">
+          <label className="space-y-1.5 text-sm text-muted">
             <span>挂载名</span>
             <input
               aria-label={`mount_name #${index + 1}`}
-              className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 font-mono text-sm text-copy outline-none"
+              className="w-full rounded-2xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
               onChange={(event) => onPatch({ mount_name: event.target.value })}
               placeholder="frontend"
               value={row.mount_name}
@@ -306,7 +306,7 @@ function RowEditor({
       </div>
 
       {mode === "dev" ? (
-        <label className="flex items-center gap-2 text-xs text-muted">
+        <label className="flex items-center gap-3 rounded-2xl border border-border bg-panel/55 px-4 py-3 text-sm text-muted">
           <input
             checked={!!row.base_rev_lock}
             onChange={(event) => onPatch({ base_rev_lock: event.target.checked })}

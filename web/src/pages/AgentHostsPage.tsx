@@ -56,6 +56,15 @@ interface PendingAction {
   id: string;
 }
 
+const PRIMARY_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-soft/70 bg-[linear-gradient(180deg,rgba(208,160,90,0.98),rgba(169,112,45,0.92))] px-5 py-3 text-sm font-semibold text-ink-invert shadow-[0_18px_34px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.16)] transition hover:-translate-y-0.5 hover:brightness-105 disabled:opacity-60 disabled:hover:translate-y-0";
+const SECONDARY_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition hover:border-accent/50 hover:bg-panel hover:text-copy disabled:opacity-50";
+const DANGER_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition hover:border-danger/45 hover:bg-danger/10 hover:text-danger disabled:opacity-50";
+const FORM_FIELD_CLASSNAME =
+  "w-full rounded-2xl border border-border-strong bg-panel px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]";
+
 function LoadingSkeleton() {
   return (
     <div className="space-y-3">
@@ -93,14 +102,14 @@ function HostRow({
   const isLocal = host.id === LOCAL_HOST_ID;
 
   return (
-    <article className="rounded-2xl border border-border bg-panel-strong/70 p-3 shadow-[0_0_0_1px_rgba(209,207,197,0.2)]">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <article className="rounded-[26px] border border-border bg-panel-strong/72 p-4 shadow-[0_0_0_1px_rgba(209,207,197,0.2),0_18px_36px_rgba(0,0,0,0.24)]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex min-w-0 gap-4">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-accent/10 text-accent">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-[20px] bg-accent/12 text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
             <Server className="size-5" strokeWidth={1.8} />
           </div>
-          <div className="min-w-0 space-y-2">
-            <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 space-y-3">
+            <div className="flex flex-wrap items-center gap-3.5">
               <h3 className="font-serif text-xl font-medium text-copy">
                 {isLocal ? "本机 Agent Host" : host.id}
               </h3>
@@ -113,7 +122,7 @@ function HostRow({
               ) : null}
             </div>
             <p className="font-mono text-sm text-muted">{host.host}</p>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-soft">
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-soft">
               <span>ID：{host.id}</span>
               <span>并发上限：{host.max_concurrent}</span>
               <span>
@@ -142,12 +151,12 @@ function HostRow({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 lg:justify-end">
+        <div className="flex flex-wrap gap-3 lg:max-w-[16rem] lg:justify-end">
           <button
             type="button"
             disabled={checking}
             onClick={() => onHealthcheck(host.id)}
-            className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-panel px-4 py-2 text-sm font-medium text-muted transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
+            className={SECONDARY_ACTION_BUTTON_CLASSNAME}
           >
             <RefreshCw className="size-4" strokeWidth={1.8} />
             {checking ? "检查中..." : "健康检查"}
@@ -157,7 +166,7 @@ function HostRow({
               type="button"
               disabled={deleting}
               onClick={() => onDelete(host.id)}
-              className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-panel px-4 py-2 text-sm font-medium text-muted transition hover:border-danger/30 hover:text-danger disabled:opacity-50"
+              className={DANGER_ACTION_BUTTON_CLASSNAME}
             >
               <Trash2 className="size-4" strokeWidth={1.8} />
               删除
@@ -231,78 +240,80 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form className="grid gap-3 md:grid-cols-[1fr_1.4fr_1fr_1fr] xl:grid-cols-[1fr_1.6fr_1fr_1fr_1.2fr_auto]" onSubmit={handleSubmit}>
-      <label className="space-y-1 text-sm text-muted">
-        <span>Host ID（可选）</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setId(event.target.value)}
-          placeholder="ah-build-01"
-          value={id}
-        />
-      </label>
-      <label className="space-y-1 text-sm text-muted">
-        <span>连接地址</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setHost(event.target.value)}
-          placeholder="dev@10.0.0.5"
-          value={host}
-        />
-      </label>
-      <label className="space-y-1 text-sm text-muted">
-        <span>Agent 类型</span>
-        <select
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setAgentType(event.target.value as AgentHostType)}
-          value={agentType}
-        >
-          <option value="both">Claude + Codex</option>
-          <option value="claude">Claude</option>
-          <option value="codex">Codex</option>
-        </select>
-      </label>
-      <label className="space-y-1 text-sm text-muted">
-        <span>并发上限</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          inputMode="numeric"
-          min={1}
-          max={64}
-          onChange={(event) => setMaxConcurrent(event.target.value)}
-          placeholder="1"
-          type="number"
-          value={maxConcurrent}
-        />
-      </label>
-      <label className="space-y-1 text-sm text-muted">
-        <span>SSH key 路径</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setSshKey(event.target.value)}
-          placeholder="~/.ssh/id_ed25519"
-          value={sshKey}
-        />
-      </label>
-      <label className="space-y-1 text-sm text-muted xl:col-span-2">
-        <span>标签</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setLabelsText(event.target.value)}
-          placeholder="gpu, cn, high-memory"
-          value={labelsText}
-        />
-      </label>
-      <div className="flex items-end">
+    <form className="space-y-5" onSubmit={handleSubmit}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="space-y-1.5 text-sm text-muted">
+          <span>Host ID（可选）</span>
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setId(event.target.value)}
+            placeholder="ah-build-01"
+            value={id}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted md:col-span-2">
+          <span>连接地址</span>
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setHost(event.target.value)}
+            placeholder="dev@10.0.0.5"
+            value={host}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted">
+          <span>Agent 类型</span>
+          <select
+            className={FORM_FIELD_CLASSNAME}
+            onChange={(event) => setAgentType(event.target.value as AgentHostType)}
+            value={agentType}
+          >
+            <option value="both">Claude + Codex</option>
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
+        </label>
+        <label className="space-y-1.5 text-sm text-muted">
+          <span>并发上限</span>
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            inputMode="numeric"
+            min={1}
+            max={64}
+            onChange={(event) => setMaxConcurrent(event.target.value)}
+            placeholder="1"
+            type="number"
+            value={maxConcurrent}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted md:col-span-2">
+          <span>SSH key 路径</span>
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setSshKey(event.target.value)}
+            placeholder="~/.ssh/id_ed25519"
+            value={sshKey}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted md:col-span-2">
+          <span>标签</span>
+          <input
+            className={FORM_FIELD_CLASSNAME}
+            onChange={(event) => setLabelsText(event.target.value)}
+            placeholder="gpu, cn, high-memory"
+            value={labelsText}
+          />
+        </label>
+      </div>
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+      <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end">
         <button
-          className="w-full rounded-xl bg-accent px-4 py-3 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft disabled:opacity-60 md:w-auto"
+          className={`${PRIMARY_ACTION_BUTTON_CLASSNAME} w-full sm:w-auto`}
           disabled={submitting}
           type="submit"
         >
           {submitting ? "新增中..." : "新增 Agent Host"}
         </button>
       </div>
-      {error ? <p className="text-xs text-danger md:col-span-4 xl:col-span-7">{error}</p> : null}
     </form>
   );
 }
@@ -393,6 +404,7 @@ export function AgentHostsPage() {
   return (
     <div className="space-y-6">
       <AppDialog
+        size="wide"
         description="登记后可以对 Agent Host 执行健康检查，并作为远端执行节点参与任务调度。"
         onClose={() => setCreateOpen(false)}
         open={createOpen}
@@ -414,14 +426,14 @@ export function AgentHostsPage() {
             <button
               type="button"
               onClick={() => setCreateOpen(true)}
-              className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft"
+              className={PRIMARY_ACTION_BUTTON_CLASSNAME}
             >
               新增 Agent Host
             </button>
             <button
               type="button"
               onClick={() => void handleSync()}
-              className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-panel-strong/50 px-3 py-2 text-sm font-medium text-muted transition hover:border-accent/40 hover:text-accent"
+              className={SECONDARY_ACTION_BUTTON_CLASSNAME}
             >
               <RefreshCw className="size-3.5" strokeWidth={1.8} />
               同步配置
@@ -430,39 +442,39 @@ export function AgentHostsPage() {
         }
       >
         <div className="space-y-4">
-          <div className="grid gap-3 xl:grid-cols-[1.2fr_1fr_auto]">
+          <div className="space-y-4">
             <label className="space-y-1 text-sm text-muted">
               <span>搜索</span>
               <input
-                className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
+                className={FORM_FIELD_CLASSNAME}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="按 ID、连接地址或标签搜索"
                 value={search}
               />
             </label>
-
-            <label className="space-y-1 text-sm text-muted">
-              <span>Agent 类型</span>
-              <select
-                className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-                onChange={(event) => setAgentType(event.target.value as AgentTypeFilter)}
-                value={agentType}
-              >
-                <option value="all">全部类型</option>
-                <option value="both">Claude + Codex</option>
-                <option value="claude">Claude</option>
-                <option value="codex">Codex</option>
-              </select>
-            </label>
-
-            <div className="space-y-1">
-              <span className="text-sm text-muted">健康状态</span>
-              <SegmentedControl
-                ariaLabel="Agent Host 健康状态"
-                options={HEALTH_OPTIONS}
-                onChange={(value) => setHealth(value)}
-                value={health}
-              />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <label className="space-y-1 text-sm text-muted">
+                <span>Agent 类型</span>
+                <select
+                  className={FORM_FIELD_CLASSNAME}
+                  onChange={(event) => setAgentType(event.target.value as AgentTypeFilter)}
+                  value={agentType}
+                >
+                  <option value="all">全部类型</option>
+                  <option value="both">Claude + Codex</option>
+                  <option value="claude">Claude</option>
+                  <option value="codex">Codex</option>
+                </select>
+              </label>
+              <div className="space-y-2">
+                <span className="text-sm text-muted">健康状态</span>
+                <SegmentedControl
+                  ariaLabel="Agent Host 健康状态"
+                  options={HEALTH_OPTIONS}
+                  onChange={(value) => setHealth(value)}
+                  value={health}
+                />
+              </div>
             </div>
           </div>
 

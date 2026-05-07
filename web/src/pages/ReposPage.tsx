@@ -53,6 +53,17 @@ interface PendingAction {
   id: string;
 }
 
+const PRIMARY_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-soft/70 bg-[linear-gradient(180deg,rgba(208,160,90,0.98),rgba(169,112,45,0.92))] px-5 py-3 text-sm font-semibold text-ink-invert shadow-[0_18px_34px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.16)] transition hover:-translate-y-0.5 hover:brightness-105 disabled:opacity-60 disabled:hover:translate-y-0";
+const NEUTRAL_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-copy/20 bg-copy px-4 py-3 text-sm font-semibold text-ink-invert shadow-[0_16px_30px_rgba(0,0,0,0.26)] transition hover:-translate-y-0.5 hover:bg-copy/92 disabled:opacity-60 disabled:hover:translate-y-0";
+const SECONDARY_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition hover:border-accent/50 hover:bg-panel hover:text-copy disabled:opacity-50";
+const DANGER_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition hover:border-danger/45 hover:bg-danger/10 hover:text-danger disabled:opacity-50";
+const FORM_FIELD_CLASSNAME =
+  "w-full rounded-2xl border border-border-strong bg-panel px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]";
+
 function LoadingSkeleton() {
   return (
     <div className="space-y-3">
@@ -79,20 +90,20 @@ function RepoRow({
   deleting: boolean;
 }) {
   return (
-    <article className="rounded-2xl border border-border bg-panel-strong/70 p-3 shadow-[0_0_0_1px_rgba(209,207,197,0.2)]">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <article className="rounded-[26px] border border-border bg-panel-strong/72 p-4 shadow-[0_0_0_1px_rgba(209,207,197,0.2),0_18px_36px_rgba(0,0,0,0.24)]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex min-w-0 gap-4">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-accent/10 text-accent">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-[20px] bg-accent/12 text-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
             <Database className="size-5" strokeWidth={1.8} />
           </div>
-          <div className="min-w-0 space-y-2">
-            <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 space-y-3">
+            <div className="flex flex-wrap items-center gap-3.5">
               <h3 className="font-serif text-xl font-medium text-copy">{repo.name}</h3>
               <RepoFetchStatusBadge repo={repo} />
             </div>
             <p className="font-mono text-xs text-muted">{repo.id}</p>
             <p className="truncate font-mono text-sm text-muted">{repo.url}</p>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-soft">
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-soft">
               <span>角色：{ROLE_LABELS[repo.role]}</span>
               <span>默认分支：{repo.default_branch}</span>
               <span>更新：{new Date(repo.updated_at).toLocaleString()}</span>
@@ -106,11 +117,11 @@ function RepoRow({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 lg:justify-end">
+        <div className="flex flex-wrap gap-3 lg:max-w-[18rem] lg:justify-end">
           <button
             type="button"
             onClick={() => onOpen(repo.id)}
-            className="rounded-xl bg-copy px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] transition hover:bg-copy/90"
+            className={NEUTRAL_ACTION_BUTTON_CLASSNAME}
           >
             打开
           </button>
@@ -118,7 +129,7 @@ function RepoRow({
             type="button"
             disabled={fetching}
             onClick={() => onFetch(repo.id)}
-            className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-panel px-4 py-2 text-sm font-medium text-muted transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
+            className={SECONDARY_ACTION_BUTTON_CLASSNAME}
           >
             <RefreshCw className="size-4" strokeWidth={1.8} />
             {fetching ? "Fetch 中..." : "立即 fetch"}
@@ -127,7 +138,7 @@ function RepoRow({
             type="button"
             disabled={deleting}
             onClick={() => onDelete(repo.id)}
-            className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-panel px-4 py-2 text-sm font-medium text-muted transition hover:border-danger/30 hover:text-danger disabled:opacity-50"
+            className={DANGER_ACTION_BUTTON_CLASSNAME}
           >
             <Trash2 className="size-4" strokeWidth={1.8} />
             删除
@@ -191,67 +202,69 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form className="grid gap-3 md:grid-cols-[1fr_2fr_1fr_1fr_1fr_auto]" onSubmit={handleSubmit}>
-      <label className="space-y-1 text-sm text-muted">
+    <form className="space-y-5" onSubmit={handleSubmit}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="space-y-1.5 text-sm text-muted">
           <span>名称</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setName(event.target.value)}
-          placeholder="frontend"
-          value={name}
-        />
-      </label>
-      <label className="space-y-1 text-sm text-muted">
-        <span>URL</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setUrl(event.target.value)}
-          placeholder="git@github.com:org/repo.git"
-          value={url}
-        />
-      </label>
-      <label className="space-y-1 text-sm text-muted">
-          <span>默认分支</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setDefaultBranch(event.target.value)}
-          placeholder="main"
-          value={defaultBranch}
-        />
-      </label>
-      <label className="space-y-1 text-sm text-muted">
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="frontend"
+            value={name}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted">
           <span>角色</span>
-        <select
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setRole(event.target.value as RepoRole)}
-          value={role}
-        >
-          {ROLES.map((option) => (
-            <option key={option} value={option}>
-              {ROLE_LABELS[option]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="space-y-1 text-sm text-muted">
+          <select
+            className={FORM_FIELD_CLASSNAME}
+            onChange={(event) => setRole(event.target.value as RepoRole)}
+            value={role}
+          >
+            {ROLES.map((option) => (
+              <option key={option} value={option}>
+                {ROLE_LABELS[option]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1.5 text-sm text-muted md:col-span-2">
+          <span>URL</span>
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="git@github.com:org/repo.git"
+            value={url}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted">
+          <span>默认分支</span>
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setDefaultBranch(event.target.value)}
+            placeholder="main"
+            value={defaultBranch}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted">
           <span>SSH key 路径</span>
-        <input
-          className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 font-mono text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-          onChange={(event) => setSshKeyPath(event.target.value)}
-          placeholder="~/.ssh/id_ed25519"
-          value={sshKeyPath}
-        />
-      </label>
-      <div className="flex items-end">
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setSshKeyPath(event.target.value)}
+            placeholder="~/.ssh/id_ed25519"
+            value={sshKeyPath}
+          />
+        </label>
+      </div>
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+      <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end">
         <button
-          className="w-full rounded-xl bg-accent px-4 py-3 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft disabled:opacity-60 md:w-auto"
+          className={`${PRIMARY_ACTION_BUTTON_CLASSNAME} w-full sm:w-auto`}
           disabled={submitting}
           type="submit"
         >
           {submitting ? "登记中..." : "登记"}
         </button>
       </div>
-      {error ? <p className="text-xs text-danger md:col-span-6">{error}</p> : null}
     </form>
   );
 }
@@ -354,6 +367,7 @@ export function ReposPage() {
   return (
     <div className="space-y-6">
       <AppDialog
+        size="wide"
         description="登记后可在仓库详情中浏览分支、目录树、文件和提交历史。"
         onClose={() => setCreateOpen(false)}
         open={createOpen}
@@ -375,14 +389,14 @@ export function ReposPage() {
             <button
               type="button"
               onClick={() => setCreateOpen(true)}
-              className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft"
+              className={PRIMARY_ACTION_BUTTON_CLASSNAME}
             >
               登记仓库
             </button>
             <button
               type="button"
               onClick={() => void handleSync()}
-              className="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-panel-strong/50 px-3 py-2 text-sm font-medium text-muted transition hover:border-accent/40 hover:text-accent"
+              className={SECONDARY_ACTION_BUTTON_CLASSNAME}
             >
               <RefreshCw className="size-3.5" strokeWidth={1.8} />
               同步配置
@@ -391,48 +405,50 @@ export function ReposPage() {
         }
       >
         <div className="space-y-4">
-          <div className="grid gap-3 xl:grid-cols-[1.2fr_1fr_1fr_auto]">
+          <div className="space-y-4">
             <label className="space-y-1 text-sm text-muted">
               <span>搜索</span>
               <input
-                className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
+                className={FORM_FIELD_CLASSNAME}
                 value={search}
                 onChange={(event) => updateFilters({ search: event.target.value, offset: 0 })}
                 placeholder="按名称、URL 或分支搜索"
               />
             </label>
 
-            <label className="space-y-1 text-sm text-muted">
-              <span>角色</span>
-              <select
-                className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-                value={role}
-                onChange={(event) => updateFilters({ role: event.target.value as RepoRoleFilter, offset: 0 })}
-              >
-                <option value="all">全部角色</option>
-                {ROLES.map((option) => (
-                  <option key={option} value={option}>
-                    {ROLE_LABELS[option]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <label className="space-y-1 text-sm text-muted">
+                <span>角色</span>
+                <select
+                  className={FORM_FIELD_CLASSNAME}
+                  value={role}
+                  onChange={(event) => updateFilters({ role: event.target.value as RepoRoleFilter, offset: 0 })}
+                >
+                  <option value="all">全部角色</option>
+                  {ROLES.map((option) => (
+                    <option key={option} value={option}>
+                      {ROLE_LABELS[option]}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <label className="space-y-1 text-sm text-muted">
-              <span>排序</span>
-              <select
-                className="w-full rounded-xl border border-border-strong bg-panel px-4 py-3 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]"
-                value={sort}
-                onChange={(event) => updateFilters({ sort: event.target.value as RepoSort, offset: 0 })}
-              >
-                <option value="updated_desc">最近更新</option>
-                <option value="last_fetched_desc">最近 fetch</option>
-                <option value="name_asc">名称 A-Z</option>
-                <option value="name_desc">名称 Z-A</option>
-              </select>
-            </label>
+              <label className="space-y-1 text-sm text-muted">
+                <span>排序</span>
+                <select
+                  className={FORM_FIELD_CLASSNAME}
+                  value={sort}
+                  onChange={(event) => updateFilters({ sort: event.target.value as RepoSort, offset: 0 })}
+                >
+                  <option value="updated_desc">最近更新</option>
+                  <option value="last_fetched_desc">最近 fetch</option>
+                  <option value="name_asc">名称 A-Z</option>
+                  <option value="name_desc">名称 Z-A</option>
+                </select>
+              </label>
+            </div>
 
-            <div className="space-y-1">
+            <div className="space-y-2">
               <span className="text-sm text-muted">健康度</span>
               <SegmentedControl
                 ariaLabel="仓库 fetch 状态"

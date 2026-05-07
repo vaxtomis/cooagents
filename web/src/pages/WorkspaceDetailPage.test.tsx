@@ -228,6 +228,7 @@ describe("WorkspaceDetailPage", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
     fireEvent.click(await screen.findByRole("button", { name: "新建开发工作" }));
+    expect(document.querySelector('[data-dialog-size="wide"]')).not.toBeNull();
 
     const docSelect = await screen.findByDisplayValue("请选择");
     fireEvent.change(docSelect, { target: { value: "doc-1" } });
@@ -336,6 +337,7 @@ describe("WorkspaceDetailPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "新建设计工作" }));
+    expect(document.querySelector('[data-dialog-size="wide"]')).not.toBeNull();
     const toggle = await screen.findByRole("button", { name: /关联仓库/ });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByLabelText("仓库选择 #1")).toBeNull();

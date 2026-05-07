@@ -41,6 +41,17 @@ const TAB_LABELS: Record<TabId, string> = {
   events: "事件流",
 };
 
+const PRIMARY_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-soft/70 bg-[linear-gradient(180deg,rgba(208,160,90,0.98),rgba(169,112,45,0.92))] px-5 py-3 text-sm font-semibold text-ink-invert shadow-[0_18px_34px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.16)] transition hover:-translate-y-0.5 hover:brightness-105 disabled:opacity-60 disabled:hover:translate-y-0";
+const SECONDARY_ACTION_BUTTON_CLASSNAME =
+  "inline-flex items-center justify-center gap-2 rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition hover:border-accent/50 hover:bg-panel hover:text-copy disabled:opacity-50";
+const FORM_FIELD_CLASSNAME =
+  "w-full rounded-2xl border border-border-strong bg-panel px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]";
+const FORM_SELECT_CLASSNAME =
+  "w-full rounded-2xl border border-border-strong bg-panel-strong px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)] [&_option]:bg-panel-strong";
+const DIALOG_FOOTER_CLASSNAME =
+  "flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end";
+
 function DesignWorkRow({ workspaceId, dw }: { workspaceId: string; dw: DesignWork }) {
   return (
     <Link
@@ -149,20 +160,20 @@ function DesignWorkCreateForm({
   }
 
   return (
-    <form className="space-y-3" onSubmit={submit}>
-      <div className="grid gap-3 md:grid-cols-2">
-        <label className="space-y-1 text-xs text-muted">
+    <form className="space-y-5" onSubmit={submit}>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <label className="space-y-1.5 text-sm text-muted">
           <span>标题</span>
           <input
-            className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm text-copy outline-none"
+            className={FORM_FIELD_CLASSNAME}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
           />
         </label>
-        <label className="space-y-1 text-xs text-muted">
+        <label className="space-y-1.5 text-sm text-muted">
           <span>Slug 标识</span>
           <input
-            className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 font-mono text-sm text-copy outline-none"
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
             value={slug}
             placeholder="feature-x"
             onChange={(event) => setSlug(event.target.value.toLowerCase())}
@@ -170,18 +181,18 @@ function DesignWorkCreateForm({
         </label>
       </div>
 
-      <label className="block space-y-1 text-xs text-muted">
+      <label className="block space-y-1.5 text-sm text-muted">
         <span>需求说明</span>
         <textarea
-          className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm text-copy outline-none"
+          className={`${FORM_FIELD_CLASSNAME} min-h-[9rem] resize-y`}
           value={userInput}
           rows={4}
           onChange={(event) => setUserInput(event.target.value)}
         />
       </label>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <label className="flex items-center gap-2 text-xs text-muted">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.95fr)]">
+        <label className="flex items-center gap-3 rounded-2xl border border-border bg-panel-strong/55 px-4 py-3 text-sm text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
           <input
             type="checkbox"
             checked={needsFrontendMockup}
@@ -189,10 +200,10 @@ function DesignWorkCreateForm({
           />
           <span>需要前端 mockup</span>
         </label>
-        <label className="space-y-1 text-xs text-muted">
+        <label className="space-y-1.5 text-sm text-muted">
           <span>执行 Agent</span>
           <select
-            className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none [&_option]:bg-panel-strong"
+            className={FORM_SELECT_CLASSNAME}
             value={agent}
             onChange={(event) => setAgent(event.target.value as AgentKind)}
           >
@@ -202,12 +213,12 @@ function DesignWorkCreateForm({
         </label>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         <button
           type="button"
           aria-expanded={showRepos}
           onClick={() => setShowRepos((value) => !value)}
-          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:border-accent/40 hover:text-accent"
+          className="inline-flex items-center justify-center rounded-xl border border-border-dark/60 bg-panel-strong/80 px-4 py-2.5 text-sm font-medium text-copy-soft shadow-[0_12px_24px_rgba(0,0,0,0.24)] transition hover:border-accent/45 hover:bg-panel hover:text-copy"
         >
           {showRepos
             ? "隐藏仓库绑定"
@@ -220,22 +231,22 @@ function DesignWorkCreateForm({
         ) : null}
       </div>
 
-      <p className="text-[11px] text-muted-soft">当前流程只创建新的 DesignWork。</p>
+      <p className="text-xs leading-relaxed text-muted-soft">当前流程只创建新的 DesignWork。</p>
 
       {error ? <p className="text-xs text-danger">{error}</p> : null}
 
-      <div className="flex gap-2">
+      <div className={DIALOG_FOOTER_CLASSNAME}>
         <button
           type="submit"
           disabled={submitting}
-          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] disabled:opacity-60"
+          className={`${PRIMARY_ACTION_BUTTON_CLASSNAME} w-full sm:w-auto`}
         >
           {submitting ? "创建中..." : "提交"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:text-copy"
+          className={`${SECONDARY_ACTION_BUTTON_CLASSNAME} w-full sm:w-auto`}
         >
           取消
         </button>
@@ -327,11 +338,11 @@ function DevWorkCreateForm({
   }
 
   return (
-    <form className="space-y-3" onSubmit={submit}>
-      <label className="block space-y-1 text-xs text-muted">
+    <form className="space-y-5" onSubmit={submit}>
+      <label className="block space-y-1.5 text-sm text-muted">
         <span>已发布设计文档</span>
         <select
-          className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none [&_option]:bg-panel-strong"
+          className={FORM_SELECT_CLASSNAME}
           value={designDocId}
           onChange={(event) => setDesignDocId(event.target.value)}
         >
@@ -344,26 +355,26 @@ function DevWorkCreateForm({
         </select>
       </label>
 
-      <div className="block space-y-1 text-xs text-muted">
+      <div className="block space-y-2 text-sm text-muted">
         <span>仓库绑定</span>
         <RepoRefsEditor minRows={1} mode="dev" onChange={setRepoRefs} value={repoRefs} />
       </div>
 
-      <label className="block space-y-1 text-xs text-muted">
+      <label className="block space-y-1.5 text-sm text-muted">
         <span>执行提示</span>
         <textarea
           aria-label="DevWork 执行提示"
-          className="w-full rounded-xl border border-border-strong bg-panel px-3 py-2 text-sm text-copy outline-none"
+          className={`${FORM_FIELD_CLASSNAME} min-h-[9rem] resize-y`}
           rows={4}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
         />
       </label>
 
-      <label className="block space-y-1 text-xs text-muted">
+      <label className="block space-y-1.5 text-sm text-muted">
         <span>执行 Agent</span>
         <select
-          className="w-full rounded-xl border border-border-strong bg-panel-strong px-3 py-2 text-sm text-copy outline-none [&_option]:bg-panel-strong"
+          className={FORM_SELECT_CLASSNAME}
           value={agent}
           onChange={(event) => setAgent(event.target.value as AgentKind)}
         >
@@ -374,18 +385,18 @@ function DevWorkCreateForm({
 
       {error ? <p className="text-xs text-danger">{error}</p> : null}
 
-      <div className="flex gap-2">
+      <div className={DIALOG_FOOTER_CLASSNAME}>
         <button
           type="submit"
           disabled={submitting}
-          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] disabled:opacity-60"
+          className={`${PRIMARY_ACTION_BUTTON_CLASSNAME} w-full sm:w-auto`}
         >
           {submitting ? "创建中..." : "提交"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-lg border border-border-strong bg-panel-strong/50 px-3 py-1.5 text-xs text-muted transition hover:text-copy"
+          className={`${SECONDARY_ACTION_BUTTON_CLASSNAME} w-full sm:w-auto`}
         >
           取消
         </button>
@@ -554,6 +565,7 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-6">
       <AppDialog
+        size="wide"
         description="从需求说明生成新的设计工作；可选绑定仓库作为上下文。"
         onClose={() => setDesignDialogOpen(false)}
         open={designDialogOpen}
@@ -571,6 +583,7 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
       </AppDialog>
 
       <AppDialog
+        size="wide"
         description="选择已发布设计文档和目标仓库，创建开发执行项。"
         onClose={() => setDevDialogOpen(false)}
         open={devDialogOpen}
@@ -632,7 +645,7 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
             title="DesignWork 列表"
             actions={
               <button
-                className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft"
+                className={PRIMARY_ACTION_BUTTON_CLASSNAME}
                 onClick={() => setDesignDialogOpen(true)}
                 type="button"
               >
@@ -700,7 +713,7 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
           title="DevWork 列表"
           actions={
             <button
-              className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-accent)] transition hover:bg-accent-soft disabled:opacity-40"
+              className={PRIMARY_ACTION_BUTTON_CLASSNAME}
               disabled={devCreateDisabled}
               onClick={() => setDevDialogOpen(true)}
               title={devCreateDisabledTitle}

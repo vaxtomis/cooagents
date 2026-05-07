@@ -111,6 +111,7 @@ describe("ReposPage", () => {
     await waitFor(() => expect(listRepoPage).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: "登记仓库" }));
+    expect(document.querySelector('[data-dialog-size="wide"]')).not.toBeNull();
     fireEvent.change(screen.getByLabelText("名称"), {
       target: { value: "new-repo" },
     });

@@ -87,6 +87,7 @@ describe("AgentHostsPage", () => {
     await waitFor(() => expect(listAgentHosts).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: "新增 Agent Host" }));
+    expect(document.querySelector('[data-dialog-size="wide"]')).not.toBeNull();
     fireEvent.change(screen.getByLabelText("连接地址"), {
       target: { value: "dev@10.0.0.5" },
     });
