@@ -2,6 +2,8 @@
 
 $step_wall
 
+$retry_feedback
+
 ## 必读路径
 
 1. **本轮迭代设计**：`$iteration_note_path`

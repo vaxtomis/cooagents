@@ -698,7 +698,7 @@ class DesignWorkStateMachine:
             )
             return
         await self._loop_or_escalate(
-            dw, list(report.all_missing()), reason="post-validate failed"
+            dw, report.feedback_items(), reason="post-validate failed"
         )
 
     async def _d6_persist(self, dw: dict) -> None:

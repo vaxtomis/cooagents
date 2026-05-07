@@ -2,6 +2,8 @@
 
 $step_wall
 
+$retry_feedback
+
 你是 reviewer，使用 Read / Bash 工具自行查阅以下文件并完成评分。
 
 ## 必读顺序

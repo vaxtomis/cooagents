@@ -35,7 +35,7 @@ def compose_prompt(inputs: PromptInputs) -> str:
     )
     if inputs.missing_sections:
         bullets = "\n".join(f"- {s}" for s in inputs.missing_sections)
-        missing_hint = f"上一轮缺失：\n{bullets}\n请本轮务必补齐上述项。"
+        missing_hint = f"上一轮缺失或格式错误：\n{bullets}\n请本轮务必修正上述项。"
     else:
         missing_hint = "(首轮，无补齐项)"
 

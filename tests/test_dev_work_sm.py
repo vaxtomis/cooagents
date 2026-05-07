@@ -197,6 +197,46 @@ def step4_no_findings(step_tag, round_n, prompt, worktree):
     return ("", 1)
 
 
+def _last_json_output_path(prompt: str) -> Path | None:
+    matches = re.findall(r"`([^`]+\.json)`", prompt)
+    return Path(matches[-1]) if matches else None
+
+
+def step4_invalid_findings_json(step_tag, round_n, prompt, worktree):
+    out = _last_json_output_path(prompt)
+    if out is None:
+        return ("", 1)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("{not-json", encoding="utf-8")
+    return ("ok", 0)
+
+
+def step4_write_findings_expect_retry_feedback(step_tag, round_n, prompt, worktree):
+    assert "System retry feedback" in prompt
+    assert "Step4 findings JSON invalid" in prompt
+    return step4_write_findings(step_tag, round_n, prompt, worktree)
+
+
+def step5_invalid_review_json(step_tag, round_n, prompt, worktree):
+    out = _last_json_output_path(prompt)
+    if out is None:
+        return ("", 1)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("{not-json", encoding="utf-8")
+    return ("not json", 0)
+
+
+def _step5_writer_expect_retry_feedback(payload: dict):
+    writer = _step5_writer(payload)
+
+    def _w(step_tag, round_n, prompt, worktree):
+        assert "System retry feedback" in prompt
+        assert "Step5 unparseable" in prompt
+        return writer(step_tag, round_n, prompt, worktree)
+
+    return _w
+
+
 def _step5_writer(payload: dict):
     def _w(step_tag, round_n, prompt, worktree):
         m = re.search(r"必须\*\*将结果写入 `([^`]+\.json)`", prompt) or \
@@ -722,6 +762,52 @@ async def test_step2_missing_h2_loops_as_req_gap(env):
     final = await sm.run_to_completion(dw["id"])
     assert final["current_step"] == "COMPLETED"
     assert final["iteration_rounds"] == 1  # round 1 looped; round 2 passed
+    feedback = await env["registry"].read_text(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"devworks/{dw['id']}/feedback/feedback-for-round2.md",
+    )
+    assert "System validation feedback" in feedback
+    assert "Step2 missing H2" in feedback
+
+
+async def test_step4_format_error_is_visible_in_retry_prompt(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_invalid_findings_json,
+        step4_write_findings_expect_retry_feedback,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "COMPLETED"
+
+
+async def test_step5_parse_error_is_visible_in_retry_prompt(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        step5_invalid_review_json,
+        _step5_writer_expect_retry_feedback(
+            {"score": 90, "issues": [], "problem_category": None}
+        ),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "COMPLETED"
 
 
 async def test_step2_front_matter_not_tampered(env):

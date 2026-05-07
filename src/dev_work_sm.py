@@ -212,6 +212,67 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         row = await self._get(dev_id)
         return _decode_gates(row.get("gates_json") if row else None)
 
+    async def _append_loop_feedback(
+        self,
+        dev_id: str,
+        *,
+        for_round: int,
+        back_to: DevWorkStep,
+        reason: str,
+        problem_category: ProblemCategory | None,
+    ) -> None:
+        row = await self._get(dev_id)
+        if row is None:
+            return
+        gates = _decode_gates(row.get("gates_json"))
+        entries = gates.get("loop_feedback")
+        if not isinstance(entries, list):
+            entries = []
+        clean_entries = [item for item in entries if isinstance(item, dict)]
+        clean_entries.append(
+            {
+                "for_round": for_round,
+                "back_to": back_to.value,
+                "reason": reason,
+                "problem_category": (
+                    problem_category.value if problem_category else None
+                ),
+            }
+        )
+        gates["loop_feedback"] = clean_entries[-50:]
+        await self.db.execute(
+            "UPDATE dev_works SET gates_json=?, updated_at=? WHERE id=?",
+            (json.dumps(gates, ensure_ascii=False), self._now(), dev_id),
+        )
+
+    async def _loop_feedback_for_round(
+        self,
+        dev_id: str,
+        round_n: int,
+        back_to: DevWorkStep | None = None,
+    ) -> str:
+        gates = await self._gates(dev_id)
+        entries = gates.get("loop_feedback")
+        if not isinstance(entries, list):
+            return ""
+        lines: list[str] = []
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            if item.get("for_round") != round_n:
+                continue
+            if back_to is not None and item.get("back_to") != back_to.value:
+                continue
+            reason = str(item.get("reason") or "").strip()
+            if not reason:
+                continue
+            category = item.get("problem_category")
+            prefix = str(item.get("back_to") or "retry")
+            if category:
+                prefix = f"{prefix} / {category}"
+            lines.append(f"- [{prefix}] {reason}")
+        return "\n".join(lines)
+
     def _resolve_max_rounds(self, dw: dict[str, Any]) -> int:
         gates = _decode_gates(dw.get("gates_json"))
         override = gates.get("max_rounds_override")
@@ -750,7 +811,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         if not report.ok:
             await self._escalate(
                 dw,
-                reason=f"design_doc schema invalid: {report.all_missing()}",
+                reason=f"design_doc schema invalid: {report.feedback_items()}",
                 problem_category=ProblemCategory.design_hollow,
             )
             return
@@ -1195,7 +1256,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 pass
         return self.config.scoring.default_threshold
 
-    async def _render_previous_review_markdown(self, dev_id: str) -> str:
+    async def _render_previous_review_markdown(
+        self, dev_id: str, round_n: int | None = None
+    ) -> str:
         """Render previous-round reviewer issues + hints into a markdown blob.
 
         Returns an empty string when no prior review exists. Pure (DB-only).
@@ -1203,6 +1266,13 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         the previous review persisted a non-empty ``next_round_hints`` array.
         Output stays byte-identical to Phase 4 when hints are empty/NULL.
         """
+        loop_feedback = (
+            await self._loop_feedback_for_round(
+                dev_id, round_n, DevWorkStep.STEP2_ITERATION
+            )
+            if round_n is not None
+            else ""
+        )
         row = await self.db.fetchone(
             "SELECT score, problem_category, issues_json, "
             "next_round_hints_json FROM reviews "
@@ -1210,7 +1280,12 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             (dev_id,),
         )
         if row is None:
-            return ""
+            if not loop_feedback:
+                return ""
+            return (
+                "System validation feedback from previous attempt:\n"
+                f"{loop_feedback}"
+            )
         try:
             issues = json.loads(row["issues_json"]) if row["issues_json"] else []
         except (ValueError, TypeError):
@@ -1258,6 +1333,10 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                     lines.append(f"- {' '.join(tokens)}" if tokens else "-")
                 else:
                     lines.append(f"- {h}")
+        if loop_feedback:
+            lines.append("")
+            lines.append("## System validation feedback")
+            lines.extend(loop_feedback.splitlines())
         return "\n".join(lines)
 
     async def _write_previous_review_for_round(
@@ -1273,7 +1352,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         """
         if round_n <= 1:
             return None
-        body = await self._render_previous_review_markdown(dw["id"])
+        body = await self._render_previous_review_markdown(dw["id"], round_n)
         if not body:
             return None
         rel = (
@@ -1350,6 +1429,13 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 dw, reason=reason, problem_category=problem_category
             )
             return
+        await self._append_loop_feedback(
+            dw["id"],
+            for_round=next_round + 1,
+            back_to=back_to,
+            reason=reason,
+            problem_category=problem_category,
+        )
         # Phase 9: drop the just-finished round's sessions before the DB
         # row's ``iteration_rounds`` is incremented to ``next_round``.
         # Step handlers compute ``round_n = dw["iteration_rounds"] + 1``

@@ -38,11 +38,23 @@ _RUBRIC_SECTION = "打分 rubric"
 _H2_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 _H3_RE = re.compile(r"^###\s+(.+?)\s*$", re.MULTILINE)
 _SCENARIO_CASE_TITLE_RE = re.compile(r"^SC-\d{2,}\s+\S.+$")
+_SCENARIO_FIELD_NAMES = r"Actor|Trigger|Preconditions|Main Flow|Expected Result"
+_SCENARIO_FIELD_LINE_RE = re.compile(
+    rf"^(?:[-*]\s*)?(?:\*\*)?(?:{_SCENARIO_FIELD_NAMES})(?:\*\*)?"
+    r"\s*[:：](?:\*\*)?",
+)
 _SCENARIO_FIELD_RE = {
-    "Actor": re.compile(r"^(?:[-*]\s*)?Actor\s*:\s*(.+)?$", re.MULTILINE),
-    "Main Flow": re.compile(r"^(?:[-*]\s*)?Main Flow\s*:\s*(.+)?$", re.MULTILINE),
+    "Actor": re.compile(
+        r"^(?:[-*]\s*)?(?:\*\*)?Actor(?:\*\*)?\s*[:：](?:\*\*)?\s*(.+)?$",
+        re.MULTILINE,
+    ),
+    "Main Flow": re.compile(
+        r"^(?:[-*]\s*)?(?:\*\*)?Main Flow(?:\*\*)?\s*[:：](?:\*\*)?\s*(.+)?$",
+        re.MULTILINE,
+    ),
     "Expected Result": re.compile(
-        r"^(?:[-*]\s*)?Expected Result\s*:\s*(.+)?$", re.MULTILINE
+        r"^(?:[-*]\s*)?(?:\*\*)?Expected Result(?:\*\*)?\s*[:：](?:\*\*)?\s*(.+)?$",
+        re.MULTILINE,
     ),
 }
 _AC_ITEM_RE = re.compile(r"^\s*-\s*\[[ xX]?\]\s*AC-\d{2,}\s*:\s*\S.+$", re.MULTILINE)
@@ -61,6 +73,11 @@ class ValidationReport:
     def all_missing(self) -> list[str]:
         out = [f"front_matter.{k}" for k in self.missing_fm_keys]
         out.extend(self.missing_sections)
+        return out
+
+    def feedback_items(self) -> list[str]:
+        out = self.all_missing()
+        out.extend(f"validation_error: {err}" for err in self.errors)
         return out
 
 
@@ -119,7 +136,7 @@ def _field_has_content(case_body: str, field_name: str) -> bool:
         stripped = line.strip()
         if not stripped:
             continue
-        if re.match(r"^(?:[-*]\s*)?(?:Actor|Trigger|Preconditions|Main Flow|Expected Result)\s*:", stripped):
+        if _SCENARIO_FIELD_LINE_RE.match(stripped):
             return False
         return True
     return False

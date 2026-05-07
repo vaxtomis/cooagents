@@ -42,6 +42,17 @@ _PREV_REVIEW_PLACEHOLDER = "_(首轮，无上轮反馈 — 跳过此步)_"
 _CONTEXT_PATH_PLACEHOLDER = "_(无 ctx 文件 — 本轮 Step3 未产出)_"
 
 
+def _render_retry_feedback(feedback: str | None) -> str:
+    if not feedback:
+        return ""
+    return (
+        "\n## System retry feedback\n\n"
+        "The previous attempt for this step failed validation. Fix these "
+        "items before doing any other work:\n\n"
+        f"{feedback.strip()}\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Step responsibility walls (Phase 5)
 # ---------------------------------------------------------------------------
@@ -298,6 +309,7 @@ class Step4Inputs:
     # worktree (multi-mount tasks). The primary ``worktree_path`` above is
     # only the default landing pad referenced in the prompt header.
     mount_table_entries: tuple[MountTableEntry, ...]
+    retry_feedback: str | None = None
 
 
 def compose_step4(inputs: Step4Inputs) -> str:
@@ -308,6 +320,7 @@ def compose_step4(inputs: Step4Inputs) -> str:
         findings_output_path=inputs.findings_output_path,
         mount_table=_render_mount_table(inputs.mount_table_entries),
         step_wall=_STEP_WALL_STEP4,
+        retry_feedback=_render_retry_feedback(inputs.retry_feedback),
     )
 
 
@@ -342,6 +355,7 @@ class Step5Inputs:
     primary_worktree_path: str | None
     rubric_threshold: int
     output_json_path: str
+    retry_feedback: str | None = None
 
 
 def compose_step5(inputs: Step5Inputs) -> str:
@@ -360,6 +374,7 @@ def compose_step5(inputs: Step5Inputs) -> str:
         step_wall=_STEP_WALL_STEP5,
         boundary_check=_BOUNDARY_CHECK_RUBRIC,
         next_round_hints_guide=_NEXT_ROUND_HINTS_GUIDE,
+        retry_feedback=_render_retry_feedback(inputs.retry_feedback),
     )
 
 

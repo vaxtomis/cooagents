@@ -227,6 +227,33 @@ async def test_missing_then_fixed_next_round(env):
     assert stub.call_count == 2
 
 
+async def test_validation_errors_are_fed_into_next_prompt(env):
+    scenario_dir = env["root"] / "format_error_then_fixed"
+    scenario_dir.mkdir()
+    perfect = (FIXTURES / "perfect" / "round1.md").read_text(encoding="utf-8")
+    invalid = perfect.replace("- [ ] AC-", "- AC-")
+    (scenario_dir / "round1.md").write_text(invalid, encoding="utf-8")
+    (scenario_dir / "round2.md").write_text(perfect, encoding="utf-8")
+    stub = StubExecutor(scenario_dir)
+    sm = DesignWorkStateMachine(
+        db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
+        executor=stub, config=_build_config(), registry=env["registry"],
+    )
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], title="T", sub_slug="format-feedback",
+        user_input="x" * 50, mode=DesignWorkMode.new, parent_version=None,
+        needs_frontend_mockup=False, agent="claude",
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_state"] == "COMPLETED"
+    prompt = await env["registry"].read_text(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"designs/.drafts/{dw['id']}-prompt-loop1.md",
+    )
+    assert "validation_error:" in prompt
+    assert "AC-xx" in prompt
+
+
 async def test_recovers_existing_output_for_current_prompt(env):
     stub = StubExecutor(FIXTURES / "perfect")
     sm = DesignWorkStateMachine(

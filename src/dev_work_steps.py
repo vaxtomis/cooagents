@@ -301,6 +301,9 @@ class DevWorkStepHandlersMixin:
         # ``worktree_path`` below remains the primary's path, used as the
         # prompt's default landing pad.
         mount_entries = await self._load_mount_table_entries(dw)
+        retry_feedback = await self._loop_feedback_for_round(
+            dw["id"], round_n, DevWorkStep.STEP4_DEVELOP
+        )
         prompt = compose_step4(
             Step4Inputs(
                 worktree_path=dw["worktree_path"],
@@ -308,6 +311,7 @@ class DevWorkStepHandlersMixin:
                 context_path=self._abs_for(ws, ctx_rel),
                 findings_output_path=self._abs_for(ws, findings_rel),
                 mount_table_entries=mount_entries,
+                retry_feedback=retry_feedback,
             )
         )
         prompt_rel = f"devworks/{dw['id']}/prompts/step4-round{round_n}.md"
@@ -440,6 +444,9 @@ class DevWorkStepHandlersMixin:
         review_abs = self._abs_for(ws, review_rel)
 
         mount_entries = await self._load_mount_table_entries(dw)
+        retry_feedback = await self._loop_feedback_for_round(
+            dw["id"], round_n, DevWorkStep.STEP5_REVIEW
+        )
 
         # Step3 ctx file path — Step5 reviewer reads it to verify Step4
         # addressed the疑点/risks Step3 raised. Phase 4 always passes a
@@ -461,6 +468,7 @@ class DevWorkStepHandlersMixin:
                 primary_worktree_path=dw.get("worktree_path"),
                 rubric_threshold=rubric_threshold,
                 output_json_path=review_abs,
+                retry_feedback=retry_feedback,
             )
         )
         prompt_rel = f"devworks/{dw['id']}/prompts/step5-round{round_n}.md"
@@ -507,6 +515,13 @@ class DevWorkStepHandlersMixin:
 
         if outcome is None:
             if attempt < 1:
+                await self._append_loop_feedback(
+                    dw["id"],
+                    for_round=round_n,
+                    back_to=DevWorkStep.STEP5_REVIEW,
+                    reason=f"Step5 unparseable: {parse_reason}",
+                    problem_category=None,
+                )
                 await self._update_gates_field(
                     dw["id"], retry_key, attempt + 1
                 )

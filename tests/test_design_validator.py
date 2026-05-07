@@ -218,6 +218,15 @@ def test_scenario_case_requires_required_fields():
     assert any("missing required field `Expected Result`" in err for err in report.errors)
 
 
+def test_scenario_case_accepts_bold_required_fields():
+    md = _fm() + _body()
+    md = md.replace("- Actor:", "- **Actor:**")
+    md = md.replace("- Main Flow:", "- **Main Flow:**")
+    md = md.replace("- Expected Result:", "- **Expected Result:**")
+    report = validate_design_markdown(md, required_sections=REQ, mockup_sections=MOC)
+    assert report.ok is True
+
+
 def test_scenario_case_heading_must_match_sc_pattern():
     md = _fm() + _body(bad_scenario_heading=True)
     report = validate_design_markdown(md, required_sections=REQ, mockup_sections=MOC)
@@ -257,3 +266,11 @@ def test_all_missing_aggregates_front_matter_and_sections():
     assert "front_matter.goal" in missing
     assert "验收标准" in missing
     assert "打分 rubric" in missing
+
+
+def test_feedback_items_include_validation_errors():
+    md = _fm() + _body(acceptance_valid=False)
+    report = validate_design_markdown(md, required_sections=REQ, mockup_sections=MOC)
+    assert report.all_missing() == []
+    assert any(item.startswith("validation_error:") for item in report.feedback_items())
+    assert any("AC-xx" in item for item in report.feedback_items())
