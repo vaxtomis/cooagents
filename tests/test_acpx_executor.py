@@ -6,6 +6,8 @@ covered deleted code paths and are intentionally gone.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from src.acpx_executor import AcpxExecutor
@@ -102,10 +104,16 @@ async def test_run_once_spawns_subprocess(monkeypatch, executor):
     captured = {}
 
     class FakeProc:
-        returncode = 0
+        def __init__(self):
+            self.stdout = asyncio.StreamReader()
+            self.stderr = asyncio.StreamReader()
+            self.stdout.feed_data(b"done\n")
+            self.stdout.feed_eof()
+            self.stderr.feed_eof()
+            self.returncode = 0
 
-        async def communicate(self):
-            return b"done\n", b""
+        async def wait(self):
+            return self.returncode
 
     async def fake_exec(*args, **kwargs):
         captured["args"] = args
@@ -118,15 +126,22 @@ async def test_run_once_spawns_subprocess(monkeypatch, executor):
     assert rc == 0
     assert captured["args"][0] == "acpx"
     assert captured["kwargs"]["cwd"] == "/tmp/wt"
+    assert captured["kwargs"]["start_new_session"] is True
 
 
 @pytest.mark.asyncio
 async def test_run_once_returns_nonzero_exit(monkeypatch, executor):
     class FakeProc:
-        returncode = 7
+        def __init__(self):
+            self.stdout = asyncio.StreamReader()
+            self.stderr = asyncio.StreamReader()
+            self.stdout.feed_data(b"boom")
+            self.stdout.feed_eof()
+            self.stderr.feed_eof()
+            self.returncode = 7
 
-        async def communicate(self):
-            return b"boom", b""
+        async def wait(self):
+            return self.returncode
 
     async def fake_exec(*args, **kwargs):
         return FakeProc()
@@ -135,3 +150,35 @@ async def test_run_once_returns_nonzero_exit(monkeypatch, executor):
     stdout, rc = await executor.run_once("codex", "/tmp/wt", 10, prompt="p")
     assert rc == 7
     assert stdout == "boom"
+
+
+@pytest.mark.asyncio
+async def test_run_once_returns_when_descendant_keeps_pipe_open(
+    monkeypatch, executor
+):
+    """A detached acpx child may keep stdout open after the main rc is ready."""
+
+    class PipeHolderProc:
+        def __init__(self):
+            self.stdout = asyncio.StreamReader()
+            self.stderr = asyncio.StreamReader()
+            self.stdout.feed_data(b"ack\n")
+            self.returncode: int | None = None
+
+        async def wait(self):
+            await asyncio.sleep(0.005)
+            self.returncode = 0
+            return self.returncode
+
+        async def communicate(self):
+            await asyncio.Event().wait()
+
+    async def fake_exec(*args, **kwargs):
+        return PipeHolderProc()
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+    stdout, rc = await asyncio.wait_for(
+        executor.run_once("claude", "/tmp/wt", 10, prompt="p"),
+        timeout=0.5,
+    )
+    assert (stdout, rc) == ("ack", 0)

@@ -487,6 +487,30 @@ class DesignWorkStateMachine:
                 dw, DesignWorkState.LLM_GENERATE, DesignWorkState.PROMPT_COMPOSE
             )
             return
+        output_rel = dw["output_path"]
+        output_ref = (
+            await self.registry.stat(
+                workspace_slug=ws["slug"], relative_path=output_rel,
+            )
+            if output_rel
+            else None
+        )
+        if output_ref is not None and output_ref.mtime_ns >= ref.mtime_ns:
+            await emit_and_deliver(
+                self.db,
+                self.webhooks,
+                event_name="design_work.llm_completed",
+                workspace_id=dw["workspace_id"],
+                correlation_id=dw["id"],
+                payload={
+                    "loop": dw["loop"],
+                    "rc": 0,
+                    "stdout_len": 0,
+                    "recovered": True,
+                },
+            )
+            await self._advance_after_llm_success(dw)
+            return
         timeout = self.config.design.execution_timeout  # U5
         worktree = self._abs_for(ws, "designs")
         prompt_abs = self._abs_for(ws, prompt_rel)
@@ -526,6 +550,9 @@ class DesignWorkStateMachine:
                 dw, missing=[], reason=f"LLM call failed rc={rc}"
             )
             return
+        await self._advance_after_llm_success(dw)
+
+    async def _advance_after_llm_success(self, dw: dict) -> None:
         if bool(dw["needs_frontend_mockup"]):
             await self._transition(
                 dw, DesignWorkState.LLM_GENERATE, DesignWorkState.MOCKUP
@@ -671,12 +698,25 @@ class DesignWorkStateMachine:
             "UPDATE design_works SET current_state=?, updated_at=? WHERE id=?",
             (DesignWorkState.COMPLETED.value, now, dw["id"]),
         )
+        self._running.pop(dw["id"], None)
         try:
             await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
         except Exception:
             logger.exception(
                 "regenerate_workspace_md failed for %s", dw["workspace_id"]
             )
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="design_work.completed",
+            workspace_id=dw["workspace_id"],
+            correlation_id=dw["id"],
+            payload={
+                "design_doc_id": row["id"],
+                "version": version,
+                "slug": slug,
+            },
+        )
         await emit_and_deliver(
             self.db,
             self.webhooks,

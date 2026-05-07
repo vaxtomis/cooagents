@@ -23,6 +23,7 @@ const DESIGN_WORK_EVENT_NAMES = [
   "design_work.llm_completed",
   "design_work.round_completed",
   "design_work.mockup_recorded",
+  "design_work.completed",
   "design_work.escalated",
 ] as const;
 const DESIGN_WORK_EVENT_LIMIT = 20;

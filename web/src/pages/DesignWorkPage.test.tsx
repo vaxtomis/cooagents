@@ -164,7 +164,10 @@ describe("DesignWorkPage", () => {
       "ws-1",
       expect.objectContaining({
         correlation_id: "dw-1",
-        event_name: expect.arrayContaining(["design_work.started"]),
+        event_name: expect.arrayContaining([
+          "design_work.started",
+          "design_work.completed",
+        ]),
       }),
     );
   });

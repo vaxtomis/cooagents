@@ -118,6 +118,15 @@ async def test_happy_path_new(env):
     )
     assert row["status"] == "published"
     assert row["rubric_threshold"] == 85  # from fixture front-matter
+    ev = await env["db"].fetchone(
+        "SELECT * FROM workspace_events "
+        "WHERE event_name='design_work.completed' AND correlation_id=?",
+        (dw["id"],),
+    )
+    assert ev is not None
+    payload = json.loads(ev["payload_json"])
+    assert payload["design_doc_id"] == row["id"]
+    assert payload["slug"] == "demo"
 
 
 async def test_rubric_api_override_wins(env):
@@ -154,6 +163,41 @@ async def test_missing_then_fixed_next_round(env):
     final = await sm.run_to_completion(dw["id"])
     assert final["current_state"] == "COMPLETED"
     assert stub.call_count == 2
+
+
+async def test_recovers_existing_output_for_current_prompt(env):
+    stub = StubExecutor(FIXTURES / "perfect")
+    sm = DesignWorkStateMachine(
+        db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
+        executor=stub, config=_build_config(), registry=env["registry"],
+    )
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], title="Recovered",
+        sub_slug="recovered", user_input="x" * 50,
+        mode=DesignWorkMode.new, parent_version=None,
+        needs_frontend_mockup=False, agent="claude",
+    )
+    for _ in range(4):
+        dw = await sm.tick(dw["id"])
+    assert dw["current_state"] == "LLM_GENERATE"
+
+    await env["registry"].put_markdown(
+        workspace_row=env["ws"],
+        relative_path=dw["output_path"],
+        text=(FIXTURES / "perfect" / "round1.md").read_text(encoding="utf-8"),
+        kind="design_doc",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_state"] == "COMPLETED"
+    assert stub.call_count == 0
+    ev = await env["db"].fetchone(
+        "SELECT * FROM workspace_events "
+        "WHERE event_name='design_work.llm_completed' AND correlation_id=?",
+        (dw["id"],),
+    )
+    payload = json.loads(ev["payload_json"])
+    assert payload["recovered"] is True
 
 
 async def test_escalate_on_max_loops(env):

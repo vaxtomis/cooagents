@@ -165,6 +165,39 @@ class AcpxExecutor:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        stdout, _ = await proc.communicate()
-        return stdout.decode("utf-8", errors="replace").strip(), proc.returncode
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+
+        async def _pump_stream(
+            reader: asyncio.StreamReader | None, sink: list[bytes],
+        ) -> None:
+            if reader is None:
+                return
+            try:
+                while True:
+                    chunk = await reader.read(65536)
+                    if not chunk:
+                        return
+                    sink.append(chunk)
+            except asyncio.CancelledError:
+                # The direct acpx process can exit after writing the final
+                # result while a detached descendant still holds the pipe fd.
+                # Preserve bytes collected so far and let the state machine
+                # continue from the direct process return code.
+                return
+
+        stdout_task = asyncio.create_task(_pump_stream(proc.stdout, stdout_chunks))
+        stderr_task = asyncio.create_task(_pump_stream(proc.stderr, stderr_chunks))
+        try:
+            await proc.wait()
+            await asyncio.sleep(0)
+        finally:
+            for task in (stdout_task, stderr_task):
+                task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+        return (
+            b"".join(stdout_chunks).decode("utf-8", errors="replace").strip(),
+            proc.returncode if proc.returncode is not None else -1,
+        )
