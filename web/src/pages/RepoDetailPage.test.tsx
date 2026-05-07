@@ -287,4 +287,104 @@ describe("RepoDetailPage", () => {
       expect(fetchRepo).toHaveBeenCalledWith("repo-aaa111");
     });
   });
+
+  it("fetch revalidates the active tree and blob queries", async () => {
+    vi.mocked(getRepo).mockResolvedValue(repo);
+    vi.mocked(repoBranches).mockResolvedValue(branches);
+    vi.mocked(repoTree).mockResolvedValue(treeRoot);
+    vi.mocked(repoBlob).mockResolvedValue({
+      ref: "main",
+      path: "README.md",
+      size: 12,
+      binary: false,
+      content: "# Hello World\n",
+    });
+    vi.mocked(fetchRepo).mockResolvedValue({
+      outcome: "fetched",
+      fetch_status: "healthy",
+      last_fetched_at: "2026-04-26T13:00:00Z",
+    });
+
+    renderAt();
+
+    fireEvent.click(await screen.findByRole("button", { name: /README\.md/ }));
+
+    await waitFor(() => {
+      expect(repoTree).toHaveBeenCalledWith("repo-aaa111", {
+        ref: "main",
+        path: "",
+        depth: 1,
+      });
+      expect(repoBlob).toHaveBeenCalledWith("repo-aaa111", {
+        ref: "main",
+        path: "README.md",
+      });
+    });
+
+    const treeCallsBeforeFetch = vi.mocked(repoTree).mock.calls.length;
+    const blobCallsBeforeFetch = vi.mocked(repoBlob).mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: /fetch/ }));
+
+    await waitFor(() => {
+      expect(repoTree).toHaveBeenCalledTimes(treeCallsBeforeFetch + 1);
+      expect(repoBlob).toHaveBeenCalledTimes(blobCallsBeforeFetch + 1);
+    });
+  });
+
+  it("fetch revalidates the active log query without resetting offset", async () => {
+    vi.mocked(getRepo).mockResolvedValue(repo);
+    vi.mocked(repoBranches).mockResolvedValue(branches);
+    vi.mocked(repoTree).mockResolvedValue(treeRoot);
+    vi.mocked(repoLogPage).mockResolvedValue({
+      ref: "main",
+      path: null,
+      items: [
+        {
+          sha: "abcdef0123456789abcdef0123456789abcdef01",
+          author: "Alice",
+          email: "alice@example.com",
+          committed_at: "2026-04-26T10:00:00Z",
+          subject: "feat: add things",
+        },
+      ],
+      pagination: {
+        limit: 20,
+        offset: 0,
+        total: 1,
+        has_more: false,
+      },
+    });
+    vi.mocked(fetchRepo).mockResolvedValue({
+      outcome: "fetched",
+      fetch_status: "healthy",
+      last_fetched_at: "2026-04-26T13:00:00Z",
+    });
+
+    renderAt();
+    await screen.findByText("README.md");
+
+    fireEvent.click(screen.getAllByRole("tab")[2]);
+
+    await waitFor(() => {
+      expect(repoLogPage).toHaveBeenCalledWith("repo-aaa111", {
+        ref: "main",
+        limit: 20,
+        offset: 0,
+      });
+    });
+
+    const logCallsBeforeFetch = vi.mocked(repoLogPage).mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: /fetch/ }));
+
+    await waitFor(() => {
+      expect(repoLogPage).toHaveBeenCalledTimes(logCallsBeforeFetch + 1);
+      expect(repoLogPage).toHaveBeenLastCalledWith("repo-aaa111", {
+        ref: "main",
+        limit: 20,
+        offset: 0,
+      });
+    });
+  });
 });

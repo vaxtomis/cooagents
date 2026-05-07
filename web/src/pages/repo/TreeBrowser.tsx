@@ -11,6 +11,7 @@ interface Props {
   path: string;
   onPathChange: (path: string) => void;
   onSelectFile: (path: string) => void;
+  refreshToken: number;
   selectedPath: string | null;
 }
 
@@ -66,10 +67,11 @@ export function TreeBrowser({
   path,
   onPathChange,
   onSelectFile,
+  refreshToken,
   selectedPath,
 }: Props) {
   const query = useSWR<RepoTree>(
-    gitRef ? ["repo-tree", repoId, gitRef, path] : null,
+    gitRef ? ["repo-tree", repoId, gitRef, path, refreshToken] : null,
     () => repoTree(repoId, { ref: gitRef, path, depth: 1 }),
   );
 

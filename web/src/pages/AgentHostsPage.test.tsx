@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import {
   healthcheckAgentHost,
   listAgentHosts,
   syncAgentHosts,
+  updateAgentHost,
 } from "../api/agentHosts";
 import type { AgentHost } from "../types";
 import { AgentHostsPage } from "./AgentHostsPage";
@@ -127,6 +128,83 @@ describe("AgentHostsPage", () => {
 
     await waitFor(() => {
       expect(healthcheckAgentHost).toHaveBeenCalledWith("ah-remote");
+    });
+  });
+
+  it("edits a remote host without clearing the stored ssh key", async () => {
+    vi.mocked(listAgentHosts).mockResolvedValue([localHost, remoteHost]);
+    vi.mocked(updateAgentHost).mockResolvedValue({
+      ...remoteHost,
+      host: "ops@10.0.0.9",
+      agent_type: "claude",
+      max_concurrent: 6,
+      labels: ["ops", "eu"],
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit ah-remote" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Edit Agent Host" });
+    fireEvent.change(within(dialog).getByLabelText("Edit host"), {
+      target: { value: "ops@10.0.0.9" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Edit agent type"), {
+      target: { value: "claude" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Edit max concurrent"), {
+      target: { value: "6" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Edit labels"), {
+      target: { value: "ops, eu" },
+    });
+    fireEvent.submit(within(dialog).getByLabelText("Edit host").closest("form")!);
+
+    await waitFor(() => {
+      expect(updateAgentHost).toHaveBeenCalledWith("ah-remote", {
+        host: "ops@10.0.0.9",
+        agent_type: "claude",
+        max_concurrent: 6,
+        labels: ["ops", "eu"],
+      });
+    });
+  });
+
+  it("allows editing the local host while keeping host fixed to local", async () => {
+    vi.mocked(listAgentHosts).mockResolvedValue([localHost]);
+    vi.mocked(updateAgentHost).mockResolvedValue({
+      ...localHost,
+      agent_type: "codex",
+      max_concurrent: 2,
+      labels: ["built-in"],
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit local" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Edit Agent Host" });
+    const hostInput = within(dialog).getByLabelText("Edit host");
+    expect(hostInput).toHaveValue("local");
+    expect(hostInput).toHaveAttribute("readonly");
+    fireEvent.change(within(dialog).getByLabelText("Edit agent type"), {
+      target: { value: "codex" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Edit max concurrent"), {
+      target: { value: "2" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Edit labels"), {
+      target: { value: "built-in" },
+    });
+    fireEvent.submit(hostInput.closest("form")!);
+
+    await waitFor(() => {
+      expect(updateAgentHost).toHaveBeenCalledWith("local", {
+        host: "local",
+        agent_type: "codex",
+        max_concurrent: 2,
+        labels: ["built-in"],
+      });
     });
   });
 });

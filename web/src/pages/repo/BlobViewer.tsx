@@ -71,11 +71,12 @@ interface Props {
   repoId: string;
   gitRef: string;
   path: string | null;
+  refreshToken: number;
 }
 
-export function BlobViewer({ repoId, gitRef, path }: Props) {
+export function BlobViewer({ repoId, gitRef, path, refreshToken }: Props) {
   const query = useSWR<RepoBlob | null>(
-    path && gitRef ? ["repo-blob", repoId, gitRef, path] : null,
+    path && gitRef ? ["repo-blob", repoId, gitRef, path, refreshToken] : null,
     () => (path ? repoBlob(repoId, { ref: gitRef, path }) : null),
   );
 

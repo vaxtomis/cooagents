@@ -131,6 +131,7 @@ function RepoDetailContent({ repoId }: { repoId: string }) {
   const [filePath, setFilePath] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
   // Initialise ref from default_branch once data arrives.
   useEffect(() => {
@@ -152,6 +153,7 @@ function RepoDetailContent({ repoId }: { repoId: string }) {
     try {
       await fetchRepo(repoId);
       await Promise.all([repoQuery.mutate(), branchesQuery.mutate()]);
+      setRefreshVersion((current) => current + 1);
     } catch (err) {
       setActionError(extractError(err, "fetch 失败"));
     } finally {
@@ -208,14 +210,26 @@ function RepoDetailContent({ repoId }: { repoId: string }) {
                 onPathChange={setPath}
                 onSelectFile={setFilePath}
                 path={path}
+                refreshToken={refreshVersion}
                 repoId={repoId}
                 selectedPath={filePath}
               />
-              <BlobViewer gitRef={gitRef} path={filePath} repoId={repoId} />
+              <BlobViewer
+                gitRef={gitRef}
+                path={filePath}
+                refreshToken={refreshVersion}
+                repoId={repoId}
+              />
             </div>
           )}
 
-          {tab === "log" && <LogList gitRef={gitRef} repoId={repoId} />}
+          {tab === "log" && (
+            <LogList
+              gitRef={gitRef}
+              refreshToken={refreshVersion}
+              repoId={repoId}
+            />
+          )}
         </div>
       </SectionPanel>
     </div>

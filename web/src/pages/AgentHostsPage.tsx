@@ -1,4 +1,4 @@
-import { RefreshCw, Server, Trash2 } from "lucide-react";
+import { Pencil, RefreshCw, Server, Trash2 } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import useSWR from "swr";
 import {
@@ -7,6 +7,7 @@ import {
   healthcheckAgentHost,
   listAgentHosts,
   syncAgentHosts,
+  updateAgentHost,
 } from "../api/agentHosts";
 import { AppDialog } from "../components/AppDialog";
 import { EmptyState, SectionPanel } from "../components/SectionPanel";
@@ -19,6 +20,7 @@ import type {
   AgentHostType,
   CreateAgentHostPayload,
   HealthStatus,
+  UpdateAgentHostPayload,
 } from "../types";
 
 const LOCAL_HOST_ID = "local";
@@ -92,12 +94,14 @@ function HostRow({
   host,
   checking,
   deleting,
+  onEdit,
   onHealthcheck,
   onDelete,
 }: {
   host: AgentHost;
   checking: boolean;
   deleting: boolean;
+  onEdit: (host: AgentHost) => void;
   onHealthcheck: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
@@ -154,6 +158,15 @@ function HostRow({
         </div>
 
         <div className="flex flex-wrap gap-3 lg:max-w-[16rem] lg:justify-end">
+          <button
+            type="button"
+            aria-label={`Edit ${host.id}`}
+            onClick={() => onEdit(host)}
+            className={SECONDARY_ACTION_BUTTON_CLASSNAME}
+          >
+            <Pencil className="size-4" strokeWidth={1.8} />
+            Edit
+          </button>
           <button
             type="button"
             disabled={checking}
@@ -320,12 +333,144 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+function EditForm({
+  host,
+  onUpdated,
+}: {
+  host: AgentHost;
+  onUpdated: () => void;
+}) {
+  const isLocal = host.id === LOCAL_HOST_ID;
+  const [hostValue, setHostValue] = useState(host.host);
+  const [agentType, setAgentType] = useState<AgentHostType>(host.agent_type);
+  const [maxConcurrent, setMaxConcurrent] = useState(String(host.max_concurrent));
+  const [sshKey, setSshKey] = useState("");
+  const [labelsText, setLabelsText] = useState(host.labels.join(", "));
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedHost = isLocal ? LOCAL_HOST_ID : hostValue.trim();
+    const trimmedSshKey = sshKey.trim();
+    const parsedMaxConcurrent = Number.parseInt(maxConcurrent, 10);
+    const labels = labelsText
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    if (!HOST_RE.test(trimmedHost)) {
+      setError("Connection address must be local or user@host[:port].");
+      return;
+    }
+    if (!Number.isInteger(parsedMaxConcurrent) || parsedMaxConcurrent < 1 || parsedMaxConcurrent > 64) {
+      setError("Max concurrent must be an integer from 1 to 64.");
+      return;
+    }
+
+    setError(null);
+    setSubmitting(true);
+    const payload: UpdateAgentHostPayload = {
+      host: trimmedHost,
+      agent_type: agentType,
+      max_concurrent: parsedMaxConcurrent,
+      labels,
+      ...(trimmedSshKey ? { ssh_key: trimmedSshKey } : {}),
+    };
+
+    try {
+      await updateAgentHost(host.id, payload);
+      onUpdated();
+    } catch (err) {
+      setError(extractError(err, "Update Agent Host failed"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="space-y-5" onSubmit={handleSubmit}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="space-y-1.5 text-sm text-muted md:col-span-2">
+          <span>Connection address</span>
+          <input
+            aria-label="Edit host"
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setHostValue(event.target.value)}
+            placeholder="dev@10.0.0.5"
+            readOnly={isLocal}
+            value={isLocal ? LOCAL_HOST_ID : hostValue}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted">
+          <span>Agent type</span>
+          <select
+            aria-label="Edit agent type"
+            className={FORM_FIELD_CLASSNAME}
+            onChange={(event) => setAgentType(event.target.value as AgentHostType)}
+            value={agentType}
+          >
+            <option value="both">Claude + Codex</option>
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
+        </label>
+        <label className="space-y-1.5 text-sm text-muted">
+          <span>Max concurrent</span>
+          <input
+            aria-label="Edit max concurrent"
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            inputMode="numeric"
+            min={1}
+            max={64}
+            onChange={(event) => setMaxConcurrent(event.target.value)}
+            placeholder="1"
+            type="number"
+            value={maxConcurrent}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted md:col-span-2">
+          <span>SSH key path</span>
+          <input
+            aria-label="Edit ssh key"
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setSshKey(event.target.value)}
+            placeholder="Leave blank to keep current key"
+            value={sshKey}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted md:col-span-2">
+          <span>Labels</span>
+          <input
+            aria-label="Edit labels"
+            className={FORM_FIELD_CLASSNAME}
+            onChange={(event) => setLabelsText(event.target.value)}
+            placeholder="gpu, cn, high-memory"
+            value={labelsText}
+          />
+        </label>
+      </div>
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+      <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end">
+        <button
+          className={`${PRIMARY_ACTION_BUTTON_CLASSNAME} w-full sm:w-auto`}
+          disabled={submitting}
+          type="submit"
+        >
+          {submitting ? "Saving..." : "Save changes"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function AgentHostsPage() {
   const polling = useWorkspacePolling();
   const [search, setSearch] = useState("");
   const [health, setHealth] = useState<HealthFilter>("all");
   const [agentType, setAgentType] = useState<AgentTypeFilter>("all");
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingHost, setEditingHost] = useState<AgentHost | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [syncReport, setSyncReport] = useState<SyncSummary | null>(null);
@@ -356,6 +501,11 @@ export function AgentHostsPage() {
         return right.updated_at.localeCompare(left.updated_at);
       });
   }, [agentType, health, hosts, search]);
+
+  function handleEdit(host: AgentHost) {
+    setActionError(null);
+    setEditingHost(host);
+  }
 
   async function handleHealthcheck(id: string) {
     setPending({ kind: "healthcheck", id });
@@ -418,6 +568,25 @@ export function AgentHostsPage() {
             void query.mutate();
           }}
         />
+      </AppDialog>
+
+      <AppDialog
+        size="wide"
+        description="Update visible host configuration. Leave SSH key blank to keep the stored key unchanged."
+        onClose={() => setEditingHost(null)}
+        open={editingHost !== null}
+        title="Edit Agent Host"
+      >
+        {editingHost ? (
+          <EditForm
+            key={editingHost.id}
+            host={editingHost}
+            onUpdated={() => {
+              setEditingHost(null);
+              void query.mutate();
+            }}
+          />
+        ) : null}
       </AppDialog>
 
       <SectionPanel
@@ -523,6 +692,7 @@ export function AgentHostsPage() {
                   checking={pending?.kind === "healthcheck" && pending.id === host.id}
                   deleting={pending?.kind === "delete" && pending.id === host.id}
                   onDelete={handleDelete}
+                  onEdit={handleEdit}
                   onHealthcheck={handleHealthcheck}
                 />
               ))}

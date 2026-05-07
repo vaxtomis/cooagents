@@ -9,11 +9,12 @@ import type { RepoLogPage } from "../../types";
 interface Props {
   repoId: string;
   gitRef: string;
+  refreshToken: number;
 }
 
 const LOG_LIMIT = 20;
 
-export function LogList({ repoId, gitRef }: Props) {
+export function LogList({ repoId, gitRef, refreshToken }: Props) {
   const [offset, setOffset] = useState(0);
 
   useEffect(() => {
@@ -21,7 +22,7 @@ export function LogList({ repoId, gitRef }: Props) {
   }, [gitRef]);
 
   const query = useSWR<RepoLogPage>(
-    gitRef ? ["repo-log-page", repoId, gitRef, offset] : null,
+    gitRef ? ["repo-log-page", repoId, gitRef, offset, refreshToken] : null,
     () => repoLogPage(repoId, { ref: gitRef, limit: LOG_LIMIT, offset }),
   );
 
