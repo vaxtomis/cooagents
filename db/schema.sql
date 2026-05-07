@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS design_works (
   -- Default 'local' keeps old DBs working; FK enforced after agent_hosts table.
   agent_host_id           TEXT NOT NULL DEFAULT 'local' REFERENCES agent_hosts(id),
   escalated_at            TEXT,
+  escalation_reason       TEXT,
   -- Workspace-relative POSIX (e.g. "designs/.drafts/desw-<id>-input.md").
   user_input_path         TEXT,
   output_design_doc_id    TEXT,              -- soft reference (no FK, U12)

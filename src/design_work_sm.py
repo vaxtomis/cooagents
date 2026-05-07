@@ -735,10 +735,12 @@ class DesignWorkStateMachine:
         now = self._now()
         await self.db.execute(
             "UPDATE design_works SET current_state=?, escalated_at=?, "
-            "missing_sections_json=?, updated_at=? WHERE id=?",
+            "escalation_reason=?, missing_sections_json=?, "
+            "updated_at=? WHERE id=?",
             (
                 DesignWorkState.ESCALATED.value,
                 now,
+                reason,
                 json.dumps(missing, ensure_ascii=False) if missing else None,
                 now,
                 dw["id"],
@@ -750,7 +752,11 @@ class DesignWorkStateMachine:
             event_name="design_work.escalated",
             workspace_id=dw["workspace_id"],
             correlation_id=dw["id"],
-            payload={"reason": reason, "missing": missing or []},
+            payload={
+                "subject": "design_work",
+                "reason": reason,
+                "missing_sections": missing or [],
+            },
         )
 
 

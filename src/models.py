@@ -122,6 +122,7 @@ class DesignWork(BaseModel):
     missing_sections: list[str] | None = None
     agent: AgentKind = AgentKind.claude
     escalated_at: str | None = None
+    escalation_reason: str | None = None
     user_input_path: str | None = None
     output_design_doc_id: str | None = None
     # Phase 3 additions (U7): persisted here instead of in an in-memory cache
@@ -329,6 +330,7 @@ class DesignWorkProgress(BaseModel):
     missing_sections: list[str] | None = None
     output_design_doc_id: str | None = None
     escalated_at: str | None = None
+    escalation_reason: str | None = None
     title: str | None = None
     sub_slug: str | None = None
     version: str | None = None

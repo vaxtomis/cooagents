@@ -6,6 +6,7 @@ import { cancelDevWork, getDevWork, tickDevWork } from "../api/devWorks";
 import { getIterationNoteContent, listIterationNotes } from "../api/devIterationNotes";
 import { getGate } from "../api/gates";
 import { listReviews } from "../api/reviews";
+import { listWorkspaceEvents } from "../api/workspaceEvents";
 import { DevWorkStepProgress } from "../components/DevWorkStepProgress";
 import { GateActionPanel } from "../components/GateActionPanel";
 import { MarkdownPanel } from "../components/MarkdownPanel";
@@ -13,13 +14,18 @@ import { RepoPushStatusGrid } from "../components/RepoPushStatusGrid";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
 import { ScoreBadge } from "../components/ScoreBadge";
 import { StatusBadge } from "../components/StatusBadge";
-import { useWorkspaceDetailPolling, useWorkspacePolling } from "../hooks/useWorkspacePolling";
+import {
+  useWorkspaceActivePolling,
+  useWorkspaceDetailPolling,
+  useWorkspacePolling,
+} from "../hooks/useWorkspacePolling";
 import { extractError } from "../lib/extractError";
-import type { DevIterationNote, DevWork, Review } from "../types";
+import type { DevIterationNote, DevWork, Review, WorkspaceEvent } from "../types";
 
-const TAB_IDS = ["notes", "reviews", "gate"] as const;
+const TAB_IDS = ["notes", "reviews", "gate", "activity"] as const;
 type TabId = (typeof TAB_IDS)[number];
 const TAB_LABELS: Record<TabId, string> = {
+  activity: "Activity",
   notes: "迭代设计文件",
   reviews: "审核历史",
   gate: "闸门",
@@ -33,6 +39,19 @@ function formatDateTime(value: string | null | undefined) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
+
+const DEV_WORK_EVENT_NAMES = [
+  "dev_work.started",
+  "dev_work.progress",
+  "dev_work.step_completed",
+  "dev_work.round_completed",
+  "dev_work.score_passed",
+  "dev_work.escalated",
+  "dev_work.cancelled",
+  "dev_work.completed",
+  "dev_work.gate.exit_waiting",
+  "dev_work.merge_conflict",
+] as const;
 
 const DEV_WORK_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
@@ -62,6 +81,31 @@ function ReviewRow({ review }: { review: Review }) {
           </pre>
         </details>
       ) : null}
+    </article>
+  );
+}
+
+function compactPayload(payload: WorkspaceEvent["payload"]) {
+  if (!payload) return null;
+  return Object.entries(payload)
+    .filter(([, value]) => value !== null && value !== undefined)
+    .slice(0, 4)
+    .map(([key, value]) => {
+      const rendered = typeof value === "object" ? JSON.stringify(value) : String(value);
+      return `${key}: ${rendered}`;
+    })
+    .join(" / ");
+}
+
+function ActivityRow({ event }: { event: WorkspaceEvent }) {
+  const payload = compactPayload(event.payload);
+  return (
+    <article className="rounded-2xl border border-border bg-panel-strong/80 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-mono text-xs text-copy">{event.event_name}</p>
+        <span className="text-[11px] text-muted">{formatDateTime(event.ts)}</span>
+      </div>
+      {payload ? <p className="mt-2 break-words text-xs text-muted">{payload}</p> : null}
     </article>
   );
 }
@@ -154,6 +198,17 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
     () => getGate(gateId),
     { ...polling, shouldRetryOnError: false },
   );
+  const activityPolling = useWorkspaceActivePolling(Boolean(dvQuery.data?.is_running));
+  const workspaceEventsQuery = useSWR(
+    ["workspace-events", "dev-work", wsId, dvId],
+    () =>
+      listWorkspaceEvents(wsId, {
+        limit: 20,
+        event_name: [...DEV_WORK_EVENT_NAMES],
+        correlation_id: dvId,
+      }),
+    activityPolling,
+  );
 
   const notesDesc = useMemo(
     () => (notesQuery.data ? [...notesQuery.data].reverse() : []),
@@ -205,6 +260,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const escalated = devWork.current_step === "ESCALATED";
   const cancelled = devWork.current_step === "CANCELLED";
   const terminal = escalated || cancelled || devWork.current_step === "COMPLETED";
+  const activityEvents = workspaceEventsQuery.data?.events ?? [];
 
   // Missing gate is an expected "no exit gate right now" state, not an error.
   const gateInfo =
@@ -442,6 +498,32 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
                   await Promise.all([gateQuery.mutate(), dvQuery.mutate()]);
                 }}
               />
+            )}
+          </div>
+        ) : null}
+
+        {tab === "activity" ? (
+          <div
+            aria-labelledby="devwork-tab-activity"
+            id="devwork-tabpanel-activity"
+            role="tabpanel"
+          >
+            {workspaceEventsQuery.error ? (
+              <p className="text-xs text-danger">
+                {extractError(workspaceEventsQuery.error, "DevWork activity failed")}
+              </p>
+            ) : activityEvents.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+                No DevWork activity yet.
+              </p>
+            ) : (
+              <div className="max-h-[26rem] overflow-y-auto pr-1" data-testid="devwork-activity-feed">
+                <div className="space-y-3">
+                  {activityEvents.map((event) => (
+                    <ActivityRow event={event} key={event.event_id} />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         ) : null}

@@ -38,6 +38,10 @@ export async function createDesignWork(payload: CreateDesignWorkPayload): Promis
   return apiFetch<DesignWork>("/design-works", { method: "POST", body: payload });
 }
 
+export async function retryDesignWork(id: string): Promise<DesignWork> {
+  return apiFetch<DesignWork>(`/design-works/${encodeURIComponent(id)}/retry`, { method: "POST" });
+}
+
 export async function tickDesignWork(id: string): Promise<DesignWork> {
   return apiFetch<DesignWork>(`/design-works/${encodeURIComponent(id)}/tick`, { method: "POST" });
 }

@@ -103,6 +103,7 @@ export interface DesignWork {
   missing_sections: string[] | null;
   output_design_doc_id: string | null;
   escalated_at: string | null;
+  escalation_reason: string | null;
   title: string | null;
   sub_slug: string | null;
   version: string | null;

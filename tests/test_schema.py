@@ -68,6 +68,12 @@ async def test_dev_works_indicator_columns(db):
     }.issubset(cols)
 
 
+async def test_design_works_has_escalation_reason(db):
+    rows = await db.fetchall("PRAGMA table_info(design_works)")
+    cols = {r["name"] for r in rows}
+    assert "escalation_reason" in cols
+
+
 async def test_design_docs_unique_workspace_slug_version(db):
     await db.execute(
         "INSERT INTO workspaces(id,title,slug,status,root_path,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",

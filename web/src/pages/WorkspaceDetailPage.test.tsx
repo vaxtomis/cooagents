@@ -81,6 +81,7 @@ const designWork: DesignWork = {
   missing_sections: null,
   output_design_doc_id: null,
   escalated_at: null,
+  escalation_reason: null,
   title: "T",
   sub_slug: "t",
   version: null,
@@ -223,6 +224,35 @@ describe("WorkspaceDetailPage", () => {
 
     await waitFor(() => expect(listDesignWorkPage).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("T")).toBeInTheDocument();
+  });
+
+  it("bounds the workspace event stream while keeping pagination visible", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue(designPage);
+    vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
+    vi.mocked(listDevWorkPage).mockResolvedValue(devPage);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue({
+      events: [
+        {
+          id: 1,
+          event_id: "evt-1",
+          event_name: "design_work.escalated",
+          workspace_id: "ws-1",
+          correlation_id: "dw-1",
+          payload: { reason: "post-validate failed" },
+          ts: "2026-04-23T00:00:01Z",
+        },
+      ],
+      pagination: { limit: 20, offset: 0, total: 21, has_more: true },
+    });
+
+    renderPage();
+
+    fireEvent.click((await screen.findAllByRole("tab"))[2]);
+
+    expect(await screen.findByText("design_work.escalated")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-events-feed")).toBeInTheDocument();
+    expect(document.querySelector('[data-pagination-tone="console"]')).not.toBeNull();
   });
 
   it("DevWork form rejects empty repo_refs and never calls createDevWork", async () => {

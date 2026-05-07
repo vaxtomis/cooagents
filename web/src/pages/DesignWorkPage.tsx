@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
-import { cancelDesignWork, getDesignWork, tickDesignWork } from "../api/designWorks";
+import { cancelDesignWork, getDesignWork, retryDesignWork, tickDesignWork } from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
 import { listReviews } from "../api/reviews";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
@@ -25,6 +25,7 @@ const DESIGN_WORK_EVENT_NAMES = [
   "design_work.mockup_recorded",
   "design_work.escalated",
 ] as const;
+const DESIGN_WORK_EVENT_LIMIT = 20;
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -107,9 +108,10 @@ export function DesignWorkPage() {
 }
 
 function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
+  const navigate = useNavigate();
   const polling = useWorkspacePolling();
   const detailPolling = useWorkspaceDetailPolling<DesignWork>((latest) => Boolean(latest?.is_running));
-  const [actionPending, setActionPending] = useState<"tick" | "cancel" | null>(null);
+  const [actionPending, setActionPending] = useState<"tick" | "cancel" | "retry" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const dwQuery = useSWR(["design-work", dwId], () => getDesignWork(dwId), detailPolling);
@@ -130,7 +132,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
     ["workspace-events", "design-work", wsId, dwId],
     () =>
       listWorkspaceEvents(wsId, {
-        limit: 8,
+        limit: DESIGN_WORK_EVENT_LIMIT,
         event_name: [...DESIGN_WORK_EVENT_NAMES],
         correlation_id: dwId,
       }),
@@ -184,16 +186,20 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
 
   const activityEvents = workspaceEventsQuery.data?.events ?? [];
 
-  async function runAction(action: "tick" | "cancel") {
+  async function runAction(action: "tick" | "cancel" | "retry") {
     setActionPending(action);
     setActionError(null);
     try {
       if (action === "tick") {
         await tickDesignWork(dwId);
-      } else {
+        await dwQuery.mutate();
+      } else if (action === "cancel") {
         await cancelDesignWork(dwId);
+        await dwQuery.mutate();
+      } else {
+        const created = await retryDesignWork(dwId);
+        navigate(`/workspaces/${wsId}/design-works/${created.id}`);
       }
-      await dwQuery.mutate();
     } catch (err) {
       setActionError(extractError(err, "操作失败"));
     } finally {
@@ -235,6 +241,22 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
           <p className="mt-5 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
             DesignWork 已升级，需人工介入；tick 已禁用。
           </p>
+        ) : null}
+
+        {escalated ? (
+          <div className="mt-3 rounded-2xl border border-warning/25 bg-panel-strong/60 p-4 text-sm text-warning">
+            <p className="text-xs text-warning/90">
+              Reason: {designWork.escalation_reason ?? "No escalation reason recorded"}
+            </p>
+            <button
+              className="mt-3 rounded-lg bg-copy px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] disabled:opacity-50"
+              disabled={actionPending !== null}
+              onClick={() => void runAction("retry")}
+              type="button"
+            >
+              {actionPending === "retry" ? "Retrying..." : "Retry as new DesignWork"}
+            </button>
+          </div>
         ) : null}
 
         {designWork.is_running ? (
@@ -299,11 +321,18 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
             暂无 DesignWork 活动。
           </p>
         ) : (
-          <div className="space-y-3">
-            {activityEvents.map((event) => (
-              <ActivityRow event={event} key={event.event_id} />
-            ))}
-          </div>
+          <>
+            <div className="max-h-[26rem] overflow-y-auto pr-1" data-testid="designwork-activity-feed">
+              <div className="space-y-3">
+                {activityEvents.map((event) => (
+                  <ActivityRow event={event} key={event.event_id} />
+                ))}
+              </div>
+            </div>
+            {(workspaceEventsQuery.data?.pagination.total ?? 0) > activityEvents.length ? (
+              <p className="mt-2 text-xs text-muted">Showing latest {activityEvents.length} events</p>
+            ) : null}
+          </>
         )}
       </SectionPanel>
 

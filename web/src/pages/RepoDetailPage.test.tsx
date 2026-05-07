@@ -288,6 +288,40 @@ describe("RepoDetailPage", () => {
     });
   });
 
+  it("falls back to a valid branch when fetch prunes the active ref", async () => {
+    vi.mocked(getRepo).mockResolvedValue(repo);
+    vi.mocked(repoBranches)
+      .mockResolvedValueOnce({ default_branch: "main", branches: ["main", "old"] })
+      .mockResolvedValueOnce({ default_branch: "main", branches: ["main", "new"] });
+    vi.mocked(repoTree).mockResolvedValue(treeRoot);
+    vi.mocked(fetchRepo).mockResolvedValue({
+      outcome: "fetched",
+      fetch_status: "healthy",
+      last_fetched_at: "2026-04-26T13:00:00Z",
+    });
+
+    renderAt();
+
+    fireEvent.change(await screen.findByLabelText("ref"), { target: { value: "old" } });
+    await waitFor(() => {
+      expect(repoTree).toHaveBeenCalledWith("repo-aaa111", {
+        ref: "old",
+        path: "",
+        depth: 1,
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /fetch/ }));
+
+    await waitFor(() => {
+      expect(repoTree).toHaveBeenCalledWith("repo-aaa111", {
+        ref: "main",
+        path: "",
+        depth: 1,
+      });
+    });
+  });
+
   it("fetch revalidates the active tree and blob queries", async () => {
     vi.mocked(getRepo).mockResolvedValue(repo);
     vi.mocked(repoBranches).mockResolvedValue(branches);

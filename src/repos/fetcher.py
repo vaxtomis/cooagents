@@ -29,6 +29,7 @@ from src.git_utils import run_git
 from src.repos.credentials import SshKeyMaterial, resolve_repo_credential
 
 logger = logging.getLogger(__name__)
+_BRANCH_REFSPEC = "+refs/heads/*:refs/heads/*"
 
 
 class RepoFetcher:
@@ -100,7 +101,7 @@ class RepoFetcher:
         # deleted branches accumulate forever in the bare clone.
         await run_git(
             "--git-dir", str(bare),
-            "fetch", "--prune", "origin",
+            "fetch", "--prune", "origin", _BRANCH_REFSPEC,
             check=True, env=env, timeout=self.timeout_s,
         )
 

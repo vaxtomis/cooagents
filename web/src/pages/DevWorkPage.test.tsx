@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { SWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import type { DevWork, GateInfo, WorkerRepoHandoff } from "../types";
+import type { DevWork, GateInfo, WorkerRepoHandoff, WorkspaceEventsEnvelope } from "../types";
 import { DevWorkPage } from "./DevWorkPage";
 
 vi.mock("../api/devWorks", () => ({
@@ -21,11 +21,19 @@ vi.mock("../api/reviews", () => ({
 vi.mock("../api/gates", () => ({
   getGate: vi.fn(),
 }));
+vi.mock("../api/workspaceEvents", () => ({
+  listWorkspaceEvents: vi.fn(),
+}));
 
 import { getDevWork } from "../api/devWorks";
 import { listIterationNotes } from "../api/devIterationNotes";
 import { listReviews } from "../api/reviews";
 import { getGate } from "../api/gates";
+import { listWorkspaceEvents } from "../api/workspaceEvents";
+
+beforeEach(() => {
+  vi.mocked(listWorkspaceEvents).mockResolvedValue(emptyEvents);
+});
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -56,6 +64,11 @@ const waitingGate: GateInfo = {
   gate_id: "dev:dv-1:exit",
   status: "waiting",
   gate_key: "exit",
+};
+
+const emptyEvents: WorkspaceEventsEnvelope = {
+  events: [],
+  pagination: { limit: 20, offset: 0, total: 0, has_more: false },
 };
 
 function renderPage() {
@@ -177,5 +190,41 @@ describe("DevWorkPage", () => {
     expect(screen.getByRole("button", { name: "推进" })).toBeDisabled();
     expect(screen.getByText("STEP4_DEVELOP")).toBeInTheDocument();
     expect(screen.getByText("45s")).toBeInTheDocument();
+  });
+
+  it("renders a bounded scoped activity feed", async () => {
+    vi.mocked(getDevWork).mockResolvedValue(devWork);
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+    vi.mocked(listWorkspaceEvents).mockResolvedValue({
+      events: [
+        {
+          id: 1,
+          event_id: "evt-1",
+          event_name: "dev_work.progress",
+          workspace_id: "ws-1",
+          correlation_id: "dv-1",
+          payload: { step: "STEP4_DEVELOP", round: 2 },
+          ts: "2026-04-23T00:00:01Z",
+        },
+      ],
+      pagination: { limit: 20, offset: 0, total: 1, has_more: false },
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(getDevWork).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+
+    expect(await screen.findByText("dev_work.progress")).toBeInTheDocument();
+    expect(screen.getByTestId("devwork-activity-feed")).toBeInTheDocument();
+    expect(listWorkspaceEvents).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({
+        correlation_id: "dv-1",
+        event_name: expect.arrayContaining(["dev_work.progress"]),
+      }),
+    );
   });
 });

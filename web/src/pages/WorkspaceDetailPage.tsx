@@ -73,6 +73,9 @@ function DesignWorkRow({ workspaceId, dw }: { workspaceId: string; dw: DesignWor
       </div>
       <p className="text-xs text-muted">模式 {dw.mode} / 循环 {dw.loop}</p>
       <p className="text-xs text-muted">更新时间 {formatDateTime(dw.updated_at)}</p>
+      {dw.current_state === "ESCALATED" && dw.escalation_reason ? (
+        <p className="text-xs text-warning">Reason: {dw.escalation_reason}</p>
+      ) : null}
       {dw.output_design_doc_id ? (
         <p className="truncate font-mono text-[11px] text-muted">文档 {dw.output_design_doc_id}</p>
       ) : null}
@@ -794,10 +797,12 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
               <EmptyState copy="暂无 Workspace 事件。" />
             )
           ) : (
-            <div className="space-y-2">
-              {events.map((event) => (
-                <EventRow key={event.event_id} event={event} />
-              ))}
+            <div className="max-h-[32rem] overflow-y-auto pr-1" data-testid="workspace-events-feed">
+              <div className="space-y-2">
+                {events.map((event) => (
+                  <EventRow key={event.event_id} event={event} />
+                ))}
+              </div>
             </div>
           )}
 

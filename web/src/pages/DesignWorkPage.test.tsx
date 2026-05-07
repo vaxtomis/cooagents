@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
@@ -8,6 +8,7 @@ import { DesignWorkPage } from "./DesignWorkPage";
 
 vi.mock("../api/designWorks", () => ({
   getDesignWork: vi.fn(),
+  retryDesignWork: vi.fn(),
   tickDesignWork: vi.fn(),
   cancelDesignWork: vi.fn(),
 }));
@@ -21,7 +22,7 @@ vi.mock("../api/workspaceEvents", () => ({
   listWorkspaceEvents: vi.fn(),
 }));
 
-import { getDesignWork } from "../api/designWorks";
+import { getDesignWork, retryDesignWork } from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
 import { listReviews } from "../api/reviews";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
@@ -31,9 +32,15 @@ afterEach(() => {
 });
 
 function renderPage() {
+  function LocationProbe() {
+    const location = useLocation();
+    return <div data-testid="location-probe">{location.pathname}</div>;
+  }
+
   render(
     <SWRConfig value={{ dedupingInterval: 0, provider: () => new Map(), revalidateOnFocus: false }}>
       <MemoryRouter initialEntries={["/workspaces/ws-1/design-works/dw-1"]}>
+        <LocationProbe />
         <Routes>
           <Route path="/workspaces/:wsId/design-works/:dwId" element={<DesignWorkPage />} />
         </Routes>
@@ -51,6 +58,7 @@ const baseDesignWork: DesignWork = {
   missing_sections: ["architecture", "data-flow"],
   output_design_doc_id: null,
   escalated_at: null,
+  escalation_reason: null,
   title: "Feature",
   sub_slug: "feature",
   version: null,
@@ -67,17 +75,43 @@ const eventsEnvelope: WorkspaceEventsEnvelope = {
 
 describe("DesignWorkPage", () => {
   it("renders escalated banner and missing_sections chips when state=ESCALATED", async () => {
-    vi.mocked(getDesignWork).mockResolvedValue({ ...baseDesignWork, current_state: "ESCALATED" });
+    vi.mocked(getDesignWork).mockResolvedValue({
+      ...baseDesignWork,
+      current_state: "ESCALATED",
+      escalation_reason: "post-validate failed",
+    });
     vi.mocked(listReviews).mockResolvedValue([]);
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     renderPage();
 
     expect(await screen.findByText(/DesignWork 已升级/)).toBeInTheDocument();
     expect(screen.getByText("architecture")).toBeInTheDocument();
+    expect(screen.getByText(/post-validate failed/)).toBeInTheDocument();
     expect(screen.getByText("data-flow")).toBeInTheDocument();
 
     const tickBtn = screen.getByRole("button", { name: "推进" });
     expect(tickBtn).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Retry as new DesignWork" })).toBeEnabled();
+  });
+
+  it("retries an escalated DesignWork and navigates to the new row", async () => {
+    vi.mocked(getDesignWork).mockResolvedValue({
+      ...baseDesignWork,
+      current_state: "ESCALATED",
+      escalation_reason: "post-validate failed",
+    });
+    vi.mocked(retryDesignWork).mockResolvedValue({ ...baseDesignWork, id: "dw-2" });
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry as new DesignWork" }));
+
+    await waitFor(() => expect(retryDesignWork).toHaveBeenCalledWith("dw-1"));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/workspaces/ws-1/design-works/dw-2",
+    );
   });
 
   it("renders the reconcile hint when design-doc content returns 410", async () => {
@@ -125,6 +159,7 @@ describe("DesignWorkPage", () => {
     expect(screen.getByText(/后台驱动正在推进此 DesignWork/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "推进" })).toBeDisabled();
     expect(await screen.findByText("design_work.started")).toBeInTheDocument();
+    expect(screen.getByTestId("designwork-activity-feed")).toBeInTheDocument();
     expect(listWorkspaceEvents).toHaveBeenCalledWith(
       "ws-1",
       expect.objectContaining({

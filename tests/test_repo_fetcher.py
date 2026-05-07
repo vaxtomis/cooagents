@@ -7,11 +7,29 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 from typing import Any
 
 import pytest
 
 from src.repos.fetcher import RepoFetcher
+
+
+def _git(cwd, *args: str) -> str:
+    proc_env = dict(os.environ)
+    proc_env.setdefault("GIT_AUTHOR_NAME", "Test")
+    proc_env.setdefault("GIT_AUTHOR_EMAIL", "test@example.com")
+    proc_env.setdefault("GIT_COMMITTER_NAME", "Test")
+    proc_env.setdefault("GIT_COMMITTER_EMAIL", "test@example.com")
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        env=proc_env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
 
 
 def _repo(**overrides: Any) -> dict[str, Any]:
@@ -65,6 +83,71 @@ async def test_fetch_when_bare_exists(env):
     assert args[:2] == ["--git-dir", str(bare)]
     assert "fetch" in args
     assert "--prune" in args
+    assert "+refs/heads/*:refs/heads/*" in args
+
+
+async def test_fetch_updates_heads_with_explicit_refspec(tmp_path):
+    origin_src = tmp_path / "origin-src"
+    origin_src.mkdir()
+    _git(origin_src, "-c", "init.defaultBranch=main", "init")
+    _git(origin_src, "config", "user.email", "test@example.com")
+    _git(origin_src, "config", "user.name", "Test")
+    (origin_src / "README.md").write_text("one\n", encoding="utf-8")
+    _git(origin_src, "add", "README.md")
+    _git(origin_src, "commit", "-m", "init")
+    initial_sha = _git(origin_src, "rev-parse", "refs/heads/main")
+    _git(origin_src, "branch", "stale")
+
+    fetcher = RepoFetcher(workspaces_root=tmp_path, timeout_s=30)
+    bare = fetcher.bare_path("repo-aaa")
+    bare.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "clone", "--bare", str(origin_src), str(bare)],
+        check=True,
+        capture_output=True,
+    )
+
+    (origin_src / "README.md").write_text("two\n", encoding="utf-8")
+    _git(origin_src, "add", "README.md")
+    _git(origin_src, "commit", "-m", "second")
+    second_sha = _git(origin_src, "rev-parse", "refs/heads/main")
+    _git(origin_src, "checkout", "-b", "feature/x")
+    (origin_src / "FEATURE.md").write_text("feature\n", encoding="utf-8")
+    _git(origin_src, "add", "FEATURE.md")
+    _git(origin_src, "commit", "-m", "feature")
+    feature_sha = _git(origin_src, "rev-parse", "refs/heads/feature/x")
+    _git(origin_src, "checkout", "main")
+    _git(origin_src, "branch", "-D", "stale")
+
+    outcome = await fetcher.fetch_or_clone(_repo(url=str(origin_src)))
+    assert outcome == "fetched"
+    assert (
+        _git(tmp_path, "--git-dir", str(bare), "rev-parse", "refs/heads/main")
+        == second_sha
+    )
+    assert (
+        _git(
+            tmp_path,
+            "--git-dir",
+            str(bare),
+            "rev-parse",
+            "refs/heads/feature/x",
+        )
+        == feature_sha
+    )
+    stale = subprocess.run(
+        ["git", "--git-dir", str(bare), "rev-parse", "--verify", "refs/heads/stale"],
+        check=False,
+        capture_output=True,
+    )
+    assert stale.returncode != 0
+
+    _git(origin_src, "reset", "--hard", initial_sha)
+    await fetcher.fetch_or_clone(_repo(url=str(origin_src)))
+    assert (
+        _git(tmp_path, "--git-dir", str(bare), "rev-parse", "refs/heads/main")
+        == initial_sha
+    )
 
 
 async def test_env_omits_git_ssh_command_for_public_repo(env):

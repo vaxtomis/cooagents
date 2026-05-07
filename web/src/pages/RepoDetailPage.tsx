@@ -140,6 +140,19 @@ function RepoDetailContent({ repoId }: { repoId: string }) {
     }
   }, [gitRef, repoQuery.data]);
 
+  useEffect(() => {
+    const branchData = branchesQuery.data;
+    const availableBranches = branchData?.branches ?? [];
+    if (availableBranches.length === 0) return;
+    if (!gitRef || !availableBranches.includes(gitRef)) {
+      const preferred =
+        branchData?.default_branch && availableBranches.includes(branchData.default_branch)
+          ? branchData.default_branch
+          : availableBranches[0];
+      setGitRef(preferred);
+    }
+  }, [branchesQuery.data, gitRef]);
+
   // Reset path / selected file whenever the ref changes — paths in another
   // ref may not exist anymore.
   useEffect(() => {

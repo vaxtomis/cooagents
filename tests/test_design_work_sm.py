@@ -1,6 +1,7 @@
 """Phase 3: DesignWorkStateMachine end-to-end tests (no real LLM)."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -169,12 +170,19 @@ async def test_escalate_on_max_loops(env):
     )
     final = await sm.run_to_completion(dw["id"])
     assert final["current_state"] == "ESCALATED"
+    row = await env["db"].fetchone(
+        "SELECT * FROM design_works WHERE id=?", (dw["id"],)
+    )
+    assert row["escalation_reason"] == "post-validate failed"
     ev = await env["db"].fetchone(
         "SELECT * FROM workspace_events WHERE event_name='design_work.escalated' "
         "AND correlation_id=?",
         (dw["id"],),
     )
     assert ev is not None
+    payload = json.loads(ev["payload_json"])
+    assert payload["reason"] == "post-validate failed"
+    assert payload["missing_sections"]
 
 
 async def test_optimize_mode_stubbed(env):

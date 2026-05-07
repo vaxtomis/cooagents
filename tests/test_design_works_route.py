@@ -102,6 +102,7 @@ async def client(tmp_path):
     test_app.state.design_work_sm = sm
     test_app.state.executor_stub = executor
     test_app.state.ws_root = ws_root
+    test_app.state.registry = registry
     test_app.state.start_time = time.time()
 
     from slowapi import Limiter
@@ -143,7 +144,9 @@ async def client(tmp_path):
         )
 
     from routes.workspaces import router as ws_router
+    from routes.design_works import limiter as dw_limiter
     from routes.design_works import router as dw_router
+    dw_limiter.enabled = False
     test_app.include_router(ws_router, prefix="/api/v1")
     test_app.include_router(dw_router, prefix="/api/v1")
 
@@ -309,6 +312,96 @@ async def test_get_projects_running_state_and_tick_rejects_live_driver(client):
 
     resumed = await client.post(f"/api/v1/design-works/{dw_id}/tick")
     assert resumed.status_code == 200
+
+
+async def test_get_exposes_escalation_reason(client):
+    client._app.state.executor_stub.scenario_dir = FIXTURES / "always_missing"
+    ws = await _create_workspace(client, slug="reason")
+    create = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Reason",
+            "slug": "reason",
+            "user_input": "x" * 30,
+        },
+    )
+    assert create.status_code == 201, create.text
+    final = await _wait_for_terminal(client, create.json()["id"])
+    assert final["current_state"] == "ESCALATED"
+    assert final["escalation_reason"] == "post-validate failed"
+
+
+async def test_retry_escalated_design_work_creates_new_row(client):
+    client._app.state.executor_stub.scenario_dir = FIXTURES / "always_missing"
+    ws = await _create_workspace(client, slug="retry")
+    create = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Retry",
+            "slug": "retry",
+            "user_input": "x" * 30,
+        },
+    )
+    assert create.status_code == 201, create.text
+    source_id = create.json()["id"]
+    source = await _wait_for_terminal(client, source_id)
+    assert source["current_state"] == "ESCALATED"
+
+    retry = await client.post(f"/api/v1/design-works/{source_id}/retry")
+    assert retry.status_code == 201, retry.text
+    body = retry.json()
+    assert body["id"] != source_id
+    assert retry.headers["Location"] == f"/api/v1/design-works/{body['id']}"
+
+    source_after = await client.get(f"/api/v1/design-works/{source_id}")
+    assert source_after.status_code == 200
+    assert source_after.json()["current_state"] == "ESCALATED"
+
+
+async def test_retry_non_escalated_design_work_returns_409(client):
+    ws = await _create_workspace(client, slug="retry-completed")
+    create = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Retry completed",
+            "slug": "retry-completed",
+            "user_input": "x" * 30,
+        },
+    )
+    assert create.status_code == 201, create.text
+    final = await _wait_for_terminal(client, create.json()["id"])
+    assert final["current_state"] == "COMPLETED"
+
+    retry = await client.post(f"/api/v1/design-works/{final['id']}/retry")
+    assert retry.status_code == 409
+    assert retry.json()["current_stage"] == "COMPLETED"
+
+
+async def test_retry_missing_source_input_returns_404(client):
+    client._app.state.executor_stub.scenario_dir = FIXTURES / "always_missing"
+    ws = await _create_workspace(client, slug="retry-missing")
+    create = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Retry missing",
+            "slug": "retry-missing",
+            "user_input": "x" * 30,
+        },
+    )
+    assert create.status_code == 201, create.text
+    source = await _wait_for_terminal(client, create.json()["id"])
+    assert source["current_state"] == "ESCALATED"
+    await client._app.state.db.execute(
+        "UPDATE design_works SET user_input_path=? WHERE id=?",
+        ("designs/.drafts/missing-input.md", source["id"]),
+    )
+
+    retry = await client.post(f"/api/v1/design-works/{source['id']}/retry")
+    assert retry.status_code == 404
 
 
 async def test_cancel_moves_to_cancelled(client):

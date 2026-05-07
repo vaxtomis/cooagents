@@ -22,13 +22,15 @@ from fastapi import APIRouter, Query, Request, Response
 from slowapi import Limiter
 
 from routes._repo_refs_validation import validate_design_repo_refs
-from src.exceptions import BadRequestError, NotFoundError
+from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.models import (
     CreateDesignWorkRequest,
+    DesignWorkMode,
     DesignWorkPage,
     DesignRepoRefView,
     DesignWorkProgress,
     DesignWorkState,
+    RepoRef,
 )
 from src.request_utils import client_ip
 
@@ -101,6 +103,7 @@ def _row_to_progress(
         missing_sections=missing,
         output_design_doc_id=row.get("output_design_doc_id"),
         escalated_at=row.get("escalated_at"),
+        escalation_reason=row.get("escalation_reason"),
         title=row.get("title"),
         sub_slug=row.get("sub_slug"),
         version=row.get("version"),
@@ -249,6 +252,78 @@ async def tick_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
     dw = await sm.tick(dw_id)
     refs = await _load_repo_refs(request.app.state.db, dw_id)
     return _row_to_progress(dw, refs, is_running=sm.is_running(dw_id))
+
+
+@router.post("/design-works/{dw_id}/retry", status_code=201)
+@limiter.limit("10/minute")
+async def retry_design_work(
+    dw_id: str, request: Request, response: Response
+) -> DesignWorkProgress:
+    db = request.app.state.db
+    source = await db.fetchone("SELECT * FROM design_works WHERE id=?", (dw_id,))
+    if not source:
+        raise NotFoundError(f"design_work {dw_id!r} not found")
+    if source["current_state"] != DesignWorkState.ESCALATED.value:
+        raise ConflictError(
+            "only ESCALATED DesignWork can be retried",
+            current_stage=source["current_state"],
+        )
+    if source["mode"] != DesignWorkMode.new.value:
+        raise ConflictError(
+            "only mode=new DesignWork retry is supported",
+            current_stage=source["mode"],
+        )
+
+    workspace = await request.app.state.workspaces.get(source["workspace_id"])
+    if workspace is None:
+        raise NotFoundError(f"workspace {source['workspace_id']!r} not found")
+    input_path = source.get("user_input_path")
+    if not input_path:
+        raise NotFoundError(f"design_work {dw_id!r} has no source input file")
+    user_input = await request.app.state.registry.read_text(
+        workspace_slug=workspace["slug"],
+        relative_path=input_path,
+    )
+
+    repo_rows = await db.fetchall(
+        "SELECT repo_id, branch FROM design_work_repos "
+        "WHERE design_work_id=? ORDER BY repo_id",
+        (dw_id,),
+    )
+    refs = [
+        RepoRef(repo_id=row["repo_id"], base_branch=row["branch"])
+        for row in repo_rows
+    ]
+    validated = (
+        await validate_design_repo_refs(
+            refs,
+            request.app.state.repo_registry_repo,
+            request.app.state.repo_inspector,
+        )
+        if refs
+        else []
+    )
+
+    sm = request.app.state.design_work_sm
+    created = await sm.create(
+        workspace_id=source["workspace_id"],
+        title=source["title"],
+        sub_slug=source["sub_slug"],
+        user_input=user_input,
+        mode=DesignWorkMode.new,
+        parent_version=source.get("parent_version"),
+        needs_frontend_mockup=bool(source.get("needs_frontend_mockup")),
+        agent=source.get("agent") or "claude",
+        repo_refs=validated,
+    )
+    sm.schedule_driver(created["id"])
+    response.headers["Location"] = f"/api/v1/design-works/{created['id']}"
+    created_refs = await _load_repo_refs(db, created["id"])
+    return _row_to_progress(
+        created,
+        created_refs,
+        is_running=sm.is_running(created["id"]),
+    )
 
 
 @router.post("/design-works/{dw_id}/cancel", status_code=204)
