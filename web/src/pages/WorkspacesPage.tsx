@@ -36,8 +36,8 @@ const NEUTRAL_ACTION_BUTTON_CLASSNAME =
   "inline-flex items-center justify-center gap-2 rounded-2xl border border-copy/20 bg-copy px-4 py-3 text-sm font-semibold text-ink-invert shadow-[0_16px_30px_rgba(0,0,0,0.26)] transition hover:-translate-y-0.5 hover:bg-copy/92 disabled:opacity-60 disabled:hover:translate-y-0";
 const FORM_FIELD_CLASSNAME =
   "w-full rounded-2xl border border-border-strong bg-panel px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]";
-const FILTER_DECK_CLASSNAME =
-  "grid gap-4 rounded-[24px] border border-border bg-panel-strong/42 p-4 shadow-[0_16px_30px_rgba(0,0,0,0.18)] xl:max-w-[32rem] xl:justify-self-end xl:grid-cols-[minmax(15rem,17rem)_auto] xl:items-end";
+const FILTER_BAR_CLASSNAME =
+  "grid gap-4 rounded-[24px] border border-border bg-panel-strong/42 p-4 shadow-[0_16px_30px_rgba(0,0,0,0.18)] xl:grid-cols-[minmax(20rem,1.8fr)_minmax(14rem,0.7fr)_auto] xl:items-end";
 
 function LoadingSkeleton() {
   return (
@@ -253,8 +253,8 @@ export function WorkspacesPage() {
         title="Workspace 工作台"
       >
         <div className="space-y-4">
-          <div className="grid gap-4 xl:grid-cols-[minmax(22rem,40rem)_minmax(20rem,1fr)] xl:items-start">
-            <label className="space-y-1.5 text-sm text-muted xl:max-w-[40rem]">
+          <div className={FILTER_BAR_CLASSNAME}>
+            <label className="space-y-1.5 text-sm text-muted">
               <span>搜索</span>
               <input
                 className={FORM_FIELD_CLASSNAME}
@@ -263,32 +263,29 @@ export function WorkspacesPage() {
                 placeholder="按标题或 slug 搜索"
               />
             </label>
+            <label className="space-y-1.5 text-sm text-muted">
+              <span>排序</span>
+              <select
+                className={FORM_FIELD_CLASSNAME}
+                value={sort}
+                onChange={(event) => updateFilters({ sort: event.target.value as WorkspaceSort, offset: 0 })}
+              >
+                <option value="updated_desc">最近更新</option>
+                <option value="created_desc">最近创建</option>
+                <option value="title_asc">标题 A-Z</option>
+                <option value="title_desc">标题 Z-A</option>
+              </select>
+            </label>
 
-            <div className={FILTER_DECK_CLASSNAME}>
-              <label className="space-y-1.5 text-sm text-muted">
-                <span>排序</span>
-                <select
-                  className={FORM_FIELD_CLASSNAME}
-                  value={sort}
-                  onChange={(event) => updateFilters({ sort: event.target.value as WorkspaceSort, offset: 0 })}
-                >
-                  <option value="updated_desc">最近更新</option>
-                  <option value="created_desc">最近创建</option>
-                  <option value="title_asc">标题 A-Z</option>
-                  <option value="title_desc">标题 Z-A</option>
-                  </select>
-              </label>
-
-              <div className="space-y-1.5 text-sm text-muted">
-                <span className="block">状态</span>
-                <div className="flex flex-wrap">
-                  <SegmentedControl
-                    ariaLabel="Workspace 状态"
-                    options={STATUS_OPTIONS}
-                    value={status}
-                    onChange={(value) => updateFilters({ status: value, offset: 0 })}
-                  />
-                </div>
+            <div className="space-y-1.5 text-sm text-muted xl:justify-self-end">
+              <span className="block">状态</span>
+              <div className="flex flex-wrap xl:justify-end">
+                <SegmentedControl
+                  ariaLabel="Workspace 状态"
+                  options={STATUS_OPTIONS}
+                  value={status}
+                  onChange={(value) => updateFilters({ status: value, offset: 0 })}
+                />
               </div>
             </div>
           </div>
