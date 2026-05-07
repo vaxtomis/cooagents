@@ -1,6 +1,0 @@
-{"file":".trellis/spec/backend/index.md","reason":"Canonical backend entry spec for layering, checklist, and required quality expectations before changing deployment-related backend code."}
-{"file":".trellis/spec/backend/directory-structure.md","reason":"This task will likely add or reshape CLI/deployment modules and needs to preserve ownership boundaries across src, routes, agent_hosts, agent_worker, and tests."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"The deployment refactor must preserve explicit contracts, single-writer patterns, regression tests, and avoid leaking secrets or bypassing validators."}
-{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Deployment and integration changes touch startup, SSH, worker, and secret-bearing flows where logging and sanitization rules matter."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"The goal is to collapse duplicated shell/skill/deployment logic into one executable core, so reuse guidance is directly relevant."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The task spans CLI, config loading, app startup, remote worker integration, skill deployment, and tests, so cross-layer design tradeoffs need explicit guidance."}

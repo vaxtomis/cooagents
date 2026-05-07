@@ -1,6 +1,0 @@
-{"file":".trellis/spec/backend/index.md","reason":"Baseline backend verification checklist for final review of deployment and integration changes."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check agent should validate regression coverage, contract clarity, secret safety, and boundary placement for the deployment refactor."}
-{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Review must ensure startup, SSH, worker, and integration failures are logged safely without leaking tokens or local key paths."}
-{"file":".trellis/spec/backend/directory-structure.md","reason":"Check agent should confirm new deployment code lives in the right modules and does not smear orchestration across the wrong layers."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"One success criterion is reducing duplicate setup logic across scripts and skills, so review should inspect reuse decisions explicitly."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Quality review should verify the deployment core, execution plane, notifier/runtime integrations, and tests stay coherent across layers."}

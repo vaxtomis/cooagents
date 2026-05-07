@@ -1,8 +1,0 @@
-{"file":".trellis/spec/backend/index.md","reason":"Entry point for backend spec checklist and layer expectations before changing DesignWork prompt/validator/state-machine code."}
-{"file":".trellis/spec/backend/directory-structure.md","reason":"Needed to keep route, state-machine, validator, template, and model changes in the correct ownership boundaries."}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines required testing, explicit contracts, and invariant duplication for backend contract-tightening work."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Relevant because stricter DesignDoc validation may change boundary/runtime validation behavior and error responses."}
-{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Relevant if DesignWork state-machine failure or escalation paths change while tightening validator behavior."}
-{"file":".trellis/spec/guides/index.md","reason":"Shared thinking-guide entry point required before implementation."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Relevant because DesignWork and DevWork already share repeated contract and UI patterns; avoid duplicating new validation logic."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Relevant because document-contract changes span prompt template, validator, state machine, API DTOs, and frontend consumers."}
