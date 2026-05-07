@@ -116,6 +116,15 @@ export interface DesignWork {
 
 export type DesignWorkPage = PaginatedResult<DesignWork>;
 
+export interface DesignWorkRetrySource {
+  title: string;
+  slug: string;
+  user_input: string;
+  needs_frontend_mockup: boolean;
+  agent: AgentKind | null;
+  repo_refs: RepoRef[];
+}
+
 export interface DesignDoc {
   id: string;
   workspace_id: string;
@@ -307,6 +316,15 @@ export interface CreateDesignWorkPayload {
   rubric_threshold?: number;
   // Phase 4 (repo-registry): optional repo binding. Empty list keeps
   // pure-doc DesignWorks creatable; omit (or send `[]`) when none.
+  repo_refs?: RepoRef[];
+}
+
+export interface RetryDesignWorkPayload {
+  title?: string;
+  slug?: string;
+  user_input?: string;
+  needs_frontend_mockup?: boolean;
+  agent?: AgentKind | null;
   repo_refs?: RepoRef[];
 }
 

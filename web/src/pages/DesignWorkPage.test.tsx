@@ -8,6 +8,7 @@ import { DesignWorkPage } from "./DesignWorkPage";
 
 vi.mock("../api/designWorks", () => ({
   getDesignWork: vi.fn(),
+  getDesignWorkRetrySource: vi.fn(),
   retryDesignWork: vi.fn(),
   tickDesignWork: vi.fn(),
   cancelDesignWork: vi.fn(),
@@ -21,9 +22,14 @@ vi.mock("../api/reviews", () => ({
 vi.mock("../api/workspaceEvents", () => ({
   listWorkspaceEvents: vi.fn(),
 }));
+vi.mock("../api/repos", () => ({
+  listRepos: vi.fn(),
+  repoBranches: vi.fn(),
+}));
 
-import { getDesignWork, retryDesignWork } from "../api/designWorks";
+import { getDesignWork, getDesignWorkRetrySource, retryDesignWork } from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
+import { listRepos } from "../api/repos";
 import { listReviews } from "../api/reviews";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
 
@@ -94,12 +100,21 @@ describe("DesignWorkPage", () => {
     expect(screen.getByRole("button", { name: "Retry as new DesignWork" })).toBeEnabled();
   });
 
-  it("retries an escalated DesignWork and navigates to the new row", async () => {
+  it("opens editable retry form before creating the new row", async () => {
     vi.mocked(getDesignWork).mockResolvedValue({
       ...baseDesignWork,
       current_state: "ESCALATED",
       escalation_reason: "post-validate failed",
     });
+    vi.mocked(getDesignWorkRetrySource).mockResolvedValue({
+      title: "Feature",
+      slug: "feature",
+      user_input: "old requirement text",
+      needs_frontend_mockup: false,
+      agent: "claude",
+      repo_refs: [],
+    });
+    vi.mocked(listRepos).mockResolvedValue([]);
     vi.mocked(retryDesignWork).mockResolvedValue({ ...baseDesignWork, id: "dw-2" });
     vi.mocked(listReviews).mockResolvedValue([]);
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
@@ -108,7 +123,26 @@ describe("DesignWorkPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Retry as new DesignWork" }));
 
-    await waitFor(() => expect(retryDesignWork).toHaveBeenCalledWith("dw-1"));
+    await waitFor(() => expect(getDesignWorkRetrySource).toHaveBeenCalledWith("dw-1"));
+    expect(retryDesignWork).not.toHaveBeenCalled();
+
+    fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Feature retry" } });
+    fireEvent.change(screen.getByLabelText("Requirement"), { target: { value: "new requirement text" } });
+    fireEvent.change(screen.getByLabelText("Execution Agent"), { target: { value: "codex" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create retry" }));
+
+    await waitFor(() => {
+      expect(retryDesignWork).toHaveBeenCalledWith(
+        "dw-1",
+        expect.objectContaining({
+          title: "Feature retry",
+          slug: "feature",
+          user_input: "new requirement text",
+          agent: "codex",
+          repo_refs: [],
+        }),
+      );
+    });
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       "/workspaces/ws-1/design-works/dw-2",
     );

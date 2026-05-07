@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.agent_hosts.dispatch_decider import choose_host, reset_counters
+from src.agent_hosts.dispatch_decider import (
+    choose_configured_host,
+    choose_host,
+    reset_counters,
+    resolve_configured_agent,
+)
 from src.agent_hosts.repo import AgentHostRepo
 from src.database import Database
 
@@ -29,10 +34,32 @@ async def test_only_unhealthy_returns_local(env):
     assert await choose_host(env, "codex") == "local"
 
 
+async def test_choose_configured_host_uses_configured_unhealthy_match(env):
+    await env.upsert(id="h1", host="u@a", agent_type="codex")
+    assert await choose_configured_host(env, "codex") == "h1"
+
+
+async def test_choose_configured_host_does_not_use_incompatible_healthy_host(env):
+    await env.upsert(id="h-claude", host="u@a", agent_type="claude")
+    await env.update_health("h-claude", status="healthy")
+    await env.upsert(id="h-codex", host="u@b", agent_type="codex")
+    assert await choose_configured_host(env, "codex") == "h-codex"
+
+
 async def test_picks_healthy_host(env):
     await env.upsert(id="h1", host="u@a", agent_type="codex")
     await env.update_health("h1", status="healthy")
     assert await choose_host(env, "codex") == "h1"
+
+
+def test_resolve_configured_agent_falls_back_when_requested_unavailable():
+    hosts = [{"agent_type": "codex", "health_status": "healthy", "labels": []}]
+    assert resolve_configured_agent(hosts, "claude") == "codex"
+
+
+def test_resolve_configured_agent_keeps_requested_when_configured():
+    hosts = [{"agent_type": "both", "health_status": "unknown", "labels": []}]
+    assert resolve_configured_agent(hosts, "claude") == "claude"
 
 
 async def test_round_robin_across_two_hosts(env):

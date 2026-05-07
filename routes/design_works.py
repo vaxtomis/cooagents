@@ -18,19 +18,21 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Body, Query, Request, Response
 from slowapi import Limiter
 
 from routes._repo_refs_validation import validate_design_repo_refs
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.models import (
     CreateDesignWorkRequest,
+    DesignWorkRetrySource,
     DesignWorkMode,
     DesignWorkPage,
     DesignRepoRefView,
     DesignWorkProgress,
     DesignWorkState,
     RepoRef,
+    RetryDesignWorkRequest,
 )
 from src.request_utils import client_ip
 
@@ -51,6 +53,18 @@ async def _load_repo_refs(db, dw_id: str) -> list[DesignRepoRefView]:
         (dw_id,),
     )
     return [_row_to_repo_ref(r) for r in rows]
+
+
+async def _load_retry_repo_refs(db, dw_id: str) -> list[RepoRef]:
+    rows = await db.fetchall(
+        "SELECT repo_id, branch FROM design_work_repos "
+        "WHERE design_work_id=? ORDER BY repo_id",
+        (dw_id,),
+    )
+    return [
+        RepoRef(repo_id=row["repo_id"], base_branch=row["branch"])
+        for row in rows
+    ]
 
 
 def _row_to_repo_ref(r: dict) -> DesignRepoRefView:
@@ -114,6 +128,32 @@ def _row_to_progress(
     )
 
 
+def _ensure_retryable(source: dict) -> None:
+    if source["current_state"] != DesignWorkState.ESCALATED.value:
+        raise ConflictError(
+            "only ESCALATED DesignWork can be retried",
+            current_stage=source["current_state"],
+        )
+    if source["mode"] != DesignWorkMode.new.value:
+        raise ConflictError(
+            "only mode=new DesignWork retry is supported",
+            current_stage=source["mode"],
+        )
+
+
+async def _read_source_user_input(request: Request, source: dict) -> str:
+    workspace = await request.app.state.workspaces.get(source["workspace_id"])
+    if workspace is None:
+        raise NotFoundError(f"workspace {source['workspace_id']!r} not found")
+    input_path = source.get("user_input_path")
+    if not input_path:
+        raise NotFoundError(f"design_work {source['id']!r} has no source input file")
+    return await request.app.state.registry.read_text(
+        workspace_slug=workspace["slug"],
+        relative_path=input_path,
+    )
+
+
 @router.post("/design-works", status_code=201)
 @limiter.limit("10/minute")
 async def create_design_work(
@@ -139,7 +179,7 @@ async def create_design_work(
         mode=req.mode,
         parent_version=req.parent_version,
         needs_frontend_mockup=req.needs_frontend_mockup,
-        agent=req.agent.value,
+        agent=req.agent.value if req.agent is not None else None,
         rubric_threshold=req.rubric_threshold,  # U2 API override
         repo_refs=validated,
     )
@@ -254,46 +294,51 @@ async def tick_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
     return _row_to_progress(dw, refs, is_running=sm.is_running(dw_id))
 
 
+@router.get("/design-works/{dw_id}/retry-source")
+async def get_design_work_retry_source(
+    dw_id: str, request: Request
+) -> DesignWorkRetrySource:
+    db = request.app.state.db
+    source = await db.fetchone("SELECT * FROM design_works WHERE id=?", (dw_id,))
+    if not source:
+        raise NotFoundError(f"design_work {dw_id!r} not found")
+    _ensure_retryable(source)
+    user_input = await _read_source_user_input(request, source)
+    refs = await _load_retry_repo_refs(db, dw_id)
+    return DesignWorkRetrySource(
+        title=source.get("title") or source["id"],
+        slug=source.get("sub_slug") or source["id"],
+        user_input=user_input,
+        needs_frontend_mockup=bool(source.get("needs_frontend_mockup")),
+        agent=source.get("agent"),
+        repo_refs=refs,
+    )
+
+
 @router.post("/design-works/{dw_id}/retry", status_code=201)
 @limiter.limit("10/minute")
 async def retry_design_work(
-    dw_id: str, request: Request, response: Response
+    dw_id: str,
+    request: Request,
+    response: Response,
+    payload: RetryDesignWorkRequest | None = Body(default=None),
 ) -> DesignWorkProgress:
     db = request.app.state.db
     source = await db.fetchone("SELECT * FROM design_works WHERE id=?", (dw_id,))
     if not source:
         raise NotFoundError(f"design_work {dw_id!r} not found")
-    if source["current_state"] != DesignWorkState.ESCALATED.value:
-        raise ConflictError(
-            "only ESCALATED DesignWork can be retried",
-            current_stage=source["current_state"],
-        )
-    if source["mode"] != DesignWorkMode.new.value:
-        raise ConflictError(
-            "only mode=new DesignWork retry is supported",
-            current_stage=source["mode"],
-        )
-
-    workspace = await request.app.state.workspaces.get(source["workspace_id"])
-    if workspace is None:
-        raise NotFoundError(f"workspace {source['workspace_id']!r} not found")
-    input_path = source.get("user_input_path")
-    if not input_path:
-        raise NotFoundError(f"design_work {dw_id!r} has no source input file")
-    user_input = await request.app.state.registry.read_text(
-        workspace_slug=workspace["slug"],
-        relative_path=input_path,
+    _ensure_retryable(source)
+    fields_set = payload.model_fields_set if payload is not None else set()
+    user_input = (
+        payload.user_input
+        if payload is not None and "user_input" in fields_set
+        else await _read_source_user_input(request, source)
     )
-
-    repo_rows = await db.fetchall(
-        "SELECT repo_id, branch FROM design_work_repos "
-        "WHERE design_work_id=? ORDER BY repo_id",
-        (dw_id,),
+    refs = (
+        payload.repo_refs or []
+        if payload is not None and "repo_refs" in fields_set
+        else await _load_retry_repo_refs(db, dw_id)
     )
-    refs = [
-        RepoRef(repo_id=row["repo_id"], base_branch=row["branch"])
-        for row in repo_rows
-    ]
     validated = (
         await validate_design_repo_refs(
             refs,
@@ -305,15 +350,35 @@ async def retry_design_work(
     )
 
     sm = request.app.state.design_work_sm
+    title = (
+        payload.title
+        if payload is not None and "title" in fields_set
+        else source["title"]
+    )
+    sub_slug = (
+        payload.slug
+        if payload is not None and "slug" in fields_set
+        else source["sub_slug"]
+    )
+    needs_frontend_mockup = (
+        payload.needs_frontend_mockup
+        if payload is not None and "needs_frontend_mockup" in fields_set
+        else bool(source.get("needs_frontend_mockup"))
+    )
+    agent = (
+        payload.agent.value if payload is not None and payload.agent is not None
+        else None if payload is not None and "agent" in fields_set
+        else source.get("agent")
+    )
     created = await sm.create(
         workspace_id=source["workspace_id"],
-        title=source["title"],
-        sub_slug=source["sub_slug"],
+        title=title,
+        sub_slug=sub_slug,
         user_input=user_input,
         mode=DesignWorkMode.new,
         parent_version=source.get("parent_version"),
-        needs_frontend_mockup=bool(source.get("needs_frontend_mockup")),
-        agent=source.get("agent") or "claude",
+        needs_frontend_mockup=bool(needs_frontend_mockup),
+        agent=agent,
         repo_refs=validated,
     )
     sm.schedule_driver(created["id"])

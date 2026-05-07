@@ -291,7 +291,7 @@ class CreateDesignWorkRequest(BaseModel):
     mode: DesignWorkMode = DesignWorkMode.new
     parent_version: str | None = None
     needs_frontend_mockup: bool = False
-    agent: AgentKind = AgentKind.claude
+    agent: AgentKind | None = None
     # Optional per-DesignWork override. When None, D6 PERSIST falls back
     # first to the LLM-produced front-matter, then to
     # config.scoring.default_threshold (=80). (U2)
@@ -319,6 +319,61 @@ class CreateDesignWorkRequest(BaseModel):
         if self.mode == DesignWorkMode.optimize and self.parent_version is None:
             raise ValueError("mode=optimize requires parent_version")
         return self
+
+
+class RetryDesignWorkRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    slug: str | None = None
+    user_input: str | None = Field(default=None, min_length=1, max_length=20000)
+    needs_frontend_mockup: bool | None = None
+    agent: AgentKind | None = None
+    # Omitted means "reuse the source repo bindings"; [] means "retry with no
+    # repo bindings".
+    repo_refs: list["RepoRef"] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_non_clearable_nulls(cls, data):
+        """Keep omitted-vs-overridden retry fields unambiguous."""
+        if not isinstance(data, dict):
+            return data
+        nullable = {"agent"}
+        retry_fields = {
+            "title",
+            "slug",
+            "user_input",
+            "needs_frontend_mockup",
+            "agent",
+            "repo_refs",
+        }
+        explicit_nulls = [
+            name for name, value in data.items()
+            if name in retry_fields and value is None and name not in nullable
+        ]
+        if explicit_nulls:
+            raise ValueError(
+                f"fields cannot be null when provided: {sorted(explicit_nulls)}"
+            )
+        return data
+
+    @field_validator("slug")
+    @classmethod
+    def _check_slug(cls, v: str | None) -> str | None:
+        if v is not None and not _WORKSPACE_SLUG_RE.match(v):
+            raise ValueError(
+                "slug must be kebab-case (1-63 chars, no leading/trailing dash, "
+                "no consecutive dashes)"
+            )
+        return v
+
+
+class DesignWorkRetrySource(BaseModel):
+    title: str
+    slug: str
+    user_input: str
+    needs_frontend_mockup: bool = False
+    agent: AgentKind | None = None
+    repo_refs: list["RepoRef"] = Field(default_factory=list)
 
 
 class DesignWorkProgress(BaseModel):
@@ -355,7 +410,7 @@ class CreateDevWorkRequest(BaseModel):
     workspace_id: str
     design_doc_id: str
     prompt: str = Field(..., min_length=1, max_length=20000)
-    agent: AgentKind = AgentKind.claude
+    agent: AgentKind | None = None
     # Phase 4 (repo-registry): replaces the free-form ``repo_path`` field.
     # At least one ref required; ``mount_name`` must be unique within the
     # payload, and at most one ref may carry ``is_primary=True``. The
@@ -779,6 +834,8 @@ class RepoLogPage(BaseModel):
 # models above keeps the file's top-down narrative readable.
 DevWork.model_rebuild()
 CreateDesignWorkRequest.model_rebuild()
+RetryDesignWorkRequest.model_rebuild()
+DesignWorkRetrySource.model_rebuild()
 DesignWorkProgress.model_rebuild()
 CreateDevWorkRequest.model_rebuild()
 DevWorkProgress.model_rebuild()

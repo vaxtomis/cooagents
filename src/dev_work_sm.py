@@ -33,7 +33,6 @@ from src.git_utils import DEVWORK_BRANCH_FMT, ensure_worktree
 from src.llm_runner import IdleTimeoutError, ProgressTick, dw_session_name
 from src.models import (
     REPO_ROLE_PRIMARY_PRIORITY,
-    AgentKind,
     DevRepoRef,
     DevWorkStep,
     ProblemCategory,
@@ -216,16 +215,38 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
     # ---- Phase 8a host dispatch helpers ----
 
     async def _pick_host(self, agent: str) -> str:
-        from src.agent_hosts.dispatch_decider import choose_host
+        from src.agent_hosts.dispatch_decider import choose_configured_host
         from src.models import LOCAL_HOST_ID
 
         if self.agent_host_repo is None:
             return LOCAL_HOST_ID
         try:
-            return await choose_host(self.agent_host_repo, agent)
+            return await choose_configured_host(self.agent_host_repo, agent)
         except Exception:
             logger.exception("choose_host failed; falling back to local")
             return LOCAL_HOST_ID
+
+    async def _resolve_agent(self, requested: str | None) -> str:
+        preferred = getattr(self.config, "preferred_dev_agent", None)
+        if self.agent_host_repo is None:
+            for candidate in (requested, preferred, "codex", "claude"):
+                if candidate in {"codex", "claude"}:
+                    return candidate
+            return "codex"
+        try:
+            from src.agent_hosts.dispatch_decider import resolve_configured_agent
+
+            return resolve_configured_agent(
+                await self.agent_host_repo.list_all(),
+                requested,
+                preferred=preferred,
+            )
+        except Exception:
+            logger.exception("resolve DevWork agent failed; using fallback")
+            for candidate in (requested, preferred, "codex", "claude"):
+                if candidate in {"codex", "claude"}:
+                    return candidate
+            return "codex"
 
     async def _open_dispatch(
         self, *, host_id: str, workspace_id: str,
@@ -265,7 +286,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         design_doc_id: str,
         repo_refs: list[tuple[DevRepoRef, str | None]],
         prompt: str,
-        agent: str = AgentKind.claude.value,
+        agent: str | None = None,
     ) -> dict[str, Any]:
         """Create a DevWork plus its ``dev_work_repos`` rows atomically.
 
@@ -306,7 +327,8 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
 
         dev_id = self._new_id()
         now = self._now()
-        host_id = await self._pick_host(agent)
+        resolved_agent = await self._resolve_agent(agent)
+        host_id = await self._pick_host(resolved_agent)
         dw_short = dev_id.removeprefix("dev-")
         devwork_branch = DEVWORK_BRANCH_FMT.format(
             slug=ws["slug"], dw_short=dw_short
@@ -333,7 +355,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                     None,
                     None,
                     None,
-                    agent,
+                    resolved_agent,
                     host_id,
                     None,
                     None,
@@ -372,6 +394,8 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             correlation_id=dev_id,
             payload={
                 "design_doc_id": design_doc_id,
+                "agent": resolved_agent,
+                "agent_host_id": host_id,
                 "repo_refs": [
                     {
                         "repo_id": r.repo_id,

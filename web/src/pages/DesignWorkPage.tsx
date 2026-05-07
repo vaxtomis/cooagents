@@ -1,13 +1,21 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
-import { cancelDesignWork, getDesignWork, retryDesignWork, tickDesignWork } from "../api/designWorks";
+import {
+  cancelDesignWork,
+  getDesignWork,
+  getDesignWorkRetrySource,
+  retryDesignWork,
+  tickDesignWork,
+} from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
 import { listReviews } from "../api/reviews";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
+import { AppDialog } from "../components/AppDialog";
 import { DesignWorkStateProgress } from "../components/DesignWorkStateProgress";
 import { MarkdownPanel } from "../components/MarkdownPanel";
+import { RepoRefsEditor, type RepoRefsEditorRow } from "../components/RepoRefsEditor";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
 import { StatusBadge } from "../components/StatusBadge";
 import {
@@ -16,7 +24,15 @@ import {
   useWorkspacePolling,
 } from "../hooks/useWorkspacePolling";
 import { extractError } from "../lib/extractError";
-import type { DesignWork, Review, WorkspaceEvent } from "../types";
+import type {
+  AgentKind,
+  DesignWork,
+  DesignWorkRetrySource,
+  RepoRef,
+  RetryDesignWorkPayload,
+  Review,
+  WorkspaceEvent,
+} from "../types";
 
 const DESIGN_WORK_EVENT_NAMES = [
   "design_work.started",
@@ -27,6 +43,13 @@ const DESIGN_WORK_EVENT_NAMES = [
   "design_work.escalated",
 ] as const;
 const DESIGN_WORK_EVENT_LIMIT = 20;
+const SLUG_RE = /^[a-z0-9](?:[a-z0-9]|-(?!-)){0,61}[a-z0-9]$|^[a-z0-9]$/;
+const FORM_FIELD_CLASSNAME =
+  "w-full rounded-2xl border border-border-strong bg-panel px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)]";
+const FORM_SELECT_CLASSNAME =
+  "w-full rounded-2xl border border-border-strong bg-panel-strong px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)] [&_option]:bg-panel-strong";
+const DIALOG_FOOTER_CLASSNAME =
+  "flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end";
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -89,6 +112,159 @@ function ReviewRow({ review }: { review: Review }) {
   );
 }
 
+function toEditorRows(refs: RepoRef[]): RepoRefsEditorRow[] {
+  return refs.map((ref) => ({
+    repo_id: ref.repo_id,
+    base_branch: ref.base_branch,
+    mount_name: "",
+    base_rev_lock: false,
+    is_primary: false,
+  }));
+}
+
+function DesignWorkRetryForm({
+  source,
+  submitting,
+  onCancel,
+  onSubmit,
+}: {
+  source: DesignWorkRetrySource;
+  submitting: boolean;
+  onCancel: () => void;
+  onSubmit: (payload: RetryDesignWorkPayload) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(source.title);
+  const [slug, setSlug] = useState(source.slug);
+  const [userInput, setUserInput] = useState(source.user_input);
+  const [needsFrontendMockup, setNeedsFrontendMockup] = useState(
+    source.needs_frontend_mockup,
+  );
+  const [agent, setAgent] = useState<AgentKind | "">(source.agent ?? "");
+  const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>(
+    toEditorRows(source.repo_refs),
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedTitle = title.trim();
+    const trimmedSlug = slug.trim();
+    const trimmedInput = userInput.trim();
+    if (!trimmedTitle) return setError("Title is required");
+    if (!SLUG_RE.test(trimmedSlug)) return setError("Slug must be kebab-case");
+    if (!trimmedInput) return setError("Requirement text is required");
+
+    const touchedRows = repoRefs.filter(
+      (row) => row.repo_id || row.base_branch,
+    );
+    for (const row of touchedRows) {
+      if (!row.repo_id || !row.base_branch) {
+        return setError("Every selected repo needs a repo and base branch");
+      }
+    }
+    const refs = touchedRows.map((row) => ({
+      repo_id: row.repo_id,
+      base_branch: row.base_branch,
+    }));
+
+    setError(null);
+    try {
+      await onSubmit({
+        title: trimmedTitle,
+        slug: trimmedSlug,
+        user_input: trimmedInput,
+        needs_frontend_mockup: needsFrontendMockup,
+        agent: agent || null,
+        repo_refs: refs,
+      });
+    } catch (err) {
+      setError(extractError(err, "Retry failed"));
+    }
+  }
+
+  return (
+    <form className="space-y-5" onSubmit={(event) => void submit(event)}>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <label className="space-y-1.5 text-sm text-muted">
+          <span>Title</span>
+          <input
+            className={FORM_FIELD_CLASSNAME}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted">
+          <span>Slug</span>
+          <input
+            className={FORM_FIELD_CLASSNAME}
+            value={slug}
+            onChange={(event) => setSlug(event.target.value)}
+          />
+        </label>
+      </div>
+
+      <label className="block space-y-1.5 text-sm text-muted">
+        <span>Requirement</span>
+        <textarea
+          className={`${FORM_FIELD_CLASSNAME} min-h-[13rem] resize-y`}
+          value={userInput}
+          onChange={(event) => setUserInput(event.target.value)}
+        />
+      </label>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <label className="flex items-center gap-2.5 text-sm text-muted">
+          <input
+            checked={needsFrontendMockup}
+            onChange={(event) => setNeedsFrontendMockup(event.target.checked)}
+            type="checkbox"
+          />
+          <span>Needs frontend mockup</span>
+        </label>
+
+        <label className="space-y-1.5 text-sm text-muted">
+          <span>Execution Agent</span>
+          <select
+            className={FORM_SELECT_CLASSNAME}
+            value={agent}
+            onChange={(event) => setAgent(event.target.value as AgentKind | "")}
+          >
+            <option value="">Automatic</option>
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
+        </label>
+      </div>
+
+      <RepoRefsEditor
+        minRows={0}
+        mode="design"
+        onChange={setRepoRefs}
+        value={repoRefs}
+      />
+
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+
+      <div className={DIALOG_FOOTER_CLASSNAME}>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="inline-flex w-full items-center justify-center rounded-2xl bg-copy px-5 py-3 text-sm font-semibold text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] disabled:opacity-50 sm:w-auto"
+        >
+          {submitting ? "Retrying..." : "Create retry"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex w-full items-center justify-center rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft transition hover:border-accent/50 hover:bg-panel hover:text-copy sm:w-auto"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 type DesignDocContentState =
   | { kind: "idle" }
   | { kind: "loading" }
@@ -114,8 +290,14 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
   const detailPolling = useWorkspaceDetailPolling<DesignWork>((latest) => Boolean(latest?.is_running));
   const [actionPending, setActionPending] = useState<"tick" | "cancel" | "retry" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [retryOpen, setRetryOpen] = useState(false);
 
   const dwQuery = useSWR(["design-work", dwId], () => getDesignWork(dwId), detailPolling);
+  const retrySourceQuery = useSWR(
+    retryOpen ? ["design-work-retry-source", dwId] : null,
+    () => getDesignWorkRetrySource(dwId),
+    { revalidateOnFocus: false },
+  );
   const reviewsQuery = useSWR(
     ["reviews", "design", dwId],
     () => listReviews({ design_work_id: dwId }),
@@ -187,22 +369,34 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
 
   const activityEvents = workspaceEventsQuery.data?.events ?? [];
 
-  async function runAction(action: "tick" | "cancel" | "retry") {
+  async function runAction(action: "tick" | "cancel") {
     setActionPending(action);
     setActionError(null);
     try {
       if (action === "tick") {
         await tickDesignWork(dwId);
         await dwQuery.mutate();
-      } else if (action === "cancel") {
+      } else {
         await cancelDesignWork(dwId);
         await dwQuery.mutate();
-      } else {
-        const created = await retryDesignWork(dwId);
-        navigate(`/workspaces/${wsId}/design-works/${created.id}`);
       }
     } catch (err) {
       setActionError(extractError(err, "操作失败"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function submitRetry(payload: RetryDesignWorkPayload) {
+    setActionPending("retry");
+    setActionError(null);
+    try {
+      const created = await retryDesignWork(dwId, payload);
+      setRetryOpen(false);
+      navigate(`/workspaces/${wsId}/design-works/${created.id}`);
+    } catch (err) {
+      setActionError(extractError(err, "Retry failed"));
+      throw err;
     } finally {
       setActionPending(null);
     }
@@ -252,10 +446,10 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
             <button
               className="mt-3 rounded-lg bg-copy px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] disabled:opacity-50"
               disabled={actionPending !== null}
-              onClick={() => void runAction("retry")}
+              onClick={() => setRetryOpen(true)}
               type="button"
             >
-              {actionPending === "retry" ? "Retrying..." : "Retry as new DesignWork"}
+              Retry as new DesignWork
             </button>
           </div>
         ) : null}
@@ -372,6 +566,41 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
           </div>
         )}
       </SectionPanel>
+
+      {retryOpen ? (
+        <AppDialog
+          description="Edit the copied source values before creating a new DesignWork."
+          onClose={() => setRetryOpen(false)}
+          open={retryOpen}
+          size="wide"
+          title="Retry DesignWork"
+        >
+          {retrySourceQuery.error ? (
+            <div className="space-y-4">
+              <p className="rounded-2xl border border-danger/25 bg-danger/10 p-4 text-sm text-danger">
+                {extractError(retrySourceQuery.error, "Retry source failed to load")}
+              </p>
+              <button
+                className="rounded-lg bg-copy px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)]"
+                onClick={() => void retrySourceQuery.mutate()}
+                type="button"
+              >
+                Reload
+              </button>
+            </div>
+          ) : retrySourceQuery.data ? (
+            <DesignWorkRetryForm
+              key={`${dwId}:${retrySourceQuery.data.slug}`}
+              onCancel={() => setRetryOpen(false)}
+              onSubmit={submitRetry}
+              source={retrySourceQuery.data}
+              submitting={actionPending === "retry"}
+            />
+          ) : (
+            <div className="h-48 animate-pulse rounded-2xl border border-border bg-panel-strong/70" />
+          )}
+        </AppDialog>
+      ) : null}
     </div>
   );
 }

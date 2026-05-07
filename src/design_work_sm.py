@@ -157,16 +157,38 @@ class DesignWorkStateMachine:
         Phase 7b call sites that don't construct one). Errors from the
         decider must not block creation — falls back to ``"local"``.
         """
-        from src.agent_hosts.dispatch_decider import choose_host
+        from src.agent_hosts.dispatch_decider import choose_configured_host
         from src.models import LOCAL_HOST_ID
 
         if self.agent_host_repo is None:
             return LOCAL_HOST_ID
         try:
-            return await choose_host(self.agent_host_repo, agent)
+            return await choose_configured_host(self.agent_host_repo, agent)
         except Exception:
             logger.exception("choose_host failed; falling back to local")
             return LOCAL_HOST_ID
+
+    async def _resolve_agent(self, requested: str | None) -> str:
+        preferred = getattr(self.config, "preferred_design_agent", None)
+        if self.agent_host_repo is None:
+            for candidate in (requested, preferred, "codex", "claude"):
+                if candidate in {"codex", "claude"}:
+                    return candidate
+            return "codex"
+        try:
+            from src.agent_hosts.dispatch_decider import resolve_configured_agent
+
+            return resolve_configured_agent(
+                await self.agent_host_repo.list_all(),
+                requested,
+                preferred=preferred,
+            )
+        except Exception:
+            logger.exception("resolve DesignWork agent failed; using fallback")
+            for candidate in (requested, preferred, "codex", "claude"):
+                if candidate in {"codex", "claude"}:
+                    return candidate
+            return "codex"
 
     async def _transition(self, dw: dict, frm: DesignWorkState, to: DesignWorkState) -> None:
         now = self._now()
@@ -210,7 +232,7 @@ class DesignWorkStateMachine:
         mode: DesignWorkMode,
         parent_version: str | None,
         needs_frontend_mockup: bool,
-        agent: str,
+        agent: str | None,
         rubric_threshold: int | None = None,
         repo_refs: list[tuple[RepoRef, str | None]] | None = None,
     ) -> dict:
@@ -252,7 +274,8 @@ class DesignWorkStateMachine:
             else None
         )
 
-        host_id = await self._pick_host(agent)
+        resolved_agent = await self._resolve_agent(agent)
+        host_id = await self._pick_host(resolved_agent)
         async with self.db.transaction():
             await self.db.execute(
                 """INSERT INTO design_works
@@ -270,7 +293,7 @@ class DesignWorkStateMachine:
                     DesignWorkState.INIT.value,
                     0,
                     None,
-                    agent,
+                    resolved_agent,
                     host_id,
                     input_rel,
                     title,
@@ -295,7 +318,13 @@ class DesignWorkStateMachine:
             event_name="design_work.started",
             workspace_id=workspace_id,
             correlation_id=wid,
-            payload={"mode": mode.value, "title": title, "sub_slug": sub_slug},
+            payload={
+                "mode": mode.value,
+                "title": title,
+                "sub_slug": sub_slug,
+                "agent": resolved_agent,
+                "agent_host_id": host_id,
+            },
         )
         try:
             await self.workspaces.regenerate_workspace_md(workspace_id)

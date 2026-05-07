@@ -2,7 +2,9 @@ import type {
   CreateDesignWorkPayload,
   DesignWork,
   DesignWorkPage,
+  DesignWorkRetrySource,
   DesignWorkState,
+  RetryDesignWorkPayload,
 } from "../types";
 import { apiFetch } from "./client";
 
@@ -38,8 +40,18 @@ export async function createDesignWork(payload: CreateDesignWorkPayload): Promis
   return apiFetch<DesignWork>("/design-works", { method: "POST", body: payload });
 }
 
-export async function retryDesignWork(id: string): Promise<DesignWork> {
-  return apiFetch<DesignWork>(`/design-works/${encodeURIComponent(id)}/retry`, { method: "POST" });
+export async function getDesignWorkRetrySource(id: string): Promise<DesignWorkRetrySource> {
+  return apiFetch<DesignWorkRetrySource>(`/design-works/${encodeURIComponent(id)}/retry-source`);
+}
+
+export async function retryDesignWork(
+  id: string,
+  payload?: RetryDesignWorkPayload,
+): Promise<DesignWork> {
+  return apiFetch<DesignWork>(`/design-works/${encodeURIComponent(id)}/retry`, {
+    method: "POST",
+    body: payload,
+  });
 }
 
 export async function tickDesignWork(id: string): Promise<DesignWork> {

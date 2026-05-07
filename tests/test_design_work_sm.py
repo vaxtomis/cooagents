@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.database import Database
+from src.agent_hosts.repo import AgentHostRepo
 from src.design_doc_manager import DesignDocManager
 from src.design_work_sm import DesignWorkStateMachine
 from src.models import DesignWorkMode
@@ -127,6 +128,66 @@ async def test_happy_path_new(env):
     payload = json.loads(ev["payload_json"])
     assert payload["design_doc_id"] == row["id"]
     assert payload["slug"] == "demo"
+
+
+async def test_create_uses_requested_agent_when_configured(env):
+    stub = StubExecutor(FIXTURES / "perfect")
+    host_repo = AgentHostRepo(env["db"])
+    await host_repo.upsert(id="local", host="local", agent_type="codex")
+    await host_repo.update_health("local", status="healthy")
+    sm = DesignWorkStateMachine(
+        db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
+        executor=stub, config=_build_config(), registry=env["registry"],
+        agent_host_repo=host_repo,
+    )
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], title="T", sub_slug="codex",
+        user_input="make it simple and clean, please",
+        mode=DesignWorkMode.new, parent_version=None,
+        needs_frontend_mockup=False, agent="codex",
+    )
+    assert dw["agent"] == "codex"
+    assert dw["agent_host_id"] == "local"
+
+
+async def test_create_falls_back_to_configured_agent_when_requested_unavailable(env):
+    stub = StubExecutor(FIXTURES / "perfect")
+    host_repo = AgentHostRepo(env["db"])
+    await host_repo.upsert(id="local", host="local", agent_type="codex")
+    await host_repo.update_health("local", status="healthy")
+    sm = DesignWorkStateMachine(
+        db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
+        executor=stub, config=_build_config(), registry=env["registry"],
+        agent_host_repo=host_repo,
+    )
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], title="T", sub_slug="fallback",
+        user_input="make it simple and clean, please",
+        mode=DesignWorkMode.new, parent_version=None,
+        needs_frontend_mockup=False, agent="claude",
+    )
+    assert dw["agent"] == "codex"
+    assert dw["agent_host_id"] == "local"
+
+
+async def test_create_omitted_agent_uses_configured_agent(env):
+    stub = StubExecutor(FIXTURES / "perfect")
+    host_repo = AgentHostRepo(env["db"])
+    await host_repo.upsert(id="local", host="local", agent_type="codex")
+    await host_repo.update_health("local", status="healthy")
+    sm = DesignWorkStateMachine(
+        db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
+        executor=stub, config=_build_config(), registry=env["registry"],
+        agent_host_repo=host_repo,
+    )
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], title="T", sub_slug="auto",
+        user_input="make it simple and clean, please",
+        mode=DesignWorkMode.new, parent_version=None,
+        needs_frontend_mockup=False, agent=None,
+    )
+    assert dw["agent"] == "codex"
+    assert dw["agent_host_id"] == "local"
 
 
 async def test_rubric_api_override_wins(env):

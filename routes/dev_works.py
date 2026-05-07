@@ -210,7 +210,7 @@ async def create_dev_work(
             design_doc_id=req.design_doc_id,
             repo_refs=validated,
             prompt=req.prompt,
-            agent=req.agent.value,
+            agent=req.agent.value if req.agent is not None else None,
         )
     except sqlite3.IntegrityError as exc:
         # Partial UNIQUE index on dev_works(design_doc_id) WHERE step not in

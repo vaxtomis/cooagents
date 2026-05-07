@@ -360,6 +360,102 @@ async def test_retry_escalated_design_work_creates_new_row(client):
     assert source_after.json()["current_state"] == "ESCALATED"
 
 
+async def test_retry_source_returns_editable_source_payload(client):
+    client._app.state.executor_stub.scenario_dir = FIXTURES / "always_missing"
+    ws = await _create_workspace(client, slug="retry-source")
+    create = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Retry Source",
+            "slug": "retry-source",
+            "user_input": "source text for retry form",
+            "needs_frontend_mockup": True,
+            "agent": "codex",
+        },
+    )
+    assert create.status_code == 201, create.text
+    source = await _wait_for_terminal(client, create.json()["id"])
+    assert source["current_state"] == "ESCALATED"
+
+    r = await client.get(f"/api/v1/design-works/{source['id']}/retry-source")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["title"] == "Retry Source"
+    assert body["slug"] == "retry-source"
+    assert body["user_input"] == "source text for retry form"
+    assert body["needs_frontend_mockup"] is True
+    assert body["agent"] == "codex"
+    assert body["repo_refs"] == []
+
+
+async def test_retry_with_overrides_creates_new_row_from_edited_values(client):
+    client._app.state.executor_stub.scenario_dir = FIXTURES / "always_missing"
+    ws = await _create_workspace(client, slug="retry-override")
+    create = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Retry Override",
+            "slug": "retry-override",
+            "user_input": "original text for retry",
+            "agent": "claude",
+        },
+    )
+    assert create.status_code == 201, create.text
+    source = await _wait_for_terminal(client, create.json()["id"])
+    assert source["current_state"] == "ESCALATED"
+
+    retry = await client.post(
+        f"/api/v1/design-works/{source['id']}/retry",
+        json={
+            "title": "Edited Retry",
+            "slug": "edited-retry",
+            "user_input": "edited text for retry",
+            "needs_frontend_mockup": True,
+            "agent": None,
+            "repo_refs": [],
+        },
+    )
+    assert retry.status_code == 201, retry.text
+    body = retry.json()
+    assert body["title"] == "Edited Retry"
+    assert body["sub_slug"] == "edited-retry"
+    created_row = await client._app.state.db.fetchone(
+        "SELECT * FROM design_works WHERE id=?", (body["id"],)
+    )
+    assert created_row["needs_frontend_mockup"] == 1
+    assert created_row["agent"] == "codex"
+    saved_input = await client._app.state.registry.read_text(
+        workspace_slug=ws["slug"],
+        relative_path=created_row["user_input_path"],
+    )
+    assert saved_input == "edited text for retry"
+
+
+async def test_retry_rejects_null_user_input_override(client):
+    client._app.state.executor_stub.scenario_dir = FIXTURES / "always_missing"
+    ws = await _create_workspace(client, slug="retry-null")
+    create = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Retry null",
+            "slug": "retry-null",
+            "user_input": "original text for retry",
+        },
+    )
+    assert create.status_code == 201, create.text
+    source = await _wait_for_terminal(client, create.json()["id"])
+    assert source["current_state"] == "ESCALATED"
+
+    retry = await client.post(
+        f"/api/v1/design-works/{source['id']}/retry",
+        json={"user_input": None},
+    )
+    assert retry.status_code == 422
+
+
 async def test_retry_non_escalated_design_work_returns_409(client):
     ws = await _create_workspace(client, slug="retry-completed")
     create = await client.post(

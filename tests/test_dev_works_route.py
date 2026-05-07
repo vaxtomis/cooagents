@@ -50,6 +50,7 @@ def _build_settings(workspace_root: Path | None = None):
         security=SimpleNamespace(
             resolved_workspace_root=lambda: root,
         ),
+        preferred_dev_agent="claude",
     )
 
 

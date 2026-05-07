@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.agent_hosts.repo import AgentHostRepo
 from src.database import Database
 from src.design_doc_manager import DesignDocManager
 from src.dev_iteration_note_manager import DevIterationNoteManager
@@ -57,6 +58,7 @@ def _build_config(max_rounds=5, default_threshold=80):
             step4_acpx_wall_ceiling_s=3600,
             require_human_exit_confirm=False,
         ),
+        preferred_dev_agent="claude",
     )
 
 
@@ -279,7 +281,7 @@ async def env(tmp_path):
     await db.close()
 
 
-def _make_sm(env, executor, cfg=None):
+def _make_sm(env, executor, cfg=None, agent_host_repo=None):
     from tests.conftest import make_test_llm_runner
     sm = DevWorkStateMachine(
         db=env["db"],
@@ -289,6 +291,7 @@ def _make_sm(env, executor, cfg=None):
         executor=executor,
         config=cfg or _build_config(),
         registry=env["registry"],
+        agent_host_repo=agent_host_repo,
         llm_runner=make_test_llm_runner(executor),
     )
     # Override workspaces_root so _s0_init's bare-clone lookup matches the
@@ -315,6 +318,60 @@ async def test_create_requires_published_design_doc(env):
             repo_refs=_refs_arg(env),
             prompt="build login",
         )
+
+
+async def test_create_uses_requested_agent_when_configured(env):
+    host_repo = AgentHostRepo(env["db"])
+    await host_repo.upsert(id="local", host="local", agent_type="codex")
+    await host_repo.update_health("local", status="healthy")
+    sm = _make_sm(env, ScriptedExecutor([]), agent_host_repo=host_repo)
+
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+        agent="codex",
+    )
+
+    assert dw["agent"] == "codex"
+    assert dw["agent_host_id"] == "local"
+
+
+async def test_create_falls_back_to_configured_agent_when_requested_unavailable(env):
+    host_repo = AgentHostRepo(env["db"])
+    await host_repo.upsert(id="local", host="local", agent_type="codex")
+    await host_repo.update_health("local", status="healthy")
+    sm = _make_sm(env, ScriptedExecutor([]), agent_host_repo=host_repo)
+
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+        agent="claude",
+    )
+
+    assert dw["agent"] == "codex"
+    assert dw["agent_host_id"] == "local"
+
+
+async def test_create_omitted_agent_uses_configured_agent(env):
+    host_repo = AgentHostRepo(env["db"])
+    await host_repo.upsert(id="local", host="local", agent_type="codex")
+    await host_repo.update_health("local", status="healthy")
+    sm = _make_sm(env, ScriptedExecutor([]), agent_host_repo=host_repo)
+
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+        agent=None,
+    )
+
+    assert dw["agent"] == "codex"
+    assert dw["agent_host_id"] == "local"
 
 
 async def test_happy_path_first_pass(env):

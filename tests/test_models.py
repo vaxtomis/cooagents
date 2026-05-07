@@ -5,6 +5,7 @@ from src.models import (
     AgentKind,
     CreateDesignWorkRequest,
     CreateDevWorkRequest,
+    DesignWorkRetrySource,
     DesignDoc,
     DesignDocStatus,
     DesignWork,
@@ -18,6 +19,7 @@ from src.models import (
     DevWorkStep,
     ProblemCategory,
     RepoRef,
+    RetryDesignWorkRequest,
     Review,
     UpdateRepoPushStateRequest,
     WorkerRepoHandoff,
@@ -202,6 +204,7 @@ def test_create_dev_work_request_happy_one_primary():
     )
     assert len(req.repo_refs) == 2
     assert sum(1 for r in req.repo_refs if r.is_primary) == 1
+    assert req.agent is None
 
 
 def test_create_design_work_request_optional_repo_refs_default_empty():
@@ -210,6 +213,7 @@ def test_create_design_work_request_optional_repo_refs_default_empty():
         user_input="hello", mode=DesignWorkMode.new,
     )
     assert req.repo_refs == []
+    assert req.agent is None
 
 
 def test_create_design_work_request_with_repo_refs():
@@ -219,6 +223,45 @@ def test_create_design_work_request_with_repo_refs():
         repo_refs=[RepoRef(repo_id="repo-aaa", base_branch="main")],
     )
     assert len(req.repo_refs) == 1
+
+
+def test_retry_design_work_request_allows_null_agent_and_empty_repo_refs():
+    req = RetryDesignWorkRequest(
+        title="T",
+        slug="retry-t",
+        user_input="hello",
+        needs_frontend_mockup=True,
+        agent=None,
+        repo_refs=[],
+    )
+    assert req.agent is None
+    assert req.repo_refs == []
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["title", "slug", "user_input", "needs_frontend_mockup", "repo_refs"],
+)
+def test_retry_design_work_request_rejects_non_clearable_nulls(field):
+    with pytest.raises(ValidationError):
+        RetryDesignWorkRequest(**{field: None})
+
+
+def test_retry_design_work_request_rejects_bad_slug():
+    with pytest.raises(ValidationError):
+        RetryDesignWorkRequest(slug="Bad Slug")
+
+
+def test_design_work_retry_source_happy():
+    source = DesignWorkRetrySource(
+        title="T",
+        slug="retry-t",
+        user_input="hello",
+        agent=AgentKind.codex,
+        repo_refs=[RepoRef(repo_id="repo-aaa", base_branch="main")],
+    )
+    assert source.agent == AgentKind.codex
+    assert source.repo_refs[0].base_branch == "main"
 
 
 # Phase 5 (repo-registry) — worker handoff DTOs ------------------------------

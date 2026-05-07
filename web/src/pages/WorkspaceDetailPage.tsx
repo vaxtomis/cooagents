@@ -117,7 +117,7 @@ function DesignWorkCreateForm({
   const [slug, setSlug] = useState("");
   const [userInput, setUserInput] = useState("");
   const [needsFrontendMockup, setNeedsFrontendMockup] = useState(false);
-  const [agent, setAgent] = useState<AgentKind>("claude");
+  const [agent, setAgent] = useState<AgentKind | "">("");
   const [showRepos, setShowRepos] = useState(false);
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -155,7 +155,7 @@ function DesignWorkCreateForm({
         user_input: trimmedInput,
         mode: "new",
         needs_frontend_mockup: needsFrontendMockup,
-        agent,
+        agent: agent || undefined,
         repo_refs: designRefs,
       });
       setTitle("");
@@ -218,8 +218,9 @@ function DesignWorkCreateForm({
           <select
             className={FORM_SELECT_CLASSNAME}
             value={agent}
-            onChange={(event) => setAgent(event.target.value as AgentKind)}
+            onChange={(event) => setAgent(event.target.value as AgentKind | "")}
           >
+            <option value="">自动选择</option>
             <option value="claude">Claude</option>
             <option value="codex">Codex</option>
           </select>
@@ -304,7 +305,7 @@ function DevWorkCreateForm({
   const [designDocId, setDesignDocId] = useState("");
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
   const [prompt, setPrompt] = useState("");
-  const [agent, setAgent] = useState<AgentKind>("claude");
+  const [agent, setAgent] = useState<AgentKind | "">("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -337,11 +338,11 @@ function DevWorkCreateForm({
     setSubmitting(true);
     try {
       const created = await createDevWork({
-        workspace_id: workspaceId,
-        design_doc_id: designDocId,
-        repo_refs: payloadRefs,
-        prompt: prompt.trim(),
-        agent,
+          workspace_id: workspaceId,
+          design_doc_id: designDocId,
+          repo_refs: payloadRefs,
+          prompt: prompt.trim(),
+          agent: agent || undefined,
       });
       setDesignDocId("");
       setRepoRefs([]);
@@ -390,14 +391,15 @@ function DevWorkCreateForm({
 
       <label className="block space-y-1.5 text-sm text-muted">
         <span>执行 Agent</span>
-        <select
-          className={FORM_SELECT_CLASSNAME}
-          value={agent}
-          onChange={(event) => setAgent(event.target.value as AgentKind)}
-        >
-          <option value="claude">Claude</option>
-          <option value="codex">Codex</option>
-        </select>
+          <select
+            className={FORM_SELECT_CLASSNAME}
+            value={agent}
+            onChange={(event) => setAgent(event.target.value as AgentKind | "")}
+          >
+            <option value="">自动选择</option>
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
       </label>
 
       {error ? <p className="text-xs text-danger">{error}</p> : null}
