@@ -202,6 +202,7 @@ export interface Review {
   score: number | null;
   issues: Record<string, unknown>[] | null;
   findings: Record<string, unknown>[] | null;
+  next_round_hints: Record<string, unknown>[] | null;
   problem_category: ProblemCategory | null;
   reviewer: string | null;
   created_at: string;

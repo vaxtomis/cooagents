@@ -56,6 +56,138 @@ const DEV_WORK_EVENT_NAMES = [
 
 const DEV_WORK_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
+type ReviewInsight = Record<string, unknown>;
+
+const REVIEW_SUMMARY_KEYS = ["message", "title", "summary", "description", "reason"] as const;
+const REVIEW_BADGE_KEYS = ["kind", "severity", "mount"] as const;
+const REVIEW_LOCATION_KEYS = ["file", "path", "line"] as const;
+const REVIEW_PROMOTED_KEYS = new Set<string>([
+  ...REVIEW_SUMMARY_KEYS,
+  ...REVIEW_BADGE_KEYS,
+  ...REVIEW_LOCATION_KEYS,
+]);
+
+function isReviewScalar(value: unknown): value is string | number | boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function formatReviewScalar(value: string | number | boolean) {
+  return typeof value === "boolean" ? (value ? "true" : "false") : String(value);
+}
+
+function readReviewScalar(item: ReviewInsight, key: string) {
+  const value = item[key];
+  if (!isReviewScalar(value)) return null;
+  const rendered = formatReviewScalar(value).trim();
+  return rendered || null;
+}
+
+function getReviewSummary(item: ReviewInsight) {
+  for (const key of REVIEW_SUMMARY_KEYS) {
+    const value = readReviewScalar(item, key);
+    if (value) return { key, value };
+  }
+
+  for (const [key, value] of Object.entries(item)) {
+    if (!REVIEW_PROMOTED_KEYS.has(key) && isReviewScalar(value)) {
+      return { key, value: formatReviewScalar(value) };
+    }
+  }
+
+  return { key: null, value: "未提供摘要" };
+}
+
+function getReviewBadges(item: ReviewInsight) {
+  return REVIEW_BADGE_KEYS.map((key) => {
+    const value = readReviewScalar(item, key);
+    return value ? `${key}: ${value}` : null;
+  }).filter((value): value is string => Boolean(value));
+}
+
+function getReviewLocation(item: ReviewInsight) {
+  const file = readReviewScalar(item, "file") ?? readReviewScalar(item, "path");
+  const line = readReviewScalar(item, "line");
+  if (file && line) return `${file}:${line}`;
+  if (file) return file;
+  if (line) return `line ${line}`;
+  return null;
+}
+
+function getReviewDetails(item: ReviewInsight, summaryKey: string | null) {
+  return Object.entries(item).flatMap(([key, value]) => {
+    if (key === summaryKey || REVIEW_PROMOTED_KEYS.has(key) || !isReviewScalar(value)) {
+      return [];
+    }
+    return [[key, value] as [string, string | number | boolean]];
+  });
+}
+
+function ReviewInsightCard({ item }: { item: ReviewInsight }) {
+  const summary = getReviewSummary(item);
+  const badges = getReviewBadges(item);
+  const location = getReviewLocation(item);
+  const details = getReviewDetails(item, summary.key);
+
+  return (
+    <li className="rounded-2xl border border-border bg-panel-deep/70 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {badges.map((badge) => (
+          <span
+            className="rounded-full border border-border-strong bg-panel-strong/70 px-2 py-0.5 font-mono text-[10px] text-muted"
+            key={badge}
+          >
+            {badge}
+          </span>
+        ))}
+      </div>
+      <p className={badges.length > 0 ? "mt-2 text-sm text-copy" : "text-sm text-copy"}>
+        {summary.value}
+      </p>
+      {location ? (
+        <p className="mt-2 break-all font-mono text-[11px] text-muted">{location}</p>
+      ) : null}
+      {details.length > 0 ? (
+        <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+          {details.map(([key, value]) => (
+            <div className="rounded-xl border border-border/70 bg-panel-strong/45 px-3 py-2" key={key}>
+              <dt className="font-mono text-[10px] uppercase text-muted-soft">{key}</dt>
+              <dd className="mt-1 break-words text-xs text-muted">
+                {formatReviewScalar(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </li>
+  );
+}
+
+function ReviewInsightSection({
+  title,
+  items,
+}: {
+  title: string;
+  items: ReviewInsight[] | null;
+}) {
+  if (!items || items.length === 0) return null;
+
+  return (
+    <section className="mt-4">
+      <div className="mb-2 flex items-center gap-2">
+        <h4 className="text-xs font-semibold text-copy">{title}</h4>
+        <span className="rounded-full border border-border bg-panel-deep px-2 py-0.5 text-[10px] text-muted">
+          {items.length}
+        </span>
+      </div>
+      <ol className="space-y-2">
+        {items.map((item, index) => (
+          <ReviewInsightCard item={item} key={`${title}-${index}`} />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function ReviewRow({ review }: { review: Review }) {
   return (
     <article className="rounded-2xl border border-border bg-panel-strong/80 p-4">
@@ -65,23 +197,13 @@ function ReviewRow({ review }: { review: Review }) {
         </p>
         {review.problem_category ? <StatusBadge status={review.problem_category} /> : null}
       </div>
-      {review.reviewer ? <p className="mt-2 text-xs text-muted">审核者 {review.reviewer}</p> : null}
-      {review.issues && review.issues.length > 0 ? (
-        <details className="mt-3 text-xs text-muted">
-          <summary className="cursor-pointer">问题 ({review.issues.length})</summary>
-          <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
-            {JSON.stringify(review.issues, null, 2)}
-          </pre>
-        </details>
-      ) : null}
-      {review.findings && review.findings.length > 0 ? (
-        <details className="mt-2 text-xs text-muted">
-          <summary className="cursor-pointer">发现项 ({review.findings.length})</summary>
-          <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
-            {JSON.stringify(review.findings, null, 2)}
-          </pre>
-        </details>
-      ) : null}
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+        {review.reviewer ? <span>审核者 {review.reviewer}</span> : null}
+        <span>创建时间 {formatDateTime(review.created_at)}</span>
+      </div>
+      <ReviewInsightSection items={review.issues} title="问题" />
+      <ReviewInsightSection items={review.findings} title="发现项" />
+      <ReviewInsightSection items={review.next_round_hints} title="下一轮提示" />
     </article>
   );
 }
@@ -310,10 +432,21 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
     <div className="space-y-6">
       <SectionPanel
         actions={
-          <Link className="text-xs text-muted hover:text-copy" to={`/workspaces/${wsId}`}>
-            ← 返回 Workspace
-          </Link>
+          <>
+            <button
+              className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
+              disabled={actionPending !== null || terminal}
+              onClick={() => void cancelWork()}
+              type="button"
+            >
+              {actionPending === "cancel" ? "取消中..." : "取消"}
+            </button>
+            <Link className="text-xs text-muted hover:text-copy" to={`/workspaces/${wsId}`}>
+              ← 返回 Workspace
+            </Link>
+          </>
         }
+        density="compact"
         kicker="开发工作"
         title={devWork.id}
       >
@@ -332,32 +465,22 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
           <ScoreBadge score={devWork.last_score} />
         </div>
 
-        <div className="mt-5">
+        <div className="mt-4">
           <DevWorkStepProgress current={devWork.current_step} />
         </div>
 
         {escalated ? (
-          <p className="mt-5 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
+          <p className="mt-4 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
             DevWork 已升级，需人工介入；闸门面板已隐藏。
           </p>
         ) : null}
 
         {devWork.is_running ? (
-          <p className="mt-5 rounded-2xl border border-success/25 bg-success/10 p-4 text-sm text-success">
+          <p className="mt-4 rounded-2xl border border-success/25 bg-success/10 p-4 text-sm text-success">
             后台驱动正在推进此 DevWork，心跳进度会随轮询刷新。
           </p>
         ) : null}
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          <button
-            className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
-            disabled={actionPending !== null || terminal}
-            onClick={() => void cancelWork()}
-            type="button"
-          >
-            {actionPending === "cancel" ? "取消中..." : "取消"}
-          </button>
-        </div>
         {actionError ? <p className="mt-3 text-xs text-danger">{actionError}</p> : null}
       </SectionPanel>
 

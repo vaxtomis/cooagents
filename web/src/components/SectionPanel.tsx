@@ -5,30 +5,57 @@ interface SectionPanelProps {
   kicker: string;
   children: ReactNode;
   actions?: ReactNode;
+  density?: "default" | "compact";
 }
 
-export function SectionPanel({ title, kicker, children, actions }: SectionPanelProps) {
+export function SectionPanel({
+  title,
+  kicker,
+  children,
+  actions,
+  density = "default",
+}: SectionPanelProps) {
+  const compact = density === "compact";
+
   return (
     <section
-      className="relative overflow-hidden rounded-[28px] border border-border-strong bg-panel/95 p-4 shadow-shell md:p-5"
+      className={[
+        "relative overflow-hidden rounded-[28px] border border-border-strong bg-panel/95 shadow-shell",
+        compact ? "p-3 md:p-4" : "p-4 md:p-5",
+      ].join(" ")}
       data-panel-tone="console"
     >
       <div className="pointer-events-none absolute inset-[1px] rounded-[27px] border border-white/4" />
       <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.85),transparent)]" />
 
-      <div className="relative flex flex-wrap items-center justify-between gap-3">
+      <div
+        className={[
+          "relative flex flex-wrap items-center justify-between",
+          compact ? "gap-2" : "gap-3",
+        ].join(" ")}
+      >
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.26em] text-accent-soft">
+          <p
+            className={[
+              "font-medium uppercase text-accent-soft",
+              compact ? "text-[10px] tracking-[0.22em]" : "text-[11px] tracking-[0.26em]",
+            ].join(" ")}
+          >
             {kicker}
           </p>
-          <h2 className="mt-1 text-[1.3rem] font-semibold leading-snug tracking-[-0.03em] text-copy md:text-[1.45rem]">
+          <h2
+            className={[
+              "font-semibold leading-snug text-copy",
+              compact ? "mt-0.5 text-[1.15rem] md:text-[1.28rem]" : "mt-1 text-[1.3rem] md:text-[1.45rem]",
+            ].join(" ")}
+          >
             {title}
           </h2>
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
 
-      <div className="relative mt-4">{children}</div>
+      <div className={compact ? "relative mt-3" : "relative mt-4"}>{children}</div>
     </section>
   );
 }

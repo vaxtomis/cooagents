@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import type { DevWork, GateInfo, WorkerRepoHandoff, WorkspaceEventsEnvelope } from "../types";
+import type { DevWork, GateInfo, Review, WorkerRepoHandoff, WorkspaceEventsEnvelope } from "../types";
 import { DevWorkPage } from "./DevWorkPage";
 
 vi.mock("../api/devWorks", () => ({
@@ -71,7 +71,7 @@ const emptyEvents: WorkspaceEventsEnvelope = {
 };
 
 function renderPage() {
-  render(
+  return render(
     <SWRConfig value={{ dedupingInterval: 0, provider: () => new Map(), revalidateOnFocus: false }}>
       <MemoryRouter initialEntries={["/workspaces/ws-1/dev-works/dv-1"]}>
         <Routes>
@@ -225,6 +225,68 @@ describe("DevWorkPage", () => {
         event_name: expect.arrayContaining(["dev_work.progress"]),
       }),
     );
+  });
+
+  it("renders review history as structured summary cards", async () => {
+    const reviews: Review[] = [
+      {
+        id: "rev-1",
+        dev_work_id: "dv-1",
+        design_work_id: null,
+        dev_iteration_note_id: "note-1",
+        round: 2,
+        score: 72,
+        issues: [
+          {
+            message: "Login button does not submit",
+            severity: "high",
+            file: "src/Login.tsx",
+            line: 42,
+            expected: "submit request",
+            context: { nested: true },
+          },
+        ],
+        findings: [
+          {
+            title: "Validation guard is present",
+            kind: "positive",
+            mount: "frontend",
+            note: "schema guard exists",
+          },
+        ],
+        next_round_hints: [
+          {
+            kind: "missing_feature",
+            message: "Add logout route",
+            mount: "backend",
+            path: "routes/auth.py",
+          },
+        ],
+        problem_category: "impl_gap",
+        reviewer: "codex",
+        created_at: "2026-04-23T00:00:02Z",
+      },
+    ];
+    vi.mocked(getDevWork).mockResolvedValue(devWork);
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue(reviews);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    const view = renderPage();
+
+    await waitFor(() => expect(getDevWork).toHaveBeenCalled());
+    const reviewsTab = view.container.querySelector<HTMLButtonElement>("#devwork-tab-reviews");
+    expect(reviewsTab).not.toBeNull();
+    fireEvent.click(reviewsTab!);
+
+    expect(await screen.findByText("Login button does not submit")).toBeInTheDocument();
+    expect(screen.getByText("Validation guard is present")).toBeInTheDocument();
+    expect(screen.getByText("Add logout route")).toBeInTheDocument();
+    expect(screen.getByText("src/Login.tsx:42")).toBeInTheDocument();
+    expect(screen.getByText("routes/auth.py")).toBeInTheDocument();
+    expect(screen.getByText("submit request")).toBeInTheDocument();
+    expect(screen.queryByText(/"message"/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/"nested"/)).not.toBeInTheDocument();
   });
 
   it("supports keyboard navigation across detail tabs", async () => {

@@ -45,6 +45,7 @@ type PageMeta = {
   title: string;
   eyebrow: string;
   description: string;
+  compact?: boolean;
 };
 
 const DESKTOP_SIDEBAR_STORAGE_KEY = "cooagents.desktopSidebarCollapsed";
@@ -88,6 +89,7 @@ function resolvePageMeta(pathname: string): PageMeta {
       title: "DesignWork 详情",
       eyebrow: "Workspace 执行",
       description: "查看状态推进、设计文档产物、校验缺口和审核历史。",
+      compact: true,
     };
   }
 
@@ -96,6 +98,7 @@ function resolvePageMeta(pathname: string): PageMeta {
       title: "DevWork 详情",
       eyebrow: "Workspace 执行",
       description: "查看开发进度、迭代文档、评审记录和闸门动作。",
+      compact: true,
     };
   }
 
@@ -204,6 +207,7 @@ function ShellLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsedPreference);
   const workspacesQuery = useSWR(["shell-workspaces", "active"], () => listWorkspaces("active"), polling);
   const recentWorkspaces = (workspacesQuery.data ?? []).slice(0, 5);
+  const compactMasthead = Boolean(meta.compact);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -360,24 +364,52 @@ function ShellLayout() {
           </div>
         </aside>
 
-        <div className="flex min-h-[calc(100vh-1.5rem)] min-w-0 flex-1 flex-col gap-4">
+        <div className={`flex min-h-[calc(100vh-1.5rem)] min-w-0 flex-1 flex-col ${compactMasthead ? "gap-3" : "gap-4"}`}>
           <header
-            className="relative overflow-hidden rounded-[30px] border border-border-strong bg-panel/95 px-4 py-4 shadow-shell md:px-5"
+            className={[
+              "relative overflow-hidden rounded-[30px] border border-border-strong bg-panel/95 px-4 shadow-shell",
+              compactMasthead ? "py-3 md:px-4" : "py-4 md:px-5",
+            ].join(" ")}
             data-console-chrome="masthead"
           >
             <div className="pointer-events-none absolute inset-[1px] rounded-[29px] border border-white/4" />
             <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.8),transparent)]" />
 
-            <div className="relative flex flex-col gap-3">
+            <div className={`relative flex flex-col ${compactMasthead ? "gap-2" : "gap-3"}`}>
               <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-accent-soft">
+                <div
+                  className={[
+                    "min-w-0",
+                    compactMasthead ? "flex flex-wrap items-baseline gap-x-3 gap-y-1" : "",
+                  ].join(" ")}
+                >
+                  <p
+                    className={[
+                      "font-medium uppercase text-accent-soft",
+                      compactMasthead ? "text-[10px] tracking-[0.2em]" : "text-[11px] tracking-[0.24em]",
+                    ].join(" ")}
+                  >
                     {meta.eyebrow}
                   </p>
-                  <h1 className="mt-1 text-[1.55rem] font-semibold leading-tight tracking-[-0.04em] text-copy md:text-[1.9rem]">
+                  <h1
+                    className={[
+                      "font-semibold leading-tight text-copy",
+                      compactMasthead
+                        ? "text-[1.25rem] md:text-[1.45rem]"
+                        : "mt-1 text-[1.55rem] md:text-[1.9rem]",
+                    ].join(" ")}
+                  >
                     {meta.title}
                   </h1>
-                  <p className="mt-1 max-w-5xl text-sm leading-relaxed text-muted">{meta.description}</p>
+                  <p
+                    className={
+                      compactMasthead
+                        ? "basis-full text-xs leading-snug text-muted md:basis-auto"
+                        : "mt-1 max-w-5xl text-sm leading-relaxed text-muted"
+                    }
+                  >
+                    {meta.description}
+                  </p>
                 </div>
 
                 <div className="hidden shrink-0 items-center gap-2 rounded-[14px] border border-border bg-panel-deep/76 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-muted md:flex">

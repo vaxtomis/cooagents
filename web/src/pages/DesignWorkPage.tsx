@@ -438,10 +438,21 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
     <div className="space-y-6">
       <SectionPanel
         actions={
-          <Link className="text-xs text-muted hover:text-copy" to={`/workspaces/${wsId}`}>
-            ← 返回 Workspace
-          </Link>
+          <>
+            <button
+              className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
+              disabled={actionPending !== null || terminal}
+              onClick={() => void cancelWork()}
+              type="button"
+            >
+              {actionPending === "cancel" ? "取消中..." : "取消"}
+            </button>
+            <Link className="text-xs text-muted hover:text-copy" to={`/workspaces/${wsId}`}>
+              ← 返回 Workspace
+            </Link>
+          </>
         }
+        density="compact"
         kicker="设计工作"
         title={designWork.title ?? designWork.sub_slug ?? designWork.id}
       >
@@ -460,12 +471,12 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
           ) : null}
         </div>
 
-        <div className="mt-5">
+        <div className="mt-4">
           <DesignWorkStateProgress current={designWork.current_state} />
         </div>
 
         {escalated ? (
-          <p className="mt-5 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
+          <p className="mt-4 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
             DesignWork 已升级，需人工介入。
           </p>
         ) : null}
@@ -487,21 +498,11 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
         ) : null}
 
         {designWork.is_running ? (
-          <p className="mt-5 rounded-2xl border border-success/25 bg-success/10 p-4 text-sm text-success">
+          <p className="mt-4 rounded-2xl border border-success/25 bg-success/10 p-4 text-sm text-success">
             后台驱动正在推进此 DesignWork，页面会自动刷新最新状态。
           </p>
         ) : null}
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          <button
-            className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
-            disabled={actionPending !== null || terminal}
-            onClick={() => void cancelWork()}
-            type="button"
-          >
-            {actionPending === "cancel" ? "取消中..." : "取消"}
-          </button>
-        </div>
         {actionError ? <p className="mt-3 text-xs text-danger">{actionError}</p> : null}
       </SectionPanel>
 
