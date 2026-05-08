@@ -105,6 +105,11 @@ function RepoRow({
             </div>
             <p className="font-mono text-xs text-muted">{repo.id}</p>
             <p className="truncate font-mono text-sm text-muted">{repo.url}</p>
+            {repo.local_path ? (
+              <p className="truncate font-mono text-xs text-muted">
+                本地路径：{repo.local_path}
+              </p>
+            ) : null}
             <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-soft">
               <span>角色：{ROLE_LABELS[repo.role]}</span>
               <span>默认分支：{repo.default_branch}</span>
@@ -154,6 +159,7 @@ function RepoRow({
 function CreateForm({ onCreated }: { onCreated: () => void }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const [localPath, setLocalPath] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("main");
   const [role, setRole] = useState<RepoRole>("backend");
   const [sshKeyPath, setSshKeyPath] = useState("");
@@ -164,6 +170,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
     event.preventDefault();
     const trimmedName = name.trim();
     const trimmedUrl = url.trim();
+    const trimmedLocalPath = localPath.trim();
     const trimmedBranch = defaultBranch.trim();
     const trimmedSshKey = sshKeyPath.trim();
     if (!REPO_NAME_RE.test(trimmedName)) {
@@ -184,6 +191,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
     const payload: CreateRepoPayload = {
       name: trimmedName,
       url: trimmedUrl,
+      local_path: trimmedLocalPath ? trimmedLocalPath : null,
       default_branch: trimmedBranch,
       role,
       ssh_key_path: trimmedSshKey ? trimmedSshKey : null,
@@ -192,6 +200,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
       await createRepo(payload);
       setName("");
       setUrl("");
+      setLocalPath("");
       setDefaultBranch("main");
       setRole("backend");
       setSshKeyPath("");
@@ -236,6 +245,15 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
             onChange={(event) => setUrl(event.target.value)}
             placeholder="git@github.com:org/repo.git"
             value={url}
+          />
+        </label>
+        <label className="space-y-1.5 text-sm text-muted md:col-span-2">
+          <span>本地路径</span>
+          <input
+            className={`${FORM_FIELD_CLASSNAME} font-mono`}
+            onChange={(event) => setLocalPath(event.target.value)}
+            placeholder="/workspace/repos/frontend"
+            value={localPath}
           />
         </label>
         <label className="space-y-1.5 text-sm text-muted">

@@ -85,6 +85,7 @@ def _handoff_to_repo_ref(handoff: WorkerRepoHandoff) -> DevRepoRefView:
         devwork_branch=handoff.devwork_branch,
         push_state=handoff.push_state,
         is_primary=handoff.is_primary,
+        worktree_path=handoff.worktree_path,
     )
 
 
@@ -97,6 +98,7 @@ def _row_to_worker_handoff(r: dict) -> WorkerRepoHandoff:
         devwork_branch=r["devwork_branch"],
         push_state=r["push_state"],
         is_primary=bool(r.get("is_primary")),
+        worktree_path=r.get("worktree_path"),
         url=r["url"],
         ssh_key_path=r.get("ssh_key_path"),
         push_err=r.get("push_err"),
@@ -360,6 +362,47 @@ async def cancel_dev_work(dev_id: str, request: Request) -> Response:
     sm = request.app.state.dev_work_sm
     await sm.cancel(dev_id)
     return Response(status_code=204)
+
+
+@router.post("/dev-works/{dev_id}/push", response_model=DevWorkProgress)
+@limiter.limit("10/minute")
+async def push_dev_work_branches(
+    dev_id: str, request: Request,
+) -> DevWorkProgress:
+    db = request.app.state.db
+    dw = await db.fetchone("SELECT * FROM dev_works WHERE id=?", (dev_id,))
+    if dw is None:
+        raise NotFoundError(f"dev_work {dev_id!r} not found")
+
+    sm = request.app.state.dev_work_sm
+    if sm.is_running(dev_id):
+        raise ConflictError(
+            f"dev_work {dev_id!r} is still running; cannot publish branches",
+            current_stage=dw["current_step"],
+        )
+    if dw["current_step"] != DevWorkStep.COMPLETED.value:
+        raise ConflictError(
+            f"dev_work {dev_id!r} is not completed; cannot publish branches",
+            current_stage=dw["current_step"],
+        )
+
+    round_n = int(dw["iteration_rounds"]) + 1
+    await request.app.state.dev_work_publisher.publish(dev_id, round_n)
+
+    refreshed = await db.fetchone(
+        "SELECT * FROM dev_works WHERE id=?", (dev_id,),
+    )
+    assert refreshed is not None
+    state_repo = request.app.state.dev_work_repo_state
+    repos = await _load_worker_repos(state_repo, dev_id)
+    refs = [_handoff_to_repo_ref(h) for h in repos]
+    return _row_to_progress(
+        refreshed,
+        refs,
+        repos,
+        is_running=sm.is_running(dev_id),
+        max_rounds=sm._resolve_max_rounds(refreshed),
+    )
 
 
 @router.post(

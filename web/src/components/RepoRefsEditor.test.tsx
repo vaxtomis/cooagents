@@ -32,6 +32,7 @@ const repoHealthy: Repo = {
   id: "repo-aaa111",
   name: "frontend",
   url: "git@github.com:org/frontend.git",
+  local_path: null,
   default_branch: "main",
   ssh_key_path: null,
   bare_clone_path: null,

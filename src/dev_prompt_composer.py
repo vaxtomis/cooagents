@@ -98,7 +98,7 @@ _STEP_WALL_STEP4 = (
     "**唯一输出**：worktree 源码改动（保留为未提交变更）+ "
     "step4-findings-roundN.json。\n"
     "**明确禁止**：不修改 iteration_note 文件、不修改 ctx 文件、"
-    "不重新规划、不 `git commit`、不写入 `.coop/` 之外的诊断文件。\n"
+    "不重新规划、不 `git commit` / `git push`、不写入 `.coop/` 之外的诊断文件。\n"
     "**越界即失败**：违反任何上述禁止，本轮 Step5 将以 "
     "`kind=\"boundary_violation\"` 记录并影响打分。"
 )

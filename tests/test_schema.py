@@ -112,6 +112,7 @@ async def test_repos_columns(db):
         "id",
         "name",
         "url",
+        "local_path",
         "default_branch",
         "ssh_key_path",
         "bare_clone_path",
@@ -123,6 +124,44 @@ async def test_repos_columns(db):
         "created_at",
         "updated_at",
     }.issubset(cols)
+
+
+async def test_repos_local_path_unique_index(db):
+    rows = await db.fetchall("PRAGMA index_list(repos)")
+    assert any(
+        r["name"] == "uniq_repos_local_path" and r["unique"]
+        for r in rows
+    )
+
+    await db.execute(
+        "INSERT INTO repos(id,name,url,local_path,default_branch,"
+        "fetch_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "repo-local-a",
+            "local-a",
+            "git@x:o/a.git",
+            "/tmp/workspace/a",
+            "main",
+            "unknown",
+            NOW,
+            NOW,
+        ),
+    )
+    with pytest.raises(Exception):
+        await db.execute(
+            "INSERT INTO repos(id,name,url,local_path,default_branch,"
+            "fetch_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                "repo-local-b",
+                "local-b",
+                "git@x:o/b.git",
+                "/tmp/workspace/a",
+                "main",
+                "unknown",
+                NOW,
+                NOW,
+            ),
+        )
 
 
 async def test_dev_works_repo_path_dropped(db):

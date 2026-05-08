@@ -123,6 +123,7 @@ async def lifespan(app: FastAPI):
     # the agent_hosts pattern above). Defensive try/except: a malformed
     # repos.yaml must not block startup.
     from src.repos import (
+        DevWorkPublisher,
         DevWorkRepoStateRepo,
         RepoFetcher,
         RepoHealthLoop,
@@ -167,6 +168,12 @@ async def lifespan(app: FastAPI):
         fetcher=repo_fetcher,
         registry=repo_registry_repo,
         timeout_s=settings.repos.fetch.timeout_s,
+    )
+    dev_work_publisher = DevWorkPublisher(
+        dev_work_repo_state,
+        timeout_s=settings.repos.fetch.timeout_s,
+        strict_host_key=settings.repos.ssh_strict_host_key,
+        known_hosts_path=settings.agents.ssh_known_hosts_path,
     )
 
     ssh_dispatcher = SshDispatcher(
@@ -246,6 +253,7 @@ async def lifespan(app: FastAPI):
     app.state.agent_dispatch_repo = agent_dispatch_repo
     app.state.repo_registry_repo = repo_registry_repo
     app.state.dev_work_repo_state = dev_work_repo_state
+    app.state.dev_work_publisher = dev_work_publisher
     app.state.repo_fetcher = repo_fetcher
     app.state.repo_health_loop = repo_health_loop
     app.state.repo_inspector = repo_inspector

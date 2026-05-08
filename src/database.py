@@ -43,6 +43,7 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         await self._conn.execute("PRAGMA foreign_keys=ON")
         await self._conn.execute(f"PRAGMA busy_timeout={self._BUSY_TIMEOUT_MS}")
+        await self._pre_migrate_for_schema()
         # Apply schema (idempotent via CREATE IF NOT EXISTS)
         schema_sql = self._schema_path.read_text(encoding="utf-8")
         await self._conn.executescript(schema_sql)
@@ -52,6 +53,28 @@ class Database:
         # Enable WAL journal mode for better concurrency
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.commit()
+
+    async def _pre_migrate_for_schema(self) -> None:
+        """Apply column additions needed by indexes in ``schema.sql``.
+
+        New schema indexes run before the full post-schema migration. If an
+        old table is missing a column referenced by a new index, SQLite can
+        fail while applying the idempotent schema script. Keep this pre-pass
+        limited to additive, safe columns that schema indexes need.
+        """
+        conn = self._ensure_connected()
+        async with conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='repos'"
+        ) as cur:
+            repo_table = await cur.fetchone()
+        if repo_table is None:
+            return
+        async with conn.execute("PRAGMA table_info(repos)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        if "local_path" not in cols:
+            await conn.execute("ALTER TABLE repos ADD COLUMN local_path TEXT")
+            await conn.commit()
 
     async def _migrate(self) -> None:
         """Apply forward-only migrations to existing tables.
@@ -77,6 +100,14 @@ class Database:
             await conn.execute("ALTER TABLE repos DROP COLUMN vendor")
         if "labels_json" in cols:
             await conn.execute("ALTER TABLE repos DROP COLUMN labels_json")
+        async with conn.execute("PRAGMA table_info(repos)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        if "local_path" not in cols:
+            await conn.execute("ALTER TABLE repos ADD COLUMN local_path TEXT")
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uniq_repos_local_path "
+            "ON repos(local_path) WHERE local_path IS NOT NULL"
+        )
         # The CHECK constraint that previously permitted ``'stale'`` lives
         # on the existing table definition; rewriting it requires a full
         # table rebuild. Instead, normalize any legacy 'stale' rows to

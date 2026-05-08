@@ -36,6 +36,7 @@ const repo: Repo = {
   id: "repo-aaa111",
   name: "frontend",
   url: "git@github.com:org/frontend.git",
+  local_path: "/workspace/repos/frontend",
   default_branch: "main",
   ssh_key_path: null,
   bare_clone_path: null,
@@ -103,6 +104,7 @@ describe("RepoDetailPage", () => {
       await screen.findByRole("heading", { name: "frontend" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/角色：/)).toBeInTheDocument();
+    expect(screen.getByText(/本地路径：/)).toBeInTheDocument();
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 

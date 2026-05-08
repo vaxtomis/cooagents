@@ -374,14 +374,17 @@ h3 {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px rgba(215, 154, 74, 0.3),
-      0 0 18px rgba(215, 154, 74, 0.16);
+      0 0 0 1px rgba(215, 154, 74, 0.4),
+      0 0 22px rgba(215, 154, 74, 0.24),
+      inset 0 1px 0 rgba(255, 231, 184, 0.08);
   }
 
   50% {
     box-shadow:
-      0 0 0 1px rgba(215, 154, 74, 0.42),
-      0 0 26px rgba(215, 154, 74, 0.24);
+      0 0 0 1px rgba(215, 154, 74, 0.66),
+      0 0 34px rgba(215, 154, 74, 0.36),
+      inset 0 1px 0 rgba(255, 231, 184, 0.18),
+      inset 0 0 18px rgba(215, 154, 74, 0.12);
   }
 }
 
@@ -392,11 +395,11 @@ h3 {
   }
 
   18% {
-    opacity: 0.2;
+    opacity: 0.32;
   }
 
   62% {
-    opacity: 0.12;
+    opacity: 0.2;
   }
 
   100% {
@@ -405,29 +408,75 @@ h3 {
   }
 }
 
+@keyframes devwork-push-ring-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes devwork-push-attention-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 14px 28px rgba(0, 0, 0, 0.26),
+      0 0 0 1px rgba(215, 154, 74, 0.3),
+      0 0 0 4px rgba(215, 154, 74, 0.08),
+      inset 0 1px 0 rgba(255, 238, 194, 0.16);
+  }
+
+  50% {
+    box-shadow:
+      0 18px 34px rgba(0, 0, 0, 0.32),
+      0 0 0 1px rgba(236, 184, 96, 0.5),
+      0 0 0 5px rgba(236, 184, 96, 0.16),
+      0 0 20px rgba(215, 154, 74, 0.2),
+      inset 0 1px 0 rgba(255, 241, 205, 0.26);
+  }
+}
+
 .progress-step-active {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  animation: progress-active-glow 3.8s ease-in-out infinite;
+  animation: progress-active-glow 3.2s ease-in-out infinite;
 }
 
-.progress-step-active::before {
+.progress-step-active::before,
+.progress-step-active::after {
   content: "";
   pointer-events: none;
   position: absolute;
+}
+
+.progress-step-active::before {
   inset: -1px -44%;
   z-index: 0;
   background: linear-gradient(
     112deg,
     transparent 0%,
-    transparent 36%,
-    rgba(255, 231, 184, 0.18) 48%,
-    rgba(255, 231, 184, 0.08) 56%,
-    transparent 70%
+    transparent 34%,
+    rgba(255, 231, 184, 0.28) 47%,
+    rgba(255, 231, 184, 0.12) 56%,
+    transparent 72%
   );
   mix-blend-mode: screen;
-  animation: progress-active-sheen 4.6s ease-in-out infinite;
+  animation: progress-active-sheen 3.8s ease-in-out infinite;
+}
+
+.progress-step-active::after {
+  inset: 1px;
+  z-index: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 224, 174, 0.16);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 231, 184, 0.18), transparent 46%),
+    linear-gradient(180deg, rgba(255, 231, 184, 0.08), transparent 42%);
+  mix-blend-mode: screen;
+  opacity: 0.78;
 }
 
 .progress-step-active > span {
@@ -435,9 +484,68 @@ h3 {
   z-index: 1;
 }
 
+.devwork-push-attention {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  border-color: rgba(215, 154, 74, 0.62);
+  background:
+    linear-gradient(180deg, rgba(214, 160, 76, 0.32), rgba(70, 48, 18, 0.9)),
+    linear-gradient(180deg, rgba(255, 244, 216, 0.08), transparent 54%);
+  color: #fff2d4;
+  animation: devwork-push-attention-glow 3.6s ease-in-out infinite;
+}
+
+.devwork-push-attention:hover {
+  border-color: rgba(236, 184, 96, 0.76);
+  background:
+    linear-gradient(180deg, rgba(224, 171, 84, 0.4), rgba(82, 57, 21, 0.94)),
+    linear-gradient(180deg, rgba(255, 246, 220, 0.12), transparent 58%);
+}
+
+.devwork-push-attention::before,
+.devwork-push-attention::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  border-radius: inherit;
+}
+
+.devwork-push-attention::before {
+  inset: -5px;
+  padding: 1.5px;
+  background: conic-gradient(
+    from 0deg,
+    rgba(255, 220, 138, 0.02) 0deg,
+    rgba(255, 220, 138, 0.82) 46deg,
+    rgba(255, 220, 138, 0.1) 72deg,
+    rgba(255, 220, 138, 0) 116deg,
+    rgba(214, 160, 76, 0) 224deg,
+    rgba(214, 160, 76, 0.74) 272deg,
+    rgba(255, 220, 138, 0.06) 304deg,
+    rgba(255, 220, 138, 0.02) 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.92;
+  animation: devwork-push-ring-spin 6.5s linear infinite;
+}
+
+.devwork-push-attention::after {
+  inset: -7px;
+  border: 1px solid rgba(255, 225, 162, 0.18);
+  opacity: 0.74;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .progress-step-active,
-  .progress-step-active::before {
+  .progress-step-active::before,
+  .progress-step-active::after,
+  .devwork-push-attention,
+  .devwork-push-attention::before {
     animation: none;
   }
 }

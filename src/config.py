@@ -134,6 +134,10 @@ class DevWorkConfig(BaseModel):
     # the active bound; this 3600s acts as a backstop so acpx itself does
     # not kill the process before our wrapper does.
     step4_acpx_wall_ceiling_s: int = 3600
+    # Step4 writes findings itself via the LLM. After the LLM process exits,
+    # allow a tiny grace period before treating a missing artifact as impl_gap.
+    step4_findings_wait_timeout_s: float = Field(default=2.0, ge=0, le=10)
+    step4_findings_wait_interval_s: float = Field(default=0.1, ge=0.01, le=1)
     # v1 default: Step5 auto-approves when score>=threshold. Phase 5 will
     # flip this to gate on a human confirmation event (PRD L145).
     require_human_exit_confirm: bool = False

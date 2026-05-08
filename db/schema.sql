@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS repos (
   id                TEXT PRIMARY KEY,                  -- 'repo-<hex12>'
   name              TEXT NOT NULL UNIQUE,              -- operator-facing handle
   url               TEXT NOT NULL,
+  local_path        TEXT,                              -- optional host-local checkout/build path metadata
   default_branch    TEXT NOT NULL DEFAULT 'main',
   ssh_key_path      TEXT,                              -- absolute path to SSH private key, or NULL
   bare_clone_path   TEXT,                              -- Phase 2 writer; NULL until then
@@ -296,6 +297,8 @@ CREATE INDEX IF NOT EXISTS idx_agent_dispatches_correlation
 CREATE INDEX IF NOT EXISTS idx_agent_dispatches_host       ON agent_dispatches(host_id);
 CREATE INDEX IF NOT EXISTS idx_agent_dispatches_state      ON agent_dispatches(state);
 CREATE INDEX IF NOT EXISTS idx_repos_fetch_status          ON repos(fetch_status);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_repos_local_path
+  ON repos(local_path) WHERE local_path IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_design_work_repos_repo      ON design_work_repos(repo_id);
 CREATE INDEX IF NOT EXISTS idx_dev_work_repos_repo         ON dev_work_repos(repo_id);
 -- Phase 4: defense-in-depth for the at-most-one-primary rule. The

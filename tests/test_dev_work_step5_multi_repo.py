@@ -55,6 +55,8 @@ def _build_config(max_rounds: int = 5, default_threshold: int = 80):
             progress_heartbeat_interval_s=0.01,
             step_idle_timeout_s=0.5,
             step4_acpx_wall_ceiling_s=3600,
+            step4_findings_wait_timeout_s=0.0,
+            step4_findings_wait_interval_s=0.01,
             require_human_exit_confirm=False,
         ),
     )

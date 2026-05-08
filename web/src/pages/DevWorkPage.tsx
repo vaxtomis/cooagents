@@ -2,7 +2,7 @@ import { useMemo, useState, type KeyboardEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
-import { cancelDevWork, getDevWork } from "../api/devWorks";
+import { cancelDevWork, getDevWork, pushDevWorkBranches } from "../api/devWorks";
 import { getIterationNoteContent, listIterationNotes } from "../api/devIterationNotes";
 import { getGate } from "../api/gates";
 import { listReviews } from "../api/reviews";
@@ -150,7 +150,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const detailPolling = useWorkspaceDetailPolling<DevWork>((latest) => Boolean(latest?.is_running));
   const [tab, setTab] = useState<TabId>("overview");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState<"cancel" | null>(null);
+  const [actionPending, setActionPending] = useState<"cancel" | "push" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const dvQuery = useSWR(["dev-work", dvId], () => getDevWork(dvId), detailPolling);
@@ -241,6 +241,20 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
       )
     : devWork.iteration_rounds;
   const activityEvents = workspaceEventsQuery.data?.events ?? [];
+  const repoPushRows = devWork.repos ?? [];
+  const hasRepoPushRows = repoPushRows.length > 0;
+  const hasPendingPush = repoPushRows.some((repo) => repo.push_state === "pending");
+  const hasFailedPush = repoPushRows.some((repo) => repo.push_state === "failed");
+  const allPushed = hasRepoPushRows && repoPushRows.every((repo) => repo.push_state === "pushed");
+  const showPushAction = devWork.current_step === "COMPLETED" && hasRepoPushRows;
+  const needsPushAttention = showPushAction && !allPushed;
+  const pushActionLabel = allPushed
+    ? "已推送"
+    : hasPendingPush
+      ? "推送分支"
+      : hasFailedPush
+        ? "重试推送"
+        : "推送分支";
 
   // Missing gate is an expected "no exit gate right now" state, not an error.
   const gateInfo =
@@ -255,6 +269,19 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
       await dvQuery.mutate();
     } catch (err) {
       setActionError(extractError(err, "操作失败"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function pushBranches() {
+    setActionPending("push");
+    setActionError(null);
+    try {
+      const updated = await pushDevWorkBranches(dvId);
+      await dvQuery.mutate(updated, { revalidate: false });
+    } catch (err) {
+      setActionError(extractError(err, "推送分支失败"));
     } finally {
       setActionPending(null);
     }
@@ -432,8 +459,23 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
             </div>
 
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-copy">仓库与推送状态</h3>
-              <RepoPushStatusGrid repos={devWork.repos ?? []} />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-copy">仓库与推送状态</h3>
+                {showPushAction ? (
+                  <button
+                    className={[
+                      "rounded-lg border border-accent/35 bg-accent/15 px-3 py-1.5 text-xs font-medium text-copy transition hover:bg-accent/20 disabled:opacity-50",
+                      needsPushAttention ? "devwork-push-attention" : "",
+                    ].join(" ")}
+                    disabled={actionPending !== null || allPushed}
+                    onClick={() => void pushBranches()}
+                    type="button"
+                  >
+                    {actionPending === "push" ? "推送中..." : pushActionLabel}
+                  </button>
+                ) : null}
+              </div>
+              <RepoPushStatusGrid repos={repoPushRows} />
             </div>
           </div>
         ) : null}

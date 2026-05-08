@@ -5,6 +5,7 @@ from src.models import (
     AgentKind,
     CreateDesignWorkRequest,
     CreateDevWorkRequest,
+    CreateRepoRequest,
     DesignWorkRetrySource,
     DesignDoc,
     DesignDocStatus,
@@ -142,6 +143,19 @@ def test_workspace_event_payload_dict():
     )
     assert e.payload["title"] == "T"
     assert e.id is None
+
+
+def test_create_repo_request_keeps_url_required_and_accepts_local_path():
+    req = CreateRepoRequest(
+        name="frontend",
+        url="git@github.com:org/frontend.git",
+        local_path="/workspace/repos/frontend",
+    )
+    assert req.url == "git@github.com:org/frontend.git"
+    assert req.local_path == "/workspace/repos/frontend"
+
+    with pytest.raises(ValidationError):
+        CreateRepoRequest(name="frontend")
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +331,7 @@ def test_worker_handoff_happy():
         base_branch="main",
         devwork_branch="devwork/x/backend",
         push_state="pending",
+        worktree_path="/tmp/worktree",
         url="git@gh:org/repo.git",
         ssh_key_path="/home/agent/.ssh/id_a",
     )

@@ -8,15 +8,18 @@ Components:
   * :class:`RepoHealthLoop` — periodic fetch task; only writer of healthy/error (Phase 2)
   * :class:`RepoInspector` — pure-read branches/tree/blob/log/rev_parse (Phase 3)
   * :class:`DevWorkRepoStateRepo` — single seam for dev_work_repos.push_state (Phase 5)
+  * :class:`DevWorkPublisher` — manual commit/push driver for completed DevWorks
 """
 from src.repos.credentials import SshKeyMaterial, resolve_repo_credential
 from src.repos.dev_work_repo_state import DevWorkRepoStateRepo
 from src.repos.fetcher import RepoFetcher
 from src.repos.health_loop import RepoHealthLoop
 from src.repos.inspector import RepoInspector
+from src.repos.publisher import DevWorkPublisher
 from src.repos.registry import RepoRegistryRepo
 
 __all__ = [
+    "DevWorkPublisher",
     "DevWorkRepoStateRepo",
     "RepoFetcher",
     "RepoHealthLoop",

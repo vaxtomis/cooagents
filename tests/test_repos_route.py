@@ -104,9 +104,20 @@ async def _build_app(
     test_app.state.repo_registry_repo = RepoRegistryRepo(db)
     test_app.state.repo_fetcher = fetcher
     test_app.state.repo_inspector = inspector or _FakeInspector()
-    # Settings shim: only ``settings.repos`` is read by the sync route.
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(exist_ok=True)
+    # Settings shim: repo CRUD reads security.workspace_root; sync reads repos.
     test_app.state.settings = type(
-        "S", (), {"repos": repos_config or ReposConfig()},
+        "S",
+        (),
+        {
+            "repos": repos_config or ReposConfig(),
+            "security": type(
+                "Sec",
+                (),
+                {"resolved_workspace_root": lambda self: workspace_root},
+            )(),
+        },
     )()
 
     @test_app.exception_handler(NotFoundError)
@@ -259,6 +270,64 @@ async def test_create_repo_returns_location_header(fetched_client):
     assert body["fetch_status"] == "unknown"
 
 
+async def test_create_repo_accepts_local_path_metadata(fetched_client):
+    client, app, _, _ = fetched_client
+    root = app.state.settings.security.resolved_workspace_root()
+    local_path = root / "repos" / "frontend"
+    resp = await client.post(
+        "/api/v1/repos",
+        json={
+            "name": "frontend-local",
+            "url": "git@github.com:org/frontend.git",
+            "local_path": str(local_path),
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["local_path"] == str(local_path.resolve())
+    assert not local_path.exists()
+
+
+async def test_create_repo_rejects_duplicate_local_path(fetched_client):
+    client, app, _, _ = fetched_client
+    root = app.state.settings.security.resolved_workspace_root()
+    local_path = root / "repos" / "shared"
+    first = await client.post(
+        "/api/v1/repos",
+        json={
+            "name": "frontend-local",
+            "url": "git@github.com:org/frontend.git",
+            "local_path": str(local_path),
+        },
+    )
+    assert first.status_code == 201, first.text
+    second = await client.post(
+        "/api/v1/repos",
+        json={
+            "name": "backend-local",
+            "url": "git@github.com:org/backend.git",
+            "local_path": str(local_path),
+        },
+    )
+    assert second.status_code == 400
+    assert "local_path" in second.json()["message"]
+
+
+async def test_create_repo_rejects_local_path_outside_workspace(fetched_client):
+    client, app, _, _ = fetched_client
+    root = app.state.settings.security.resolved_workspace_root()
+    outside = root.parent / "outside"
+    resp = await client.post(
+        "/api/v1/repos",
+        json={
+            "name": "outside-local",
+            "url": "git@github.com:org/outside.git",
+            "local_path": str(outside),
+        },
+    )
+    assert resp.status_code == 400
+    assert "workspace_root" in resp.json()["message"]
+
+
 async def test_create_repo_with_explicit_id(fetched_client):
     client, _, _, _ = fetched_client
     resp = await client.post(
@@ -311,6 +380,62 @@ async def test_patch_repo_partial(fetched_client):
     body = resp.json()
     assert body["default_branch"] == "develop"
     assert body["name"] == "frontend"  # untouched
+
+
+async def test_patch_repo_replaces_local_path(fetched_client):
+    client, app, _, _ = fetched_client
+    await _seed(app)
+    root = app.state.settings.security.resolved_workspace_root()
+    local_path = root / "repos" / "frontend"
+    resp = await client.patch(
+        "/api/v1/repos/repo-aaa",
+        json={"local_path": str(local_path)},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["local_path"] == str(local_path.resolve())
+
+
+async def test_patch_repo_allows_clearing_local_path(fetched_client):
+    client, app, _, _ = fetched_client
+    root = app.state.settings.security.resolved_workspace_root()
+    local_path = root / "repos" / "frontend"
+    await app.state.repo_registry_repo.upsert(
+        id="repo-aaa",
+        name="frontend",
+        url="git@github.com:org/frontend.git",
+        local_path=str(local_path.resolve()),
+    )
+
+    resp = await client.patch(
+        "/api/v1/repos/repo-aaa",
+        json={"local_path": None},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["local_path"] is None
+
+
+async def test_patch_repo_rejects_local_path_clash(fetched_client):
+    client, app, _, _ = fetched_client
+    root = app.state.settings.security.resolved_workspace_root()
+    local_path = root / "repos" / "shared"
+    await app.state.repo_registry_repo.upsert(
+        id="repo-aaa",
+        name="frontend",
+        url="git@github.com:org/frontend.git",
+        local_path=str(local_path.resolve()),
+    )
+    await app.state.repo_registry_repo.upsert(
+        id="repo-bbb",
+        name="backend",
+        url="git@github.com:org/backend.git",
+    )
+    resp = await client.patch(
+        "/api/v1/repos/repo-bbb",
+        json={"local_path": str(local_path)},
+    )
+    assert resp.status_code == 400
+    assert "local_path" in resp.json()["message"]
 
 
 async def test_patch_repo_404(fetched_client):

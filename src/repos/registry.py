@@ -72,6 +72,7 @@ class RepoRegistryRepo:
         id: str,
         name: str,
         url: str,
+        local_path: str | None = None,
         default_branch: str = "main",
         ssh_key_path: str | None = None,
         bare_clone_path: str | None = None,
@@ -101,19 +102,19 @@ class RepoRegistryRepo:
                 # last_fetch_err) on plain upsert. Use update_fetch_status()
                 # to mutate those columns explicitly.
                 await self.db.execute(
-                    "UPDATE repos SET name=?, url=?, default_branch=?, "
+                    "UPDATE repos SET name=?, url=?, local_path=?, default_branch=?, "
                     "ssh_key_path=?, bare_clone_path=?, role=?, updated_at=? "
                     "WHERE id=?",
-                    (name, url, default_branch, ssh_key_path,
+                    (name, url, local_path, default_branch, ssh_key_path,
                      bare_clone_path, role, now, id),
                 )
             else:
                 await self.db.execute(
-                    "INSERT INTO repos(id, name, url, default_branch, "
+                    "INSERT INTO repos(id, name, url, local_path, default_branch, "
                     "ssh_key_path, bare_clone_path, role, fetch_status, "
                     "created_at, updated_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (id, name, url, default_branch, ssh_key_path,
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (id, name, url, local_path, default_branch, ssh_key_path,
                      bare_clone_path, role, "unknown", now, now),
                 )
 
@@ -138,6 +139,14 @@ class RepoRegistryRepo:
             return None
         return dict(row)
 
+    async def get_by_local_path(self, path: str) -> dict[str, Any] | None:
+        row = await self.db.fetchone(
+            "SELECT * FROM repos WHERE local_path=?", (path,)
+        )
+        if row is None:
+            return None
+        return dict(row)
+
     @staticmethod
     def _build_list_where(
         *,
@@ -156,9 +165,10 @@ class RepoRegistryRepo:
         if query:
             like = f"%{query.strip()}%"
             conditions.append(
-                "(name LIKE ? OR url LIKE ? OR default_branch LIKE ?)"
+                "(name LIKE ? OR url LIKE ? OR local_path LIKE ? "
+                "OR default_branch LIKE ?)"
             )
-            params.extend([like, like, like])
+            params.extend([like, like, like, like])
         where_sql = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         return where_sql, params
 
@@ -323,6 +333,10 @@ class RepoRegistryRepo:
                 id=repo_id,
                 name=r.name,
                 url=r.url,
+                # ``local_path`` is operator-managed metadata in v1, not
+                # config-owned runtime state. Preserve the DB value on sync so
+                # a startup reload or /repos/sync does not silently erase it.
+                local_path=existing.get("local_path") if existing else None,
                 default_branch=r.default_branch,
                 ssh_key_path=r.ssh_key_path,
                 role=r.role,

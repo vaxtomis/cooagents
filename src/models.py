@@ -635,6 +635,7 @@ class Repo(BaseModel):
     id: str
     name: str
     url: str
+    local_path: str | None = None
     default_branch: str = "main"
     ssh_key_path: str | None = None
     bare_clone_path: str | None = None
@@ -659,6 +660,7 @@ class CreateRepoRequest(BaseModel):
     id: str | None = None
     name: str = Field(..., min_length=1, max_length=63)
     url: str = Field(..., min_length=1)
+    local_path: str | None = None
     default_branch: str = Field("main", min_length=1, max_length=200)
     ssh_key_path: str | None = None
     role: RepoRole = RepoRole.other
@@ -673,6 +675,7 @@ class UpdateRepoRequest(BaseModel):
     """Partial update — every field is optional."""
     name: str | None = Field(None, min_length=1, max_length=63)
     url: str | None = Field(None, min_length=1)
+    local_path: str | None = None
     default_branch: str | None = Field(None, min_length=1, max_length=200)
     ssh_key_path: str | None = None
     role: RepoRole | None = None

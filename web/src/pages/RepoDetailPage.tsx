@@ -62,6 +62,11 @@ function Header({ repo }: { repo: Repo | undefined }) {
       <p className="font-mono text-xs text-muted">
         URL：<span className="text-copy">{repo.url}</span>
       </p>
+      {repo.local_path ? (
+        <p className="font-mono text-xs text-muted">
+          本地路径：<span className="text-copy">{repo.local_path}</span>
+        </p>
+      ) : null}
       <p className="font-mono text-xs text-muted">
         默认分支：<span className="text-copy">{repo.default_branch}</span>
       </p>

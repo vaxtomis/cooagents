@@ -23,6 +23,7 @@ Do not import :mod:`src.dev_work_sm` here — avoids a circular import.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -53,6 +54,45 @@ _REQUIRED_H2 = ("本轮目标", "开发计划", "用例清单")
 
 class DevWorkStepHandlersMixin:
     """Mixin providing Step2–Step5 handlers for DevWorkStateMachine."""
+
+    async def _index_step4_findings_with_wait(
+        self,
+        *,
+        workspace_row: dict[str, Any],
+        relative_path: str,
+    ) -> None:
+        """Index Step4 findings, allowing a short post-process FS delay."""
+        timeout_s = float(
+            getattr(
+                self.config.devwork,
+                "step4_findings_wait_timeout_s",
+                2.0,
+            )
+        )
+        interval_s = float(
+            getattr(
+                self.config.devwork,
+                "step4_findings_wait_interval_s",
+                0.1,
+            )
+        )
+        timeout_s = max(timeout_s, 0.0)
+        interval_s = max(interval_s, 0.01)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+
+        while True:
+            try:
+                await self.registry.index_existing(
+                    workspace_row=workspace_row,
+                    relative_path=relative_path,
+                    kind="artifact",
+                )
+                return
+            except NotFoundError:
+                if loop.time() >= deadline:
+                    raise
+                await asyncio.sleep(min(interval_s, deadline - loop.time()))
 
     async def _s2_iteration(self, dw: dict[str, Any]) -> None:
         """Step2 (F2=B): SM writes header -> LLM appends three H2 sections."""
@@ -341,8 +381,8 @@ class DevWorkStepHandlersMixin:
             return
 
         try:
-            await self.registry.index_existing(
-                workspace_row=ws, relative_path=findings_rel, kind="artifact",
+            await self._index_step4_findings_with_wait(
+                workspace_row=ws, relative_path=findings_rel,
             )
         except NotFoundError:
             await self._loop_or_escalate(

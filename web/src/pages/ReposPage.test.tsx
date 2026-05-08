@@ -59,6 +59,7 @@ const repoA: Repo = {
   id: "repo-aaa111",
   name: "frontend",
   url: "git@github.com:org/frontend.git",
+  local_path: "/workspace/repos/frontend",
   default_branch: "main",
   ssh_key_path: null,
   bare_clone_path: null,
@@ -74,6 +75,7 @@ const repoB: Repo = {
   id: "repo-bbb222",
   name: "backend",
   url: "git@github.com:org/backend.git",
+  local_path: null,
   default_branch: "main",
   ssh_key_path: null,
   bare_clone_path: null,
@@ -95,6 +97,7 @@ describe("ReposPage", () => {
     vi.mocked(listRepoPage).mockResolvedValue(page);
     renderPage();
     expect(await screen.findByText("git@github.com:org/frontend.git")).toBeInTheDocument();
+    expect(screen.getByText("本地路径：/workspace/repos/frontend")).toBeInTheDocument();
     expect(screen.getByText("git@github.com:org/backend.git")).toBeInTheDocument();
     expect(screen.getByText("ssh: Could not resolve host")).toBeInTheDocument();
   });
@@ -118,12 +121,16 @@ describe("ReposPage", () => {
     fireEvent.change(screen.getByLabelText("URL"), {
       target: { value: "git@github.com:org/new.git" },
     });
+    fireEvent.change(screen.getByLabelText("本地路径"), {
+      target: { value: "/workspace/repos/new" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "登记" }));
 
     await waitFor(() => {
       expect(createRepo).toHaveBeenCalledWith({
         name: "new-repo",
         url: "git@github.com:org/new.git",
+        local_path: "/workspace/repos/new",
         default_branch: "main",
         role: "backend",
         ssh_key_path: null,

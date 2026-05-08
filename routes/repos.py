@@ -43,6 +43,7 @@ from src.models import (
     RepoTree,
     UpdateRepoRequest,
 )
+from src.path_validation import RepoPathError, validate_repo_path
 from src.request_utils import client_ip
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,19 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=client_ip)
 
 router = APIRouter(tags=["repos"])
+
+
+def _normalise_local_path(raw: str | None, request: Request) -> str | None:
+    if raw is None:
+        return None
+    stripped = raw.strip()
+    if not stripped:
+        return None
+    root = request.app.state.settings.security.resolved_workspace_root()
+    try:
+        return str(validate_repo_path(stripped, root))
+    except RepoPathError as exc:
+        raise BadRequestError(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -118,10 +132,18 @@ async def create_repo(
     # raise IntegrityError (which would 500 without a dedicated handler).
     if await registry.get_by_name(payload.name) is not None:
         raise BadRequestError(f"repo name already exists: {payload.name!r}")
+    local_path = _normalise_local_path(payload.local_path, request)
+    if local_path is not None:
+        clash = await registry.get_by_local_path(local_path)
+        if clash is not None:
+            raise BadRequestError(
+                f"repo local_path already exists: {local_path!r}"
+            )
     row = await registry.upsert(
         id=repo_id,
         name=payload.name,
         url=payload.url,
+        local_path=local_path,
         default_branch=payload.default_branch,
         ssh_key_path=payload.ssh_key_path,
         role=payload.role.value,
@@ -145,10 +167,21 @@ async def update_repo(
             raise BadRequestError(
                 f"repo name already exists: {payload.name!r}"
             )
+    local_path = row.get("local_path")
+    if "local_path" in payload.model_fields_set:
+        next_local_path = _normalise_local_path(payload.local_path, request)
+        if next_local_path is not None:
+            clash = await registry.get_by_local_path(next_local_path)
+            if clash is not None and clash["id"] != repo_id:
+                raise BadRequestError(
+                    f"repo local_path already exists: {next_local_path!r}"
+                )
+        local_path = next_local_path
     merged = await registry.upsert(
         id=repo_id,
         name=new_name,
         url=payload.url if payload.url is not None else row["url"],
+        local_path=local_path,
         default_branch=(
             payload.default_branch if payload.default_branch is not None
             else row["default_branch"]

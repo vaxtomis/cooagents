@@ -362,6 +362,7 @@ export interface Repo {
   id: string;
   name: string;
   url: string;
+  local_path: string | null;
   default_branch: string;
   ssh_key_path: string | null;
   bare_clone_path: string | null;
@@ -378,6 +379,7 @@ export type RepoPage = PaginatedResult<Repo>;
 export interface CreateRepoPayload {
   name: string;
   url: string;
+  local_path?: string | null;
   default_branch?: string;
   ssh_key_path?: string | null;
   role?: RepoRole;
@@ -386,6 +388,7 @@ export interface CreateRepoPayload {
 export interface UpdateRepoPayload {
   name?: string;
   url?: string;
+  local_path?: string | null;
   default_branch?: string;
   ssh_key_path?: string | null;
   role?: RepoRole;
@@ -482,6 +485,7 @@ export interface DevRepoRefView {
   devwork_branch: string;
   push_state: "pending" | "pushed" | "failed";
   is_primary: boolean;
+  worktree_path: string | null;
 }
 
 // Worker-facing handoff payload (Phase 5). Adds operational config + push_err.

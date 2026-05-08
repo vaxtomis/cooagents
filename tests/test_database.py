@@ -142,6 +142,7 @@ async def test_migrate_renames_legacy_repos_columns(tmp_path):
         }
         assert "credential_ref" not in cols
         assert "ssh_key_path" in cols
+        assert "local_path" in cols
         assert "vendor" not in cols
         assert "labels_json" not in cols
         # Legacy 'stale' rows are normalized to 'unknown'.
@@ -151,6 +152,42 @@ async def test_migrate_renames_legacy_repos_columns(tmp_path):
         )
         assert row["ssh_key_path"] == "/keys/id_rsa"
         assert row["fetch_status"] == "unknown"
+    finally:
+        await d.close()
+
+
+async def test_migrate_adds_repos_local_path_unique_index(tmp_path):
+    db_path = tmp_path / "legacy-local-path.db"
+    legacy = sqlite3.connect(db_path)
+    legacy.execute(
+        "CREATE TABLE repos ("
+        "id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, url TEXT NOT NULL, "
+        "default_branch TEXT NOT NULL DEFAULT 'main', ssh_key_path TEXT, "
+        "bare_clone_path TEXT, role TEXT NOT NULL DEFAULT 'other', "
+        "fetch_status TEXT NOT NULL DEFAULT 'unknown', "
+        "last_fetched_at TEXT, last_fetch_err TEXT, "
+        "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    legacy.execute(
+        "INSERT INTO repos(id,name,url,created_at,updated_at) "
+        "VALUES('repo-old','old','git@example:o/r.git','2026-04-26',"
+        "'2026-04-26')"
+    )
+    legacy.commit()
+    legacy.close()
+
+    d = Database(db_path=db_path, schema_path="db/schema.sql")
+    await d.connect()
+    try:
+        cols = {
+            r["name"] for r in await d.fetchall("PRAGMA table_info(repos)")
+        }
+        assert "local_path" in cols
+        indexes = await d.fetchall("PRAGMA index_list(repos)")
+        assert any(
+            r["name"] == "uniq_repos_local_path" and r["unique"]
+            for r in indexes
+        )
     finally:
         await d.close()
 

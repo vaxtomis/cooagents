@@ -9,6 +9,7 @@ import { DevWorkPage } from "./DevWorkPage";
 vi.mock("../api/devWorks", () => ({
   getDevWork: vi.fn(),
   cancelDevWork: vi.fn(),
+  pushDevWorkBranches: vi.fn(),
 }));
 vi.mock("../api/devIterationNotes", () => ({
   listIterationNotes: vi.fn(),
@@ -24,7 +25,7 @@ vi.mock("../api/workspaceEvents", () => ({
   listWorkspaceEvents: vi.fn(),
 }));
 
-import { getDevWork } from "../api/devWorks";
+import { getDevWork, pushDevWorkBranches } from "../api/devWorks";
 import { listIterationNotes } from "../api/devIterationNotes";
 import { listReviews } from "../api/reviews";
 import { getGate } from "../api/gates";
@@ -114,6 +115,7 @@ describe("DevWorkPage", () => {
         devwork_branch: "devwork/ws-1/dv-1/frontend",
         push_state: "pushed",
         is_primary: true,
+        worktree_path: "/tmp/frontend",
         url: "git@github.com:org/frontend.git",
         ssh_key_path: null,
         push_err: null,
@@ -126,6 +128,7 @@ describe("DevWorkPage", () => {
         devwork_branch: "devwork/ws-1/dv-1/backend",
         push_state: "failed",
         is_primary: false,
+        worktree_path: "/tmp/backend",
         url: "git@github.com:org/backend.git",
         ssh_key_path: null,
         push_err: "remote rejected: protected branch",
@@ -149,6 +152,107 @@ describe("DevWorkPage", () => {
     expect(failedMsg.getAttribute("title")).toBe(
       "remote rejected: protected branch",
     );
+  });
+
+  it("shows manual push only after completion and calls the API", async () => {
+    const repos: WorkerRepoHandoff[] = [
+      {
+        repo_id: "repo-aaa111",
+        mount_name: "frontend",
+        base_branch: "main",
+        base_rev: null,
+        devwork_branch: "devwork/ws-1/dv-1/frontend",
+        push_state: "pending",
+        is_primary: true,
+        worktree_path: "/tmp/frontend",
+        url: "git@github.com:org/frontend.git",
+        ssh_key_path: null,
+        push_err: null,
+      },
+    ];
+    const completed = { ...devWork, current_step: "COMPLETED" as const, repos };
+    vi.mocked(getDevWork).mockResolvedValue(completed);
+    vi.mocked(pushDevWorkBranches).mockResolvedValue({
+      ...completed,
+      repos: [{ ...repos[0], push_state: "pushed" }],
+    });
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    const button = await screen.findByRole("button", { name: "推送分支" });
+    expect(button).toHaveClass("devwork-push-attention");
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(pushDevWorkBranches).toHaveBeenCalledWith("dv-1");
+    });
+    expect(await screen.findByRole("button", { name: "已推送" })).toBeDisabled();
+  });
+
+  it("hides manual push before completion", async () => {
+    vi.mocked(getDevWork).mockResolvedValue({
+      ...devWork,
+      repos: [
+        {
+          repo_id: "repo-aaa111",
+          mount_name: "frontend",
+          base_branch: "main",
+          base_rev: null,
+          devwork_branch: "devwork/ws-1/dv-1/frontend",
+          push_state: "pending",
+          is_primary: true,
+          worktree_path: "/tmp/frontend",
+          url: "git@github.com:org/frontend.git",
+          ssh_key_path: null,
+          push_err: null,
+        },
+      ],
+    });
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    await waitFor(() => expect(getDevWork).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "推送分支" })).not.toBeInTheDocument();
+  });
+
+  it("renders retry push label and inline error", async () => {
+    vi.mocked(getDevWork).mockResolvedValue({
+      ...devWork,
+      current_step: "COMPLETED",
+      repos: [
+        {
+          repo_id: "repo-aaa111",
+          mount_name: "frontend",
+          base_branch: "main",
+          base_rev: null,
+          devwork_branch: "devwork/ws-1/dv-1/frontend",
+          push_state: "failed",
+          is_primary: true,
+          worktree_path: "/tmp/frontend",
+          url: "git@github.com:org/frontend.git",
+          ssh_key_path: null,
+          push_err: "remote rejected",
+        },
+      ],
+    });
+    vi.mocked(pushDevWorkBranches).mockRejectedValue(
+      new ApiError(502, "push denied", null),
+    );
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "重试推送" }));
+
+    expect(await screen.findByText("push denied")).toBeInTheDocument();
   });
 
   it("treats 404 from getGate as no-gate state (not an error)", async () => {

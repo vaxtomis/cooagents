@@ -159,6 +159,9 @@ def test_step4_prompt_includes_findings_path():
         mount_table_entries=(),
     ))
     assert "/f.json" in out
+    assert "不要 `git commit` / `git push`" in out
+    assert "退出前检查" in out
+    assert "不要只把 JSON 打印到 stdout" in out
 
 
 def test_step4_prompt_includes_mount_table():

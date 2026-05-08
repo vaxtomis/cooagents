@@ -14,7 +14,7 @@ from src.database import Database
 from src.design_doc_manager import DesignDocManager
 from src.dev_iteration_note_manager import DevIterationNoteManager
 from src.dev_work_sm import DevWorkStateMachine
-from src.exceptions import BadRequestError
+from src.exceptions import BadRequestError, NotFoundError
 from src.storage import LocalFileStore
 from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
 from src.git_utils import run_git
@@ -57,6 +57,8 @@ def _build_config(max_rounds=5, default_threshold=80):
             progress_heartbeat_interval_s=0.01,
             step_idle_timeout_s=0.5,
             step4_acpx_wall_ceiling_s=3600,
+            step4_findings_wait_timeout_s=0.0,
+            step4_findings_wait_interval_s=0.01,
             require_human_exit_confirm=False,
         ),
         preferred_dev_agent="claude",
@@ -798,6 +800,43 @@ async def test_step4_format_error_is_visible_in_retry_prompt(env):
     )
     final = await sm.run_to_completion(dw["id"])
     assert final["current_step"] == "COMPLETED"
+
+
+async def test_step4_waits_for_transient_findings_visibility(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    cfg = _build_config()
+    cfg.devwork.step4_findings_wait_timeout_s = 0.2
+    cfg.devwork.step4_findings_wait_interval_s = 0.01
+    sm = _make_sm(env, ScriptedExecutor(script), cfg=cfg)
+
+    original_index_existing = env["registry"].index_existing
+    misses = {"count": 0}
+
+    async def flaky_index_existing(**kwargs):
+        rel = kwargs.get("relative_path", "")
+        if rel.endswith("step4-findings-round1.json") and misses["count"] == 0:
+            misses["count"] += 1
+            raise NotFoundError("transient missing")
+        return await original_index_existing(**kwargs)
+
+    env["registry"].index_existing = flaky_index_existing
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert misses["count"] == 1
+    assert final["current_step"] == "COMPLETED"
+    assert final["iteration_rounds"] == 0
 
 
 async def test_step4_retry_stays_in_same_iteration_round(env):

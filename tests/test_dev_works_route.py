@@ -45,6 +45,8 @@ def _build_settings(workspace_root: Path | None = None):
             progress_heartbeat_interval_s=0.01,
             step_idle_timeout_s=0.5,
             step4_acpx_wall_ceiling_s=3600,
+            step4_findings_wait_timeout_s=0.0,
+            step4_findings_wait_interval_s=0.01,
             require_human_exit_confirm=False,
         ),
         security=SimpleNamespace(
@@ -141,6 +143,23 @@ class _FakeInspector:
         return sha or None
 
 
+class _FakePublisher:
+    def __init__(self, state_repo: DevWorkRepoStateRepo) -> None:
+        self.state_repo = state_repo
+        self.calls: list[tuple[str, int]] = []
+
+    async def publish(self, dev_work_id: str, round_n: int):
+        self.calls.append((dev_work_id, round_n))
+        rows = await self.state_repo.list_for_dev_work(dev_work_id)
+        for row in rows:
+            if row["push_state"] != "pushed":
+                await self.state_repo.update_push_state(
+                    dev_work_id,
+                    row["mount_name"],
+                    push_state="pushed",
+                )
+
+
 @pytest.fixture
 async def client(tmp_path):
     test_app = FastAPI(title="cooagents-test-dev-works")
@@ -183,6 +202,9 @@ async def client(tmp_path):
     test_app.state.settings = settings
     test_app.state.repo_registry_repo = repo_registry
     test_app.state.dev_work_repo_state = DevWorkRepoStateRepo(db)
+    test_app.state.dev_work_publisher = _FakePublisher(
+        test_app.state.dev_work_repo_state,
+    )
     test_app.state.repo_inspector = inspector
     test_app.state.start_time = time.time()
 
@@ -285,10 +307,19 @@ async def _wait_for_terminal(client: AsyncClient, dev_id: str, max_attempts: int
         r = await client.get(f"/api/v1/dev-works/{dev_id}")
         if r.status_code == 200 and r.json()["current_step"] in {
             "COMPLETED", "ESCALATED", "CANCELLED"
-        }:
+        } and not r.json()["is_running"]:
             return r.json()
         await asyncio.sleep(0.05)
     pytest.fail(f"dev_work {dev_id} did not reach terminal state in time")
+
+
+async def _wait_until_idle(client: AsyncClient, dev_id: str, max_attempts: int = 50):
+    for _ in range(max_attempts):
+        r = await client.get(f"/api/v1/dev-works/{dev_id}")
+        if r.status_code == 200 and not r.json()["is_running"]:
+            return r.json()
+        await asyncio.sleep(0.02)
+    pytest.fail(f"dev_work {dev_id} did not become idle in time")
 
 
 async def test_create_201_returns_repo_refs(client):
@@ -584,6 +615,50 @@ async def test_post_push_state_rejects_pending_422(client):
         json={"push_state": "pending"},
     )
     assert r.status_code == 422
+
+
+async def test_manual_push_unknown_dev_work_404(client):
+    r = await client.post("/api/v1/dev-works/dev-doesnotexist/push")
+    assert r.status_code == 404
+
+
+async def test_manual_push_rejects_non_completed_dev_work(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+    await client.post(f"/api/v1/dev-works/{dev_id}/cancel")
+
+    r = await client.post(f"/api/v1/dev-works/{dev_id}/push")
+
+    assert r.status_code == 409
+    assert r.json()["current_stage"] == "CANCELLED"
+
+
+async def test_manual_push_completed_calls_publisher(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+    final = await _wait_for_terminal(client, dev_id)
+    assert final["current_step"] == "COMPLETED"
+    final = await _wait_until_idle(client, dev_id)
+    backend_before = next(x for x in final["repos"] if x["mount_name"] == "backend")
+    backend_ref_before = next(
+        x for x in final["repo_refs"] if x["mount_name"] == "backend"
+    )
+    assert backend_before["push_state"] == "pending"
+    assert backend_before["worktree_path"]
+    assert backend_ref_before["worktree_path"] == backend_before["worktree_path"]
+
+    r = await client.post(f"/api/v1/dev-works/{dev_id}/push")
+
+    assert r.status_code == 200, r.text
+    assert app.state.dev_work_publisher.calls == [(dev_id, 1)]
+    backend = next(x for x in r.json()["repos"] if x["mount_name"] == "backend")
+    backend_ref = next(
+        x for x in r.json()["repo_refs"] if x["mount_name"] == "backend"
+    )
+    assert backend["push_state"] == "pushed"
+    assert backend_ref["worktree_path"] == backend["worktree_path"]
 
 
 # ---------------------------------------------------------------------------

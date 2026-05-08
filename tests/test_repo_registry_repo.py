@@ -63,7 +63,27 @@ async def test_upsert_inserts_new_repo(env):
     assert row["name"] == "frontend"
     assert row["fetch_status"] == "unknown"
     assert row["ssh_key_path"] == "/home/u/.ssh/id_rsa"
+    assert row["local_path"] is None
     assert row["default_branch"] == "main"
+
+
+async def test_upsert_local_path(env, tmp_path):
+    local_path = str((tmp_path / "repos" / "frontend").resolve())
+    row = await env["repo"].upsert(
+        id="repo-local",
+        name="frontend",
+        url="git@github.com:org/frontend.git",
+        local_path=local_path,
+    )
+    assert row["local_path"] == local_path
+
+    updated = await env["repo"].upsert(
+        id="repo-local",
+        name="frontend",
+        url="git@github.com:org/frontend.git",
+        local_path=str((tmp_path / "repos" / "frontend2").resolve()),
+    )
+    assert updated["local_path"].endswith("frontend2")
 
 
 async def test_upsert_preserves_fetch_status(env):
@@ -123,6 +143,21 @@ async def test_get_by_name(env):
     assert row is not None
     assert row["id"] == "r1"
     assert await repo.get_by_name("nope") is None
+
+
+async def test_get_by_local_path(env, tmp_path):
+    local_path = str((tmp_path / "repos" / "frontend").resolve())
+    repo = env["repo"]
+    await repo.upsert(
+        id="r1",
+        name="frontend",
+        url="git@x:o/r.git",
+        local_path=local_path,
+    )
+    row = await repo.get_by_local_path(local_path)
+    assert row is not None
+    assert row["id"] == "r1"
+    assert await repo.get_by_local_path(str(tmp_path / "missing")) is None
 
 
 async def test_list_all_orders_by_name(env):
@@ -207,6 +242,27 @@ async def test_sync_from_config_reuses_id_for_same_name(env):
     assert out2["upserted"] == [first_id]
     row = await repo.get(first_id)
     assert row["url"] == "git@x:o/r-renamed.git"
+
+
+async def test_sync_from_config_preserves_local_path_metadata(env, tmp_path):
+    repo = env["repo"]
+    local_path = str((tmp_path / "repos" / "frontend").resolve())
+    seeded = await repo.upsert(
+        id="repo-front",
+        name="frontend",
+        url="git@x:o/r.git",
+        local_path=local_path,
+    )
+    cfg = ReposConfig(repos=[
+        RepoConfig(name="frontend", url="git@x:o/r-renamed.git"),
+    ])
+
+    out = await repo.sync_from_config(cfg)
+
+    assert out["upserted"] == [seeded["id"]]
+    row = await repo.get(seeded["id"])
+    assert row["url"] == "git@x:o/r-renamed.git"
+    assert row["local_path"] == local_path
 
 
 # ---- credentials -----------------------------------------------------------
