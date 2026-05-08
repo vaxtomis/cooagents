@@ -1423,6 +1423,14 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         reason: str,
         problem_category: ProblemCategory | None,
     ) -> None:
+        # Step4 output validation failures are implementation retries inside
+        # the current iteration design, not a new Step2 planning round.
+        if back_to == DevWorkStep.STEP4_DEVELOP:
+            await self._retry_step4_same_round_or_escalate(
+                dw, reason=reason, problem_category=problem_category
+            )
+            return
+
         next_round = dw["iteration_rounds"] + 1
         if next_round > self._resolve_max_rounds(dw):
             await self._escalate(
@@ -1470,6 +1478,99 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 "back_to": back_to.value,
                 "problem_category": category_value,
                 "reason": reason,
+            },
+        )
+        try:
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
+        except Exception:
+            logger.exception(
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
+            )
+
+    async def _retry_step4_same_round_or_escalate(
+        self,
+        dw: dict[str, Any],
+        *,
+        reason: str,
+        problem_category: ProblemCategory | None,
+    ) -> None:
+        round_n = dw["iteration_rounds"] + 1
+        retry_key = f"step4_retry_round{round_n}"
+        gates = await self._gates(dw["id"])
+        attempt_raw = gates.get(retry_key, 0)
+        attempt = attempt_raw if isinstance(attempt_raw, int) else 0
+        if attempt >= 1:
+            await self._escalate(
+                dw,
+                reason=f"{reason} after Step4 retry",
+                problem_category=problem_category,
+            )
+            return
+
+        await self._append_loop_feedback(
+            dw["id"],
+            for_round=round_n,
+            back_to=DevWorkStep.STEP4_DEVELOP,
+            reason=reason,
+            problem_category=problem_category,
+        )
+        ws = await self.workspaces.get(dw["workspace_id"])
+        if ws is None:
+            await self._escalate(
+                dw,
+                reason="Step4 retry cleanup failed: workspace missing",
+                problem_category=problem_category,
+            )
+            return
+        findings_rel = (
+            f"devworks/{dw['id']}/artifacts/"
+            f"step4-findings-round{round_n}.json"
+        )
+        try:
+            await self.registry.delete(
+                workspace_row=ws,
+                relative_path=findings_rel,
+            )
+        except Exception as exc:
+            logger.exception(
+                "delete stale Step4 findings failed for %s round=%s",
+                dw["id"],
+                round_n,
+            )
+            await self._escalate(
+                dw,
+                reason=f"Step4 retry cleanup failed: {exc}",
+                problem_category=problem_category,
+            )
+            return
+        await self._update_gates_field(dw["id"], retry_key, attempt + 1)
+        await self._delete_round_sessions(dw["id"], round_n)
+        now = self._now()
+        category_value = (
+            problem_category.value if problem_category else None
+        )
+        await self.db.execute(
+            "UPDATE dev_works SET current_step=?, "
+            "last_problem_category=?, updated_at=? WHERE id=?",
+            (
+                DevWorkStep.STEP4_DEVELOP.value,
+                category_value,
+                now,
+                dw["id"],
+            ),
+        )
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="dev_work.round_completed",
+            workspace_id=dw["workspace_id"],
+            correlation_id=dw["id"],
+            payload={
+                "round": round_n,
+                "back_to": DevWorkStep.STEP4_DEVELOP.value,
+                "problem_category": category_value,
+                "reason": reason,
+                "retry": True,
             },
         )
         try:

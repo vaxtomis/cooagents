@@ -10,7 +10,6 @@ vi.mock("../api/designWorks", () => ({
   getDesignWork: vi.fn(),
   getDesignWorkRetrySource: vi.fn(),
   retryDesignWork: vi.fn(),
-  tickDesignWork: vi.fn(),
   cancelDesignWork: vi.fn(),
 }));
 vi.mock("../api/designDocs", () => ({
@@ -91,12 +90,12 @@ describe("DesignWorkPage", () => {
     renderPage();
 
     expect(await screen.findByText(/DesignWork 已升级/)).toBeInTheDocument();
+    expect(screen.getByText("后校验")).toBeInTheDocument();
     expect(screen.getByText("architecture")).toBeInTheDocument();
     expect(screen.getByText(/post-validate failed/)).toBeInTheDocument();
     expect(screen.getByText("data-flow")).toBeInTheDocument();
 
-    const tickBtn = screen.getByRole("button", { name: "推进" });
-    expect(tickBtn).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "推进" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry as new DesignWork" })).toBeEnabled();
   });
 
@@ -161,12 +160,14 @@ describe("DesignWorkPage", () => {
 
     renderPage();
 
+    fireEvent.click(await screen.findByRole("tab", { name: "最终交付" }));
+
     await waitFor(() => {
       expect(screen.getByText(/源文件已缺失/)).toBeInTheDocument();
     });
   });
 
-  it("renders running banner, disables tick, and shows scoped activity", async () => {
+  it("renders running banner and shows scoped activity", async () => {
     vi.mocked(getDesignWork).mockResolvedValue({
       ...baseDesignWork,
       is_running: true,
@@ -190,8 +191,9 @@ describe("DesignWorkPage", () => {
     renderPage();
 
     expect(await screen.findByText("自动推进中")).toBeInTheDocument();
-    expect(screen.getByText(/后台驱动正在推进此 DesignWork/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "推进" })).toBeDisabled();
+    expect(screen.getByText("后台驱动正在推进此 DesignWork，页面会自动刷新最新状态。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "推进" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "活动" }));
     expect(await screen.findByText("design_work.started")).toBeInTheDocument();
     expect(screen.getByTestId("designwork-activity-feed")).toBeInTheDocument();
     expect(listWorkspaceEvents).toHaveBeenCalledWith(
@@ -204,5 +206,23 @@ describe("DesignWorkPage", () => {
         ]),
       }),
     );
+  });
+
+  it("supports keyboard navigation across detail tabs", async () => {
+    vi.mocked(getDesignWork).mockResolvedValue(baseDesignWork);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+
+    renderPage();
+
+    const overviewTab = await screen.findByRole("tab", { name: "总览" });
+    overviewTab.focus();
+    fireEvent.keyDown(overviewTab, { key: "ArrowRight" });
+
+    const deliveryTab = screen.getByRole("tab", { name: "最终交付" });
+    await waitFor(() => {
+      expect(deliveryTab).toHaveAttribute("aria-selected", "true");
+      expect(document.activeElement).toBe(deliveryTab);
+    });
   });
 });

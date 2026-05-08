@@ -8,7 +8,6 @@ import { DevWorkPage } from "./DevWorkPage";
 
 vi.mock("../api/devWorks", () => ({
   getDevWork: vi.fn(),
-  tickDevWork: vi.fn(),
   cancelDevWork: vi.fn(),
 }));
 vi.mock("../api/devIterationNotes", () => ({
@@ -167,7 +166,7 @@ describe("DevWorkPage", () => {
     });
   });
 
-  it("renders running banner, disables tick, and shows heartbeat progress", async () => {
+  it("renders running banner and shows heartbeat progress", async () => {
     vi.mocked(getDevWork).mockResolvedValue({
       ...devWork,
       is_running: true,
@@ -186,8 +185,8 @@ describe("DevWorkPage", () => {
     renderPage();
 
     expect(await screen.findByText("自动推进中")).toBeInTheDocument();
-    expect(screen.getByText(/后台驱动正在推进此 DevWork/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "推进" })).toBeDisabled();
+    expect(screen.getByText("后台驱动正在推进此 DevWork，心跳进度会随轮询刷新。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "推进" })).not.toBeInTheDocument();
     expect(screen.getByText("STEP4_DEVELOP")).toBeInTheDocument();
     expect(screen.getByText("45s")).toBeInTheDocument();
   });
@@ -226,5 +225,24 @@ describe("DevWorkPage", () => {
         event_name: expect.arrayContaining(["dev_work.progress"]),
       }),
     );
+  });
+
+  it("supports keyboard navigation across detail tabs", async () => {
+    vi.mocked(getDevWork).mockResolvedValue(devWork);
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    const overviewTab = await screen.findByRole("tab", { name: "总览" });
+    overviewTab.focus();
+    fireEvent.keyDown(overviewTab, { key: "End" });
+
+    const activityTab = screen.getByRole("tab", { name: "Activity" });
+    await waitFor(() => {
+      expect(activityTab).toHaveAttribute("aria-selected", "true");
+      expect(document.activeElement).toBe(activityTab);
+    });
   });
 });

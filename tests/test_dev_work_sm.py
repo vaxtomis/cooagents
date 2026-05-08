@@ -211,6 +211,17 @@ def step4_invalid_findings_json(step_tag, round_n, prompt, worktree):
     return ("ok", 0)
 
 
+def step4_write_findings_but_fail(step_tag, round_n, prompt, worktree):
+    step4_write_findings(step_tag, round_n, prompt, worktree)
+    return ("failed after writing findings", 1)
+
+
+def step4_success_without_rewriting_findings(step_tag, round_n, prompt, worktree):
+    assert "System retry feedback" in prompt
+    assert "Step4 failed" in prompt
+    return ("ok", 0)
+
+
 def step4_write_findings_expect_retry_feedback(step_tag, round_n, prompt, worktree):
     assert "System retry feedback" in prompt
     assert "Step4 findings JSON invalid" in prompt
@@ -787,6 +798,93 @@ async def test_step4_format_error_is_visible_in_retry_prompt(env):
     )
     final = await sm.run_to_completion(dw["id"])
     assert final["current_step"] == "COMPLETED"
+
+
+async def test_step4_retry_stays_in_same_iteration_round(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_invalid_findings_json,
+        step4_write_findings_expect_retry_feedback,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "COMPLETED"
+    assert final["iteration_rounds"] == 0
+    rows = await env["db"].fetchall(
+        "SELECT round, markdown_path FROM dev_iteration_notes "
+        "WHERE dev_work_id=? ORDER BY round",
+        (dw["id"],),
+    )
+    assert [(r["round"], r["markdown_path"]) for r in rows] == [
+        (1, f"devworks/{dw['id']}/iteration-round-1.md")
+    ]
+    dev_root = env["ws_root"] / env["ws"]["slug"] / "devworks" / dw["id"]
+    assert not (dev_root / "iteration-round-2.md").exists()
+    assert not (dev_root / "prompts" / "step4-round2.md").exists()
+
+
+async def test_step4_second_validation_failure_escalates(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_invalid_findings_json,
+        step4_invalid_findings_json,
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "ESCALATED"
+    assert final["iteration_rounds"] == 0
+    assert final["last_problem_category"] == ProblemCategory.impl_gap.value
+
+
+async def test_step4_retry_does_not_accept_stale_findings_file(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings_but_fail,
+        step4_success_without_rewriting_findings,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "ESCALATED"
+    assert final["iteration_rounds"] == 0
+    assert final["last_problem_category"] == ProblemCategory.impl_gap.value
+    findings = (
+        env["ws_root"]
+        / env["ws"]["slug"]
+        / "devworks"
+        / dw["id"]
+        / "artifacts"
+        / "step4-findings-round1.json"
+    )
+    assert not findings.exists()
 
 
 async def test_step5_parse_error_is_visible_in_retry_prompt(env):

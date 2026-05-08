@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
@@ -7,7 +7,6 @@ import {
   getDesignWork,
   getDesignWorkRetrySource,
   retryDesignWork,
-  tickDesignWork,
 } from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
 import { listReviews } from "../api/reviews";
@@ -50,6 +49,15 @@ const FORM_SELECT_CLASSNAME =
   "w-full rounded-2xl border border-border-strong bg-panel-strong px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)] [&_option]:bg-panel-strong";
 const DIALOG_FOOTER_CLASSNAME =
   "flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end";
+
+const DESIGN_DETAIL_TABS = ["overview", "delivery", "reviews", "activity"] as const;
+type DesignDetailTab = (typeof DESIGN_DETAIL_TABS)[number];
+const DESIGN_DETAIL_TAB_LABELS: Record<DesignDetailTab, string> = {
+  overview: "总览",
+  delivery: "最终交付",
+  reviews: "审核历史",
+  activity: "活动",
+};
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -288,9 +296,10 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
   const navigate = useNavigate();
   const polling = useWorkspacePolling();
   const detailPolling = useWorkspaceDetailPolling<DesignWork>((latest) => Boolean(latest?.is_running));
-  const [actionPending, setActionPending] = useState<"tick" | "cancel" | "retry" | null>(null);
+  const [actionPending, setActionPending] = useState<"cancel" | "retry" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [retryOpen, setRetryOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<DesignDetailTab>("overview");
 
   const dwQuery = useSWR(["design-work", dwId], () => getDesignWork(dwId), detailPolling);
   const retrySourceQuery = useSWR(
@@ -369,17 +378,12 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
 
   const activityEvents = workspaceEventsQuery.data?.events ?? [];
 
-  async function runAction(action: "tick" | "cancel") {
-    setActionPending(action);
+  async function cancelWork() {
+    setActionPending("cancel");
     setActionError(null);
     try {
-      if (action === "tick") {
-        await tickDesignWork(dwId);
-        await dwQuery.mutate();
-      } else {
-        await cancelDesignWork(dwId);
-        await dwQuery.mutate();
-      }
+      await cancelDesignWork(dwId);
+      await dwQuery.mutate();
     } catch (err) {
       setActionError(extractError(err, "操作失败"));
     } finally {
@@ -400,6 +404,34 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
     } finally {
       setActionPending(null);
     }
+  }
+
+  function activateDetailTab(id: DesignDetailTab) {
+    setDetailTab(id);
+    window.setTimeout(() => {
+      document.getElementById(`designwork-tab-${id}`)?.focus();
+    }, 0);
+  }
+
+  function handleDetailTabKey(
+    event: KeyboardEvent<HTMLButtonElement>,
+    id: DesignDetailTab,
+  ) {
+    const currentIndex = DESIGN_DETAIL_TABS.indexOf(id);
+    const lastIndex = DESIGN_DETAIL_TABS.length - 1;
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = lastIndex;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    activateDetailTab(DESIGN_DETAIL_TABS[nextIndex]);
   }
 
   return (
@@ -434,7 +466,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
 
         {escalated ? (
           <p className="mt-5 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
-            DesignWork 已升级，需人工介入；tick 已禁用。
+            DesignWork 已升级，需人工介入。
           </p>
         ) : null}
 
@@ -456,39 +488,15 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
 
         {designWork.is_running ? (
           <p className="mt-5 rounded-2xl border border-success/25 bg-success/10 p-4 text-sm text-success">
-            后台驱动正在推进此 DesignWork，手动推进会暂时锁定，页面会自动刷新最新状态。
+            后台驱动正在推进此 DesignWork，页面会自动刷新最新状态。
           </p>
-        ) : null}
-
-        {designWork.missing_sections && designWork.missing_sections.length > 0 ? (
-          <div className="mt-5 space-y-2">
-            <p className="text-xs uppercase tracking-[0.24em] text-muted-soft">缺失章节</p>
-            <div className="flex flex-wrap gap-2">
-              {designWork.missing_sections.map((section) => (
-                <span
-                  className="rounded-full border border-warning/25 bg-warning/10 px-3 py-1 text-[11px] text-warning"
-                  key={section}
-                >
-                  {section}
-                </span>
-              ))}
-            </div>
-          </div>
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
           <button
-            className="rounded-lg bg-copy px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] disabled:opacity-50"
-            disabled={actionPending !== null || designWork.is_running || terminal}
-            onClick={() => void runAction("tick")}
-            type="button"
-          >
-            {actionPending === "tick" ? "推进中..." : "推进"}
-          </button>
-          <button
             className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
             disabled={actionPending !== null || terminal}
-            onClick={() => void runAction("cancel")}
+            onClick={() => void cancelWork()}
             type="button"
           >
             {actionPending === "cancel" ? "取消中..." : "取消"}
@@ -497,74 +505,158 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
         {actionError ? <p className="mt-3 text-xs text-danger">{actionError}</p> : null}
       </SectionPanel>
 
-      <SectionPanel kicker="摘要" title="状态与产物">
-        <div className="grid gap-3 md:grid-cols-4">
-          <MetricCard label="状态" value={designWork.current_state} />
-          <MetricCard label="循环轮次" value={String(designWork.loop)} />
-          <MetricCard label="DesignDoc" value={designWork.output_design_doc_id ?? "-"} />
-          <MetricCard label="更新时间" value={formatDateTime(designWork.updated_at)} />
-        </div>
-      </SectionPanel>
+      <SectionPanel
+        actions={
+          <div
+            className="flex max-w-full gap-2 overflow-x-auto pb-1"
+            role="tablist"
+            aria-label="DesignWork 详情切换"
+          >
+            {DESIGN_DETAIL_TABS.map((id) => {
+              const selected = detailTab === id;
+              return (
+                <button
+                  aria-controls={`designwork-tabpanel-${id}`}
+                  aria-selected={selected}
+                  className={[
+                    "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                    selected
+                      ? "border-accent/30 bg-accent/15 text-copy"
+                      : "border-border-strong bg-panel-strong/50 text-muted hover:border-copy/20 hover:text-copy",
+                  ].join(" ")}
+                  id={`designwork-tab-${id}`}
+                  key={id}
+                  onClick={() => activateDetailTab(id)}
+                  onKeyDown={(event) => handleDetailTabKey(event, id)}
+                  role="tab"
+                  tabIndex={selected ? 0 : -1}
+                  type="button"
+                >
+                  {DESIGN_DETAIL_TAB_LABELS[id]}
+                </button>
+              );
+            })}
+          </div>
+        }
+        kicker="详情面板"
+        title={DESIGN_DETAIL_TAB_LABELS[detailTab]}
+      >
+        {detailTab === "overview" ? (
+          <div
+            aria-labelledby="designwork-tab-overview"
+            className="space-y-5"
+            id="designwork-tabpanel-overview"
+            role="tabpanel"
+          >
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <MetricCard label="状态" value={designWork.current_state} />
+              <MetricCard label="循环轮次" value={String(designWork.loop)} />
+              <MetricCard label="模式" value={designWork.mode} />
+              <MetricCard label="DesignDoc" value={designWork.output_design_doc_id ?? "-"} />
+              <MetricCard label="版本" value={designWork.version ?? "-"} />
+              <MetricCard label="更新时间" value={formatDateTime(designWork.updated_at)} />
+            </div>
 
-      <SectionPanel kicker="最近活动" title="DesignWork 活动">
-        {workspaceEventsQuery.error ? (
-          <p className="text-xs text-danger">
-            {extractError(workspaceEventsQuery.error, "活动加载失败")}
-          </p>
-        ) : activityEvents.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
-            暂无 DesignWork 活动。
-          </p>
-        ) : (
-          <>
-            <div className="max-h-[26rem] overflow-y-auto pr-1" data-testid="designwork-activity-feed">
+            {designWork.missing_sections && designWork.missing_sections.length > 0 ? (
+              <div className="rounded-2xl border border-warning/25 bg-warning/10 p-4">
+                <p className="text-xs uppercase tracking-[0.24em] text-warning/90">
+                  缺失章节
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {designWork.missing_sections.map((section) => (
+                    <span
+                      className="rounded-full border border-warning/25 bg-panel-deep/40 px-3 py-1 text-[11px] text-warning"
+                      key={section}
+                    >
+                      {section}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {detailTab === "delivery" ? (
+          <div
+            aria-labelledby="designwork-tab-delivery"
+            id="designwork-tabpanel-delivery"
+            role="tabpanel"
+          >
+            {docState.kind === "idle" ? (
+              <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+                尚未产出 DesignDoc。
+              </p>
+            ) : docState.kind === "loading" ? (
+              <div className="h-40 animate-pulse rounded-2xl border border-border bg-panel-strong/70" />
+            ) : docState.kind === "missing" ? (
+              <p className="rounded-2xl border border-warning/25 bg-warning/10 px-4 py-4 text-sm text-warning">
+                源文件已缺失，请运行 <code className="font-mono">POST /workspaces/sync</code> 后刷新。
+              </p>
+            ) : docState.kind === "error" ? (
+              <p className="rounded-2xl border border-danger/25 bg-danger/10 px-4 py-4 text-sm text-danger">
+                {docState.message}
+              </p>
+            ) : (
+              <MarkdownPanel content={docState.content} reader />
+            )}
+          </div>
+        ) : null}
+
+        {detailTab === "reviews" ? (
+          <div
+            aria-labelledby="designwork-tab-reviews"
+            id="designwork-tabpanel-reviews"
+            role="tabpanel"
+          >
+            {reviewsQuery.error ? (
+              <p className="text-xs text-danger">{extractError(reviewsQuery.error, "加载失败")}</p>
+            ) : reviewsDesc.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+                暂无审核记录。
+              </p>
+            ) : (
               <div className="space-y-3">
-                {activityEvents.map((event) => (
-                  <ActivityRow event={event} key={event.event_id} />
+                {reviewsDesc.map((review) => (
+                  <ReviewRow key={review.id} review={review} />
                 ))}
               </div>
-            </div>
-            {(workspaceEventsQuery.data?.pagination.total ?? 0) > activityEvents.length ? (
-              <p className="mt-2 text-xs text-muted">Showing latest {activityEvents.length} events</p>
-            ) : null}
-          </>
-        )}
-      </SectionPanel>
-
-      <SectionPanel kicker="设计文档" title="最终交付">
-        {docState.kind === "idle" ? (
-          <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
-            尚未产出 DesignDoc。
-          </p>
-        ) : docState.kind === "loading" ? (
-          <div className="h-40 animate-pulse rounded-2xl border border-border bg-panel-strong/70" />
-        ) : docState.kind === "missing" ? (
-          <p className="rounded-2xl border border-warning/25 bg-warning/10 px-4 py-4 text-sm text-warning">
-            源文件已缺失，请运行 <code className="font-mono">POST /workspaces/sync</code> 后刷新。
-          </p>
-        ) : docState.kind === "error" ? (
-          <p className="rounded-2xl border border-danger/25 bg-danger/10 px-4 py-4 text-sm text-danger">
-            {docState.message}
-          </p>
-        ) : (
-          <MarkdownPanel content={docState.content} />
-        )}
-      </SectionPanel>
-
-      <SectionPanel kicker="审核历史" title="审核记录">
-        {reviewsQuery.error ? (
-          <p className="text-xs text-danger">{extractError(reviewsQuery.error, "加载失败")}</p>
-        ) : reviewsDesc.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
-            暂无审核记录。
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {reviewsDesc.map((review) => (
-              <ReviewRow key={review.id} review={review} />
-            ))}
+            )}
           </div>
-        )}
+        ) : null}
+
+        {detailTab === "activity" ? (
+          <div
+            aria-labelledby="designwork-tab-activity"
+            id="designwork-tabpanel-activity"
+            role="tabpanel"
+          >
+            {workspaceEventsQuery.error ? (
+              <p className="text-xs text-danger">
+                {extractError(workspaceEventsQuery.error, "活动加载失败")}
+              </p>
+            ) : activityEvents.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+                暂无 DesignWork 活动。
+              </p>
+            ) : (
+              <>
+                <div className="max-h-[calc(100vh-18rem)] overflow-y-auto pr-1" data-testid="designwork-activity-feed">
+                  <div className="space-y-3">
+                    {activityEvents.map((event) => (
+                      <ActivityRow event={event} key={event.event_id} />
+                    ))}
+                  </div>
+                </div>
+                {(workspaceEventsQuery.data?.pagination.total ?? 0) > activityEvents.length ? (
+                  <p className="mt-2 text-xs text-muted">
+                    Showing latest {activityEvents.length} events
+                  </p>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
       </SectionPanel>
 
       {retryOpen ? (

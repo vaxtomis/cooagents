@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
-import { cancelDevWork, getDevWork, tickDevWork } from "../api/devWorks";
+import { cancelDevWork, getDevWork } from "../api/devWorks";
 import { getIterationNoteContent, listIterationNotes } from "../api/devIterationNotes";
 import { getGate } from "../api/gates";
 import { listReviews } from "../api/reviews";
@@ -22,9 +22,10 @@ import {
 import { extractError } from "../lib/extractError";
 import type { DevIterationNote, DevWork, Review, WorkspaceEvent } from "../types";
 
-const TAB_IDS = ["notes", "reviews", "gate", "activity"] as const;
+const TAB_IDS = ["overview", "notes", "reviews", "gate", "activity"] as const;
 type TabId = (typeof TAB_IDS)[number];
 const TAB_LABELS: Record<TabId, string> = {
+  overview: "总览",
   activity: "Activity",
   notes: "迭代设计文件",
   reviews: "审核历史",
@@ -175,9 +176,9 @@ export function DevWorkPage() {
 function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const polling = useWorkspacePolling();
   const detailPolling = useWorkspaceDetailPolling<DevWork>((latest) => Boolean(latest?.is_running));
-  const [tab, setTab] = useState<TabId>("notes");
+  const [tab, setTab] = useState<TabId>("overview");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState<"tick" | "cancel" | null>(null);
+  const [actionPending, setActionPending] = useState<"cancel" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const dvQuery = useSWR(["dev-work", dvId], () => getDevWork(dvId), detailPolling);
@@ -267,21 +268,42 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
     gateQuery.data ??
     (gateQuery.error instanceof ApiError && gateQuery.error.status === 404 ? null : undefined);
 
-  async function runAction(action: "tick" | "cancel") {
-    setActionPending(action);
+  async function cancelWork() {
+    setActionPending("cancel");
     setActionError(null);
     try {
-      if (action === "tick") {
-        await tickDevWork(dvId);
-      } else {
-        await cancelDevWork(dvId);
-      }
+      await cancelDevWork(dvId);
       await dvQuery.mutate();
     } catch (err) {
       setActionError(extractError(err, "操作失败"));
     } finally {
       setActionPending(null);
     }
+  }
+
+  function activateTab(id: TabId) {
+    setTab(id);
+    window.setTimeout(() => {
+      document.getElementById(`devwork-tab-${id}`)?.focus();
+    }, 0);
+  }
+
+  function handleTabKey(event: KeyboardEvent<HTMLButtonElement>, id: TabId) {
+    const currentIndex = TAB_IDS.indexOf(id);
+    const lastIndex = TAB_IDS.length - 1;
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = lastIndex;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    activateTab(TAB_IDS[nextIndex]);
   }
 
   return (
@@ -316,29 +338,21 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
 
         {escalated ? (
           <p className="mt-5 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
-            DevWork 已升级；tick 已禁用，闸门面板已隐藏。
+            DevWork 已升级，需人工介入；闸门面板已隐藏。
           </p>
         ) : null}
 
         {devWork.is_running ? (
           <p className="mt-5 rounded-2xl border border-success/25 bg-success/10 p-4 text-sm text-success">
-            后台驱动正在推进此 DevWork，手动推进会暂时锁定，心跳进度会随轮询刷新。
+            后台驱动正在推进此 DevWork，心跳进度会随轮询刷新。
           </p>
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
           <button
-            className="rounded-lg bg-copy px-3 py-1.5 text-xs font-medium text-ink-invert shadow-[0_0_0_1px_var(--color-copy)] disabled:opacity-50"
-            disabled={actionPending !== null || devWork.is_running || terminal}
-            onClick={() => void runAction("tick")}
-            type="button"
-          >
-            {actionPending === "tick" ? "推进中..." : "推进"}
-          </button>
-          <button
             className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
             disabled={actionPending !== null || terminal}
-            onClick={() => void runAction("cancel")}
+            onClick={() => void cancelWork()}
             type="button"
           >
             {actionPending === "cancel" ? "取消中..." : "取消"}
@@ -347,47 +361,13 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
         {actionError ? <p className="mt-3 text-xs text-danger">{actionError}</p> : null}
       </SectionPanel>
 
-      <SectionPanel kicker="摘要" title="指标">
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
-          <MetricCard label="最近分数" value={devWork.last_score?.toString() ?? "-"} />
-          <MetricCard label="问题分类" value={devWork.last_problem_category ?? "-"} />
-          <MetricCard
-            label="一次通过"
-            value={
-              devWork.first_pass_success === null ? "-" : devWork.first_pass_success ? "是" : "否"
-            }
-          />
-          <MetricCard label="工作分支" value={devWork.worktree_branch ?? "-"} />
-          <MetricCard label="工作目录" value={devWork.worktree_path ?? "-"} />
-          <MetricCard label="更新时间" value={formatDateTime(devWork.updated_at)} />
-        </div>
-      </SectionPanel>
-
-      <SectionPanel kicker="当前进度" title="运行心跳">
-        {devWork.progress ? (
-          <div className="grid gap-3 md:grid-cols-4">
-            <MetricCard label="Step" value={devWork.progress.step} />
-            <MetricCard label="Round" value={String(devWork.progress.round)} />
-            <MetricCard label="Elapsed" value={`${devWork.progress.elapsed_s}s`} />
-            <MetricCard
-              label="Heartbeat"
-              value={formatDateTime(devWork.progress.last_heartbeat_at)}
-            />
-          </div>
-        ) : (
-          <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
-            暂无心跳快照；后台驱动可能处于非 LLM 子步骤或已经空闲。
-          </p>
-        )}
-      </SectionPanel>
-
-      <SectionPanel kicker="仓库" title="仓库与推送状态">
-        <RepoPushStatusGrid repos={devWork.repos ?? []} />
-      </SectionPanel>
-
       <SectionPanel
         actions={
-          <div className="flex gap-2" role="tablist" aria-label="DevWork 详情切换">
+          <div
+            className="flex max-w-full gap-2 overflow-x-auto pb-1"
+            role="tablist"
+            aria-label="DevWork 详情切换"
+          >
             {TAB_IDS.map((id) => {
               const selected = tab === id;
               return (
@@ -395,14 +375,15 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
                   aria-controls={`devwork-tabpanel-${id}`}
                   aria-selected={selected}
                   className={[
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                    "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition",
                     selected
                       ? "border-accent/30 bg-accent/15 text-copy"
                       : "border-border-strong bg-panel-strong/50 text-muted hover:border-copy/20 hover:text-copy",
                   ].join(" ")}
                   id={`devwork-tab-${id}`}
                   key={id}
-                  onClick={() => setTab(id)}
+                  onClick={() => activateTab(id)}
+                  onKeyDown={(event) => handleTabKey(event, id)}
                   role="tab"
                   tabIndex={selected ? 0 : -1}
                   type="button"
@@ -416,14 +397,65 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
         kicker="详情面板"
         title={TAB_LABELS[tab]}
       >
+        {tab === "overview" ? (
+          <div
+            aria-labelledby="devwork-tab-overview"
+            className="space-y-6"
+            id="devwork-tabpanel-overview"
+            role="tabpanel"
+          >
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <MetricCard label="最近分数" value={devWork.last_score?.toString() ?? "-"} />
+              <MetricCard label="问题分类" value={devWork.last_problem_category ?? "-"} />
+              <MetricCard
+                label="一次通过"
+                value={
+                  devWork.first_pass_success === null
+                    ? "-"
+                    : devWork.first_pass_success
+                      ? "是"
+                      : "否"
+                }
+              />
+              <MetricCard label="工作分支" value={devWork.worktree_branch ?? "-"} />
+              <MetricCard label="工作目录" value={devWork.worktree_path ?? "-"} />
+              <MetricCard label="更新时间" value={formatDateTime(devWork.updated_at)} />
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-copy">运行心跳</h3>
+              {devWork.progress ? (
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricCard label="Step" value={devWork.progress.step} />
+                  <MetricCard label="Round" value={String(devWork.progress.round)} />
+                  <MetricCard label="Elapsed" value={`${devWork.progress.elapsed_s}s`} />
+                  <MetricCard
+                    label="Heartbeat"
+                    value={formatDateTime(devWork.progress.last_heartbeat_at)}
+                  />
+                </div>
+              ) : (
+                <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+                  暂无心跳快照；后台驱动可能处于非 LLM 子步骤或已经空闲。
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-copy">仓库与推送状态</h3>
+              <RepoPushStatusGrid repos={devWork.repos ?? []} />
+            </div>
+          </div>
+        ) : null}
+
         {tab === "notes" ? (
           <div
             aria-labelledby="devwork-tab-notes"
-            className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]"
+            className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]"
             id="devwork-tabpanel-notes"
             role="tabpanel"
           >
-            <div>
+            <div className="max-h-[calc(100vh-18rem)] overflow-y-auto pr-1">
               {notesDesc.length === 0 ? (
                 <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
                   暂无迭代设计文件。
@@ -452,7 +484,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
                   {noteContent.message}
                 </p>
               ) : (
-                <MarkdownPanel content={noteContent.content} />
+                <MarkdownPanel content={noteContent.content} reader />
               )}
             </div>
           </div>
