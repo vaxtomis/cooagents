@@ -23,6 +23,13 @@ describe("StatusBadge", () => {
     expect(badge).toHaveAttribute("data-tone", "muted");
   });
 
+  it("highlights completed status", () => {
+    render(<StatusBadge status="completed" />);
+    const badge = screen.getByRole("status", { name: "已完成" });
+    expect(badge).toHaveAttribute("data-tone", "accent");
+    expect(badge.className).toContain("rgba(215,154,74,0.58)");
+  });
+
   it("falls through to muted for unknown status", () => {
     render(<StatusBadge status="totally-unknown" />);
     const badge = screen.getByRole("status", { name: "totally-unknown" });

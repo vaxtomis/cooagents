@@ -143,7 +143,7 @@ describe("AgentHostsPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit ah-remote" }));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑 ah-remote" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Edit Agent Host" });
     fireEvent.change(within(dialog).getByLabelText("Edit host"), {
@@ -181,7 +181,7 @@ describe("AgentHostsPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit local" }));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑 local" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Edit Agent Host" });
     const hostInput = within(dialog).getByLabelText("Edit host");

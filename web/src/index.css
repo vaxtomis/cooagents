@@ -369,3 +369,75 @@ h3 {
 [data-badge-dot="true"] {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.34), 0 0 14px currentColor;
 }
+
+@keyframes progress-active-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(215, 154, 74, 0.3),
+      0 0 18px rgba(215, 154, 74, 0.16);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(215, 154, 74, 0.42),
+      0 0 26px rgba(215, 154, 74, 0.24);
+  }
+}
+
+@keyframes progress-active-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-135%);
+  }
+
+  18% {
+    opacity: 0.2;
+  }
+
+  62% {
+    opacity: 0.12;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(135%);
+  }
+}
+
+.progress-step-active {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  animation: progress-active-glow 3.8s ease-in-out infinite;
+}
+
+.progress-step-active::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: -1px -44%;
+  z-index: 0;
+  background: linear-gradient(
+    112deg,
+    transparent 0%,
+    transparent 36%,
+    rgba(255, 231, 184, 0.18) 48%,
+    rgba(255, 231, 184, 0.08) 56%,
+    transparent 70%
+  );
+  mix-blend-mode: screen;
+  animation: progress-active-sheen 4.6s ease-in-out infinite;
+}
+
+.progress-step-active > span {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-step-active,
+  .progress-step-active::before {
+    animation: none;
+  }
+}

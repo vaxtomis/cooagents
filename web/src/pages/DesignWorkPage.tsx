@@ -456,7 +456,10 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
         </div>
 
         <div className="mt-4">
-          <DesignWorkStateProgress current={designWork.current_state} />
+          <DesignWorkStateProgress
+            active={designWork.is_running && !terminal}
+            current={designWork.current_state}
+          />
         </div>
 
         {escalated ? (

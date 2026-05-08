@@ -62,7 +62,7 @@ describe("App shell", () => {
   it("renders sidebar navigation and workspace-centric routes", async () => {
     const overviewLabel = "概览";
     const workspacesLabel = "Workspace";
-    const agentHostsLabel = "Agent Host 管理";
+    const agentHostsLabel = "Agent 管理";
     const repoRegistryLabel = "仓库注册表";
 
     const overview = renderAt("/");

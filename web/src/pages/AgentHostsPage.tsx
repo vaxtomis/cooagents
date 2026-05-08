@@ -160,12 +160,12 @@ function HostRow({
         <div className="flex flex-wrap gap-3 lg:max-w-[16rem] lg:justify-end">
           <button
             type="button"
-            aria-label={`Edit ${host.id}`}
+            aria-label={`编辑 ${host.id}`}
             onClick={() => onEdit(host)}
             className={SECONDARY_ACTION_BUTTON_CLASSNAME}
           >
             <Pencil className="size-4" strokeWidth={1.8} />
-            Edit
+            编辑
           </button>
           <button
             type="button"
@@ -591,7 +591,7 @@ export function AgentHostsPage() {
 
       <SectionPanel
         kicker="基础设施"
-        title="Agent Host 管理"
+        title="Agent 管理"
         actions={
           <>
             <button

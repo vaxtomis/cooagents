@@ -2,6 +2,7 @@ import { DESIGN_WORK_STATE_ORDER, type DesignWorkState } from "../types";
 
 type Props = {
   current: DesignWorkState;
+  active?: boolean;
   escalated?: boolean;
   className?: string;
 };
@@ -26,8 +27,14 @@ const STATE_LABELS: Record<DesignWorkState, string> = {
   CANCELLED: "取消",
 };
 
-export function DesignWorkStateProgress({ current, escalated = false, className = "" }: Props) {
+export function DesignWorkStateProgress({
+  current,
+  active = false,
+  escalated = false,
+  className = "",
+}: Props) {
   const currentIndex = resolveIndex(current);
+  const completed = current === "COMPLETED";
   const terminal = current === "CANCELLED" || current === "ESCALATED" || escalated;
   const terminalLabel = current === "CANCELLED" ? "已取消" : "已升级";
 
@@ -40,16 +47,24 @@ export function DesignWorkStateProgress({ current, escalated = false, className 
         {DESIGN_WORK_STATE_ORDER.map((state, index) => {
           const tone = terminal
             ? "muted"
-            : index < currentIndex
-              ? "complete"
-              : index === currentIndex
-                ? "current"
-                : "pending";
+            : completed && index === currentIndex
+              ? "done"
+              : active && index === currentIndex
+                ? "active"
+                : index < currentIndex
+                  ? "complete"
+                  : index === currentIndex
+                    ? "current"
+                    : "pending";
           const toneClass = {
             complete:
               "border-[rgba(143,164,106,0.24)] bg-[linear-gradient(180deg,rgba(143,164,106,0.18),rgba(143,164,106,0.1))] text-[#c1cb9a]",
             current:
               "border-[rgba(169,112,45,0.28)] bg-[linear-gradient(180deg,rgba(169,112,45,0.22),rgba(169,112,45,0.12))] text-copy shadow-[0_0_0_1px_rgba(169,112,45,0.24)]",
+            active:
+              "progress-step-active border-[rgba(215,154,74,0.58)] bg-[linear-gradient(180deg,rgba(215,154,74,0.34),rgba(169,112,45,0.18))] text-[#f1d7aa]",
+            done:
+              "border-[rgba(215,154,74,0.62)] bg-[linear-gradient(180deg,rgba(215,154,74,0.36),rgba(169,112,45,0.2))] text-[#f5d7a1] shadow-[0_0_0_1px_rgba(215,154,74,0.38),0_0_24px_rgba(215,154,74,0.24)]",
             muted: "border-border bg-panel-strong/60 text-muted",
             pending: "border-border bg-panel-deep/90 text-muted",
           }[tone];
@@ -60,7 +75,7 @@ export function DesignWorkStateProgress({ current, escalated = false, className 
               data-state={tone}
               key={state}
             >
-              {STATE_LABELS[state]}
+              <span>{STATE_LABELS[state]}</span>
             </li>
           );
         })}

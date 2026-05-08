@@ -56,7 +56,7 @@ const primaryNavItems: NavItem[] = [
 ];
 
 const operationsNavItems: NavItem[] = [
-  { to: "/agent-hosts", label: "Agent Host 管理", icon: Server },
+  { to: "/agent-hosts", label: "Agent 管理", icon: Server },
   { to: "/repos", label: "仓库注册表", icon: Database },
 ];
 
@@ -118,7 +118,7 @@ function resolvePageMeta(pathname: string): PageMeta {
 
   if (pathname === "/agent-hosts") {
     return {
-      title: "Agent Host 管理",
+      title: "Agent 管理",
       eyebrow: "执行基础设施",
       description: "登记执行节点、查看健康状态，并维护远端 Agent Host 配置。",
     };

@@ -8,6 +8,8 @@ const SUCCESS_DOT = "bg-success";
 const ACCENT_CLASS =
   "border-[rgba(169,112,45,0.34)] bg-[linear-gradient(180deg,rgba(169,112,45,0.2),rgba(169,112,45,0.08))] text-accent-soft";
 const ACCENT_DOT = "bg-accent";
+const HIGHLIGHT_ACCENT_CLASS =
+  "border-[rgba(215,154,74,0.58)] bg-[linear-gradient(180deg,rgba(215,154,74,0.28),rgba(169,112,45,0.12))] text-[#f5d7a1] shadow-[0_0_0_1px_rgba(215,154,74,0.22),0_0_20px_rgba(215,154,74,0.16)]";
 const WARNING_CLASS =
   "border-[rgba(185,130,54,0.34)] bg-[linear-gradient(180deg,rgba(185,130,54,0.18),rgba(185,130,54,0.08))] text-[#d6a461]";
 const WARNING_DOT = "bg-warning";
@@ -26,6 +28,10 @@ function accent(label: string) {
   return { label, tone: "accent" as StatusTone, className: ACCENT_CLASS, dotClassName: ACCENT_DOT };
 }
 
+function highlightedAccent(label: string) {
+  return { label, tone: "accent" as StatusTone, className: HIGHLIGHT_ACCENT_CLASS, dotClassName: ACCENT_DOT };
+}
+
 function warning(label: string) {
   return { label, tone: "warning" as StatusTone, className: WARNING_CLASS, dotClassName: WARNING_DOT };
 }
@@ -42,7 +48,7 @@ const STATUS_META: Record<string, { label: string; tone: StatusTone; className: 
   active: success("在线"),
   approved: success("已通过"),
   cancelled: danger("已取消"),
-  completed: accent("已完成"),
+  completed: highlightedAccent("已完成"),
   dispatched: accent("已分派"),
   failed: danger("失败"),
   interrupted: danger("已中断"),

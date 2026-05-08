@@ -330,7 +330,10 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
         </div>
 
         <div className="mt-4">
-          <DevWorkStepProgress current={devWork.current_step} />
+          <DevWorkStepProgress
+            active={devWork.is_running && !terminal}
+            current={devWork.current_step}
+          />
         </div>
 
         {escalated ? (
