@@ -15,6 +15,7 @@ import { AppDialog } from "../components/AppDialog";
 import { DesignWorkStateProgress } from "../components/DesignWorkStateProgress";
 import { MarkdownPanel } from "../components/MarkdownPanel";
 import { RepoRefsEditor, type RepoRefsEditorRow } from "../components/RepoRefsEditor";
+import { ReviewRow } from "../components/ReviewHistory";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
 import { StatusBadge } from "../components/StatusBadge";
 import {
@@ -29,7 +30,6 @@ import type {
   DesignWorkRetrySource,
   RepoRef,
   RetryDesignWorkPayload,
-  Review,
   WorkspaceEvent,
 } from "../types";
 
@@ -86,36 +86,6 @@ function ActivityRow({ event }: { event: WorkspaceEvent }) {
         <span className="text-[11px] text-muted">{formatDateTime(event.ts)}</span>
       </div>
       {payload ? <p className="mt-2 break-words text-xs text-muted">{payload}</p> : null}
-    </article>
-  );
-}
-
-function ReviewRow({ review }: { review: Review }) {
-  return (
-    <article className="rounded-2xl border border-border bg-panel-strong/80 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-medium text-copy">
-          第 {review.round} 轮 · 评分 {review.score ?? "-"}
-        </p>
-        {review.problem_category ? <StatusBadge status={review.problem_category} /> : null}
-      </div>
-      {review.reviewer ? <p className="mt-2 text-xs text-muted">审核者 {review.reviewer}</p> : null}
-      {review.issues && review.issues.length > 0 ? (
-        <details className="mt-3 text-xs text-muted">
-          <summary className="cursor-pointer">问题 ({review.issues.length})</summary>
-          <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
-            {JSON.stringify(review.issues, null, 2)}
-          </pre>
-        </details>
-      ) : null}
-      {review.findings && review.findings.length > 0 ? (
-        <details className="mt-2 text-xs text-muted">
-          <summary className="cursor-pointer">发现项 ({review.findings.length})</summary>
-          <pre className="mt-2 overflow-x-auto rounded-2xl bg-panel-deep p-3 text-[11px] text-copy whitespace-pre-wrap">
-            {JSON.stringify(review.findings, null, 2)}
-          </pre>
-        </details>
-      ) : null}
     </article>
   );
 }

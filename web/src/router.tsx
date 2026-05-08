@@ -43,7 +43,7 @@ type NavItem = {
 
 type PageMeta = {
   title: string;
-  eyebrow: string;
+  eyebrow?: string;
   description: string;
   compact?: boolean;
 };
@@ -87,7 +87,6 @@ function resolvePageMeta(pathname: string): PageMeta {
   if (/^\/workspaces\/[^/]+\/design-works\/[^/]+$/.test(pathname)) {
     return {
       title: "DesignWork 详情",
-      eyebrow: "Workspace 执行",
       description: "查看状态推进、设计文档产物、校验缺口和审核历史。",
       compact: true,
     };
@@ -96,7 +95,6 @@ function resolvePageMeta(pathname: string): PageMeta {
   if (/^\/workspaces\/[^/]+\/dev-works\/[^/]+$/.test(pathname)) {
     return {
       title: "DevWork 详情",
-      eyebrow: "Workspace 执行",
       description: "查看开发进度、迭代文档、评审记录和闸门动作。",
       compact: true,
     };
@@ -142,7 +140,7 @@ function resolvePageMeta(pathname: string): PageMeta {
     };
   }
 
-  return { title: "", eyebrow: "", description: "" };
+  return { title: "", description: "" };
 }
 
 function ShellNavLink({
@@ -383,14 +381,16 @@ function ShellLayout() {
                     compactMasthead ? "flex flex-wrap items-baseline gap-x-3 gap-y-1" : "",
                   ].join(" ")}
                 >
-                  <p
-                    className={[
-                      "font-medium uppercase text-accent-soft",
-                      compactMasthead ? "text-[10px] tracking-[0.2em]" : "text-[11px] tracking-[0.24em]",
-                    ].join(" ")}
-                  >
-                    {meta.eyebrow}
-                  </p>
+                  {meta.eyebrow ? (
+                    <p
+                      className={[
+                        "font-medium uppercase text-accent-soft",
+                        compactMasthead ? "text-[10px] tracking-[0.2em]" : "text-[11px] tracking-[0.24em]",
+                      ].join(" ")}
+                    >
+                      {meta.eyebrow}
+                    </p>
+                  ) : null}
                   <h1
                     className={[
                       "font-semibold leading-tight text-copy",
