@@ -38,6 +38,28 @@ def test_setup_skill_mandates_auth_env_generation():
     assert "repo-first" in skill.lower()
 
 
+def test_install_and_upgrade_skill_metadata_matches_unified_cli():
+    setup = Path("skills/cooagents-setup/SKILL.md").read_text(encoding="utf-8")
+    upgrade = Path("skills/cooagents-upgrade/SKILL.md").read_text(encoding="utf-8")
+
+    for skill in (setup, upgrade):
+        assert '"requires": { "bins": ["git", "node", "npm", "python"] }' in skill
+        assert '"bins": ["curl"]' not in skill
+
+    assert "required_environment_variables" not in setup
+    assert "required_for" not in upgrade
+    assert "AGENT_API_TOKEN" not in upgrade
+
+
+def test_hermes_reference_does_not_point_to_removed_workflow_skill():
+    reference = Path(
+        "skills/cooagents-setup/references/hermes-integration.md"
+    ).read_text(encoding="utf-8")
+
+    assert "cooagents-workflow" not in reference
+    assert "skills: []" in reference
+
+
 def test_generate_password_hash_script_emits_real_env_values():
     root = Path(__file__).resolve().parents[1]
     script = root / "scripts" / "generate_password_hash.py"

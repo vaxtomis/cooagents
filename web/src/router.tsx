@@ -206,6 +206,14 @@ function ShellLayout() {
   const workspacesQuery = useSWR(["shell-workspaces", "active"], () => listWorkspaces("active"), polling);
   const recentWorkspaces = (workspacesQuery.data ?? []).slice(0, 5);
   const compactMasthead = Boolean(meta.compact);
+  const showMasthead = Boolean(meta.title);
+  const mobileNav = (
+    <nav className="flex gap-2 overflow-x-auto pb-1 md:hidden">
+      {[...primaryNavItems, ...operationsNavItems].map((item) => (
+        <ShellNavLink key={item.to} compact item={item} />
+      ))}
+    </nav>
+  );
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -363,35 +371,35 @@ function ShellLayout() {
         </aside>
 
         <div className={`flex min-h-[calc(100vh-1.5rem)] min-w-0 flex-1 flex-col ${compactMasthead ? "gap-3" : "gap-4"}`}>
-          <header
-            className={[
-              "relative overflow-hidden rounded-[30px] border border-border-strong bg-panel/95 px-4 shadow-shell",
-              compactMasthead ? "py-3 md:px-4" : "py-4 md:px-5",
-            ].join(" ")}
-            data-console-chrome="masthead"
-          >
-            <div className="pointer-events-none absolute inset-[1px] rounded-[29px] border border-white/4" />
-            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.8),transparent)]" />
+          {showMasthead ? (
+            <header
+              className={[
+                "relative overflow-hidden rounded-[30px] border border-border-strong bg-panel/95 px-4 shadow-shell",
+                compactMasthead ? "py-3 md:px-4" : "py-4 md:px-5",
+              ].join(" ")}
+              data-console-chrome="masthead"
+            >
+              <div className="pointer-events-none absolute inset-[1px] rounded-[29px] border border-white/4" />
+              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(169,112,45,0.8),transparent)]" />
 
-            <div className={`relative flex flex-col ${compactMasthead ? "gap-2" : "gap-3"}`}>
-              <div className="flex items-start justify-between gap-4">
-                <div
-                  className={[
-                    "min-w-0",
-                    compactMasthead ? "flex flex-wrap items-baseline gap-x-3 gap-y-1" : "",
-                  ].join(" ")}
-                >
-                  {meta.eyebrow ? (
-                    <p
-                      className={[
-                        "font-medium uppercase text-accent-soft",
-                        compactMasthead ? "text-[10px] tracking-[0.2em]" : "text-[11px] tracking-[0.24em]",
-                      ].join(" ")}
-                    >
-                      {meta.eyebrow}
-                    </p>
-                  ) : null}
-                  {meta.title ? (
+              <div className={`relative flex flex-col ${compactMasthead ? "gap-2" : "gap-3"}`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div
+                    className={[
+                      "min-w-0",
+                      compactMasthead ? "flex flex-wrap items-baseline gap-x-3 gap-y-1" : "",
+                    ].join(" ")}
+                  >
+                    {meta.eyebrow ? (
+                      <p
+                        className={[
+                          "font-medium uppercase text-accent-soft",
+                          compactMasthead ? "text-[10px] tracking-[0.2em]" : "text-[11px] tracking-[0.24em]",
+                        ].join(" ")}
+                      >
+                        {meta.eyebrow}
+                      </p>
+                    ) : null}
                     <h1
                       className={[
                         "font-semibold leading-tight text-copy",
@@ -402,31 +410,29 @@ function ShellLayout() {
                     >
                       {meta.title}
                     </h1>
-                  ) : null}
-                  <p
-                    className={
-                      compactMasthead
-                        ? "basis-full text-xs leading-snug text-muted md:basis-auto"
-                        : "mt-1 max-w-5xl text-sm leading-relaxed text-muted"
-                    }
-                  >
-                    {meta.description}
-                  </p>
+                    <p
+                      className={
+                        compactMasthead
+                          ? "basis-full text-xs leading-snug text-muted md:basis-auto"
+                          : "mt-1 max-w-5xl text-sm leading-relaxed text-muted"
+                      }
+                    >
+                      {meta.description}
+                    </p>
+                  </div>
+
+                  <div className="hidden shrink-0 items-center gap-2 rounded-[14px] border border-border bg-panel-deep/76 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-muted md:flex">
+                    <span className="size-1.5 rounded-full bg-success ring-2 ring-black/20" />
+                    实时
+                  </div>
                 </div>
 
-                <div className="hidden shrink-0 items-center gap-2 rounded-[14px] border border-border bg-panel-deep/76 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-muted md:flex">
-                  <span className="size-1.5 rounded-full bg-success ring-2 ring-black/20" />
-                  实时
-                </div>
+                {mobileNav}
               </div>
-
-              <nav className="flex gap-2 overflow-x-auto pb-1 md:hidden">
-                {[...primaryNavItems, ...operationsNavItems].map((item) => (
-                  <ShellNavLink key={item.to} compact item={item} />
-                ))}
-              </nav>
-            </div>
-          </header>
+            </header>
+          ) : (
+            mobileNav
+          )}
 
           <main className="flex-1">
             <Outlet />

@@ -2,18 +2,13 @@
 name: cooagents-setup
 description: Install and start cooagents from a cloned repo by calling the unified deployment CLI. Use when the user wants setup, install, bootstrap, or first start.
 user-invocable: true
-required_environment_variables:
-  - name: AGENT_API_TOKEN
-    prompt: "Optional pre-existing cooagents service token"
-    help: "Leave empty on first install. The setup command will generate and write it into .env when needed."
-    optional: true
 metadata:
   {
     "openclaw":
       {
         "emoji": "setup",
         "always": false,
-        "requires": { "bins": ["curl"] }
+        "requires": { "bins": ["git", "node", "npm", "python"] }
       },
     "hermes":
       {
@@ -69,7 +64,7 @@ Use `runtime=openclaw`, `runtime=hermes`, or `runtime=both` only when the user e
 
 - dependency install and web build
 - database initialization
-- auth env generation and `.env` updates
+- auth env generation and `.env` updates, including `AGENT_API_TOKEN`
 - service start/restart
 - health and dashboard validation
 - optional OpenClaw/Hermes local integration

@@ -706,7 +706,7 @@ def integrate_hermes(repo_root: Path, *, agent_api_token: str, restart_service_a
     if not isinstance(webhook_cfg, dict):
         raise DeploymentError("settings.hermes.webhook must be a mapping")
     webhook_cfg["enabled"] = True
-    webhook_cfg["url"] = "http://127.0.0.1:8644/webhooks/cooagents"
+    webhook_cfg["url"] = "http://127.0.0.1:8644/webhook/cooagents"
     webhook_cfg["events"] = [
         "gate.waiting",
         "run.completed",

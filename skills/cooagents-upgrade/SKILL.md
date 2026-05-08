@@ -2,18 +2,13 @@
 name: cooagents-upgrade
 description: Upgrade an existing cooagents repo by calling the unified deployment CLI. Use when the user wants upgrade, update, or repair after changing repo contents.
 user-invocable: true
-required_environment_variables:
-  - name: AGENT_API_TOKEN
-    prompt: "Existing cooagents service token"
-    help: "Used only when the operator wants to inspect live API state separately. The upgrade command itself does not require interactive login."
-    required_for: "cooagents-upgrade"
 metadata:
   {
     "openclaw":
       {
         "emoji": "upgrade",
         "always": false,
-        "requires": { "bins": ["curl"] }
+        "requires": { "bins": ["git", "node", "npm", "python"] }
       },
     "hermes":
       {
@@ -32,6 +27,8 @@ Do not manually replay the old multi-stage shell flow when the unified deploymen
 Collect:
 
 - `repo_path`: local path to the existing cooagents repo
+- `branch`: optional, default `main`
+- `skip_pull`: optional, use only when the repo was already updated locally or pulling is intentionally unsafe
 
 If the repo path is missing, ask for it.
 
@@ -40,12 +37,14 @@ If the repo path is missing, ask for it.
 Run the unified upgrade command:
 
 ```bash
-exec cd {repo_path} && python scripts/deploy.py upgrade
+exec cd {repo_path} && python scripts/deploy.py upgrade --branch {branch}
 ```
+
+If `skip_pull=true`, add `--skip-pull`.
 
 The CLI is responsible for:
 
-- optional `git pull origin main`
+- optional `git pull origin {branch}`
 - dependency refresh
 - web rebuild
 - database re-initialization / migration path
