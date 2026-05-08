@@ -60,6 +60,7 @@ const baseDesignWork: DesignWork = {
   mode: "new",
   current_state: "LLM_GENERATE",
   loop: 2,
+  max_loops: 4,
   missing_sections: ["architecture", "data-flow"],
   output_design_doc_id: null,
   escalated_at: null,
@@ -84,12 +85,16 @@ describe("DesignWorkPage", () => {
       ...baseDesignWork,
       current_state: "ESCALATED",
       escalation_reason: "post-validate failed",
+      max_loops: 2,
     });
     vi.mocked(listReviews).mockResolvedValue([]);
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     renderPage();
 
     expect(await screen.findByText(/DesignWork 已升级/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "DesignWork 循环 2/2，已达最大次数" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("后校验")).toBeInTheDocument();
     expect(screen.getByText("architecture")).toBeInTheDocument();
     expect(screen.getByText(/post-validate failed/)).toBeInTheDocument();
@@ -104,6 +109,7 @@ describe("DesignWorkPage", () => {
       ...baseDesignWork,
       current_state: "ESCALATED",
       escalation_reason: "post-validate failed",
+      max_loops: 2,
     });
     vi.mocked(getDesignWorkRetrySource).mockResolvedValue({
       title: "Feature",

@@ -194,10 +194,35 @@ async def test_create_201_and_runs_to_completion(client):
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["id"].startswith("desw-")
+    assert body["max_loops"] == 3
     assert r.headers["Location"] == f"/api/v1/design-works/{body['id']}"
 
     final = await _wait_for_terminal(client, body["id"])
     assert final["current_state"] == "COMPLETED"
+    assert final["max_loops"] == 3
+
+
+async def test_create_projects_max_loops_override(client):
+    ws = await _create_workspace(client, slug="loop-override")
+    r = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Loop",
+            "slug": "loop",
+            "user_input": "some substantial user input text",
+            "mode": "new",
+            "needs_frontend_mockup": False,
+            "max_loops": 1,
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["max_loops"] == 1
+
+    projected = await client.get(f"/api/v1/design-works/{body['id']}")
+    assert projected.status_code == 200
+    assert projected.json()["max_loops"] == 1
 
 
 async def test_list_requires_workspace_id(client):

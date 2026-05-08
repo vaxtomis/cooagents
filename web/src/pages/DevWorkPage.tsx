@@ -9,6 +9,7 @@ import { listReviews } from "../api/reviews";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
 import { DevWorkStepProgress } from "../components/DevWorkStepProgress";
 import { GateActionPanel } from "../components/GateActionPanel";
+import { LoopSegmentRing } from "../components/LoopSegmentRing";
 import { MarkdownPanel } from "../components/MarkdownPanel";
 import { RepoPushStatusGrid } from "../components/RepoPushStatusGrid";
 import { ReviewRow } from "../components/ReviewHistory";
@@ -232,6 +233,13 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const escalated = devWork.current_step === "ESCALATED";
   const cancelled = devWork.current_step === "CANCELLED";
   const terminal = escalated || cancelled || devWork.current_step === "COMPLETED";
+  const maxRounds = devWork.max_rounds ?? Math.max(devWork.iteration_rounds, 1);
+  const activeRoundValue = devWork.is_running && !terminal
+    ? Math.min(
+        devWork.progress?.round ?? devWork.iteration_rounds + 1,
+        Math.max(maxRounds, 1),
+      )
+    : devWork.iteration_rounds;
   const activityEvents = workspaceEventsQuery.data?.events ?? [];
 
   // Missing gate is an expected "no exit gate right now" state, not an error.
@@ -298,6 +306,16 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
         density="compact"
         kicker="开发工作"
         title={devWork.id}
+        titleAccessory={
+          <LoopSegmentRing
+            active={devWork.is_running && !terminal}
+            completed={devWork.iteration_rounds}
+            label="DevWork 轮次"
+            max={maxRounds}
+            maxReached={devWork.iteration_rounds >= maxRounds}
+            value={activeRoundValue}
+          />
+        }
       >
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge status={devWork.current_step} />
@@ -305,9 +323,6 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
             <StatusBadge status="running" label="自动推进中" />
           ) : null}
           <span className="font-mono text-xs text-muted">文档：{devWork.design_doc_id}</span>
-          <span className="text-sm text-muted">
-            轮次 {devWork.iteration_rounds}
-          </span>
           <span className="text-sm text-muted">
             更新时间 {formatDateTime(devWork.updated_at)}
           </span>

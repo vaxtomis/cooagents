@@ -100,6 +100,7 @@ export interface DesignWork {
   mode: DesignWorkMode;
   current_state: DesignWorkState;
   loop: number;
+  max_loops: number;
   missing_sections: string[] | null;
   output_design_doc_id: string | null;
   escalated_at: string | null;
@@ -152,6 +153,7 @@ export interface DevWork {
   design_doc_id: string;
   current_step: DevWorkStep;
   iteration_rounds: number;
+  max_rounds: number;
   first_pass_success: boolean | null;
   last_score: number | null;
   last_problem_category: ProblemCategory | null;

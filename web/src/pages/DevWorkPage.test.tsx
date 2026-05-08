@@ -44,6 +44,7 @@ const devWork: DevWork = {
   design_doc_id: "doc-1",
   current_step: "STEP5_REVIEW",
   iteration_rounds: 2,
+  max_rounds: 5,
   first_pass_success: null,
   last_score: 85,
   last_problem_category: null,
@@ -92,6 +93,7 @@ describe("DevWorkPage", () => {
     renderPage();
 
     await waitFor(() => expect(getDevWork).toHaveBeenCalled());
+    expect(screen.getByRole("img", { name: "DevWork 轮次 2/5，已记录" })).toBeInTheDocument();
 
     // Switch to the gate tab.
     fireEvent.click(screen.getByRole("tab", { name: "闸门" }));

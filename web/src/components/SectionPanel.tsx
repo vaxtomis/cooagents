@@ -5,6 +5,7 @@ interface SectionPanelProps {
   kicker: string;
   children: ReactNode;
   actions?: ReactNode;
+  titleAccessory?: ReactNode;
   density?: "default" | "compact";
 }
 
@@ -13,6 +14,7 @@ export function SectionPanel({
   kicker,
   children,
   actions,
+  titleAccessory,
   density = "default",
 }: SectionPanelProps) {
   const compact = density === "compact";
@@ -34,7 +36,7 @@ export function SectionPanel({
           compact ? "gap-2" : "gap-3",
         ].join(" ")}
       >
-        <div>
+        <div className={["relative min-w-0", titleAccessory ? "pr-12" : ""].join(" ")}>
           <p
             className={[
               "font-medium uppercase text-accent-soft",
@@ -51,6 +53,11 @@ export function SectionPanel({
           >
             {title}
           </h2>
+          {titleAccessory ? (
+            <div className="absolute right-0 top-1/2 -translate-y-1/2">
+              {titleAccessory}
+            </div>
+          ) : null}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>

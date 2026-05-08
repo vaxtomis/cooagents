@@ -297,12 +297,25 @@ async def test_create_201_returns_repo_refs(client):
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["id"].startswith("dev-")
+    assert body["max_rounds"] == 5
     assert r.headers["Location"] == f"/api/v1/dev-works/{body['id']}"
     refs = body["repo_refs"]
     assert len(refs) == 1
     assert refs[0]["repo_id"] == app.state._repo_id
     assert refs[0]["mount_name"] == "backend"
     assert refs[0]["devwork_branch"].startswith("devwork/")
+
+
+async def test_create_projects_max_rounds_override(client):
+    app = client._app
+    r = await client.post("/api/v1/dev-works", json=_payload(app, max_rounds=2))
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["max_rounds"] == 2
+
+    projected = await client.get(f"/api/v1/dev-works/{body['id']}")
+    assert projected.status_code == 200
+    assert projected.json()["max_rounds"] == 2
 
 
 async def test_list_requires_workspace_id(client):

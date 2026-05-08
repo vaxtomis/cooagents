@@ -151,6 +151,7 @@ def _row_to_progress(
     repos: list[WorkerRepoHandoff] | None = None,
     *,
     is_running: bool = False,
+    max_rounds: int | None = None,
 ) -> DevWorkProgress:
     fps = row.get("first_pass_success")
     return DevWorkProgress(
@@ -159,6 +160,7 @@ def _row_to_progress(
         design_doc_id=row["design_doc_id"],
         current_step=row["current_step"],
         iteration_rounds=row["iteration_rounds"],
+        max_rounds=max_rounds if max_rounds is not None else 0,
         first_pass_success=bool(fps) if fps is not None else None,
         last_score=row.get("last_score"),
         last_problem_category=row.get("last_problem_category"),
@@ -227,7 +229,13 @@ async def create_dev_work(
     state_repo = request.app.state.dev_work_repo_state
     repos = await _load_worker_repos(state_repo, dw["id"])
     refs = [_handoff_to_repo_ref(h) for h in repos]
-    return _row_to_progress(dw, refs, repos, is_running=sm.is_running(dw["id"]))
+    return _row_to_progress(
+        dw,
+        refs,
+        repos,
+        is_running=sm.is_running(dw["id"]),
+        max_rounds=sm._resolve_max_rounds(dw),
+    )
 
 
 @router.get("/dev-works")
@@ -284,6 +292,7 @@ async def list_dev_works(
                     [_handoff_to_repo_ref(h) for h in repos_by_id.get(r["id"], [])],
                     repos_by_id.get(r["id"], []),
                     is_running=sm.is_running(r["id"]),
+                    max_rounds=sm._resolve_max_rounds(r),
                 )
                 for r in rows
             ],
@@ -303,6 +312,7 @@ async def list_dev_works(
             [_handoff_to_repo_ref(h) for h in repos_by_id.get(r["id"], [])],
             repos_by_id.get(r["id"], []),
             is_running=sm.is_running(r["id"]),
+            max_rounds=sm._resolve_max_rounds(r),
         )
         for r in rows
     ]
@@ -318,7 +328,13 @@ async def get_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
     sm = request.app.state.dev_work_sm
-    return _row_to_progress(row, refs, repos, is_running=sm.is_running(dev_id))
+    return _row_to_progress(
+        row,
+        refs,
+        repos,
+        is_running=sm.is_running(dev_id),
+        max_rounds=sm._resolve_max_rounds(row),
+    )
 
 
 @router.post("/dev-works/{dev_id}/tick")
@@ -329,7 +345,13 @@ async def tick_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
     dw = await sm.tick(dev_id)
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
-    return _row_to_progress(dw, refs, repos, is_running=sm.is_running(dev_id))
+    return _row_to_progress(
+        dw,
+        refs,
+        repos,
+        is_running=sm.is_running(dev_id),
+        max_rounds=sm._resolve_max_rounds(dw),
+    )
 
 
 @router.post("/dev-works/{dev_id}/cancel", status_code=204)
@@ -374,4 +396,10 @@ async def update_repo_push_state(
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
     sm = request.app.state.dev_work_sm
-    return _row_to_progress(dw, refs, repos, is_running=sm.is_running(dev_id))
+    return _row_to_progress(
+        dw,
+        refs,
+        repos,
+        is_running=sm.is_running(dev_id),
+        max_rounds=sm._resolve_max_rounds(dw),
+    )

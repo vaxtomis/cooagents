@@ -13,6 +13,7 @@ import { listReviews } from "../api/reviews";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
 import { AppDialog } from "../components/AppDialog";
 import { DesignWorkStateProgress } from "../components/DesignWorkStateProgress";
+import { LoopSegmentRing } from "../components/LoopSegmentRing";
 import { MarkdownPanel } from "../components/MarkdownPanel";
 import { RepoRefsEditor, type RepoRefsEditorRow } from "../components/RepoRefsEditor";
 import { ReviewRow } from "../components/ReviewHistory";
@@ -346,6 +347,10 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
     return <div className="h-[240px] animate-pulse rounded-[32px] border border-border bg-panel" />;
   }
 
+  const maxLoops = designWork.max_loops ?? Math.max(designWork.loop, 1);
+  const activeLoopValue = designWork.is_running && !terminal
+    ? Math.min(designWork.loop + 1, Math.max(maxLoops, 1))
+    : designWork.loop;
   const activityEvents = workspaceEventsQuery.data?.events ?? [];
 
   async function cancelWork() {
@@ -425,13 +430,22 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
         density="compact"
         kicker="设计工作"
         title={designWork.title ?? designWork.sub_slug ?? designWork.id}
+        titleAccessory={
+          <LoopSegmentRing
+            active={designWork.is_running && !terminal}
+            completed={designWork.loop}
+            label="DesignWork 循环"
+            max={maxLoops}
+            maxReached={designWork.loop >= maxLoops}
+            value={activeLoopValue}
+          />
+        }
       >
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge status={designWork.current_state} />
           {designWork.is_running ? (
             <StatusBadge status="running" label="自动推进中" />
           ) : null}
-          <span className="text-sm text-muted">循环 {designWork.loop}</span>
           <span className="text-sm text-muted">模式 {designWork.mode}</span>
           <span className="text-sm text-muted">
             更新时间 {formatDateTime(designWork.updated_at)}

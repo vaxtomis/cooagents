@@ -89,15 +89,13 @@ describe("App shell", () => {
     detail.unmount();
 
     const dwDetail = renderAt("/workspaces/ws-1/design-works/dw-1");
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "DesignWork 详情" })).toBeInTheDocument(),
-    );
+    expect(await screen.findByText("design work page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "DesignWork 详情" })).not.toBeInTheDocument();
     dwDetail.unmount();
 
     const dvDetail = renderAt("/workspaces/ws-1/dev-works/dv-1");
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "DevWork 详情" })).toBeInTheDocument(),
-    );
+    expect(await screen.findByText("dev work page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "DevWork 详情" })).not.toBeInTheDocument();
     dvDetail.unmount();
 
     const hosts = renderAt("/agent-hosts");

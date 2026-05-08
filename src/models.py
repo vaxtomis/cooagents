@@ -385,6 +385,7 @@ class DesignWorkProgress(BaseModel):
     mode: DesignWorkMode
     current_state: DesignWorkState
     loop: int
+    max_loops: int = 0
     missing_sections: list[str] | None = None
     output_design_doc_id: str | None = None
     escalated_at: str | None = None
@@ -464,6 +465,7 @@ class DevWorkProgress(BaseModel):
     design_doc_id: str
     current_step: DevWorkStep
     iteration_rounds: int
+    max_rounds: int = 0
     first_pass_success: bool | None = None
     last_score: int | None = None
     last_problem_category: ProblemCategory | None = None

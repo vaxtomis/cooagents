@@ -99,6 +99,7 @@ def _row_to_progress(
     repo_refs: list[DesignRepoRefView] | None = None,
     *,
     is_running: bool = False,
+    max_loops: int | None = None,
 ) -> DesignWorkProgress:
     missing = None
     if row.get("missing_sections_json"):
@@ -114,6 +115,7 @@ def _row_to_progress(
         mode=row["mode"],
         current_state=row["current_state"],
         loop=row["loop"],
+        max_loops=max_loops if max_loops is not None else 0,
         missing_sections=missing,
         output_design_doc_id=row.get("output_design_doc_id"),
         escalated_at=row.get("escalated_at"),
@@ -189,7 +191,12 @@ async def create_design_work(
     sm.schedule_driver(dw["id"])
     response.headers["Location"] = f"/api/v1/design-works/{dw['id']}"
     refs = await _load_repo_refs(request.app.state.db, dw["id"])
-    return _row_to_progress(dw, refs, is_running=sm.is_running(dw["id"]))
+    return _row_to_progress(
+        dw,
+        refs,
+        is_running=sm.is_running(dw["id"]),
+        max_loops=sm._resolve_max_loops(dw),
+    )
 
 
 @router.get("/design-works")
@@ -253,6 +260,7 @@ async def list_design_works(
                     r,
                     refs_by_id.get(r["id"], []),
                     is_running=sm.is_running(r["id"]),
+                    max_loops=sm._resolve_max_loops(r),
                 )
                 for r in rows
             ],
@@ -270,6 +278,7 @@ async def list_design_works(
             r,
             refs_by_id.get(r["id"], []),
             is_running=sm.is_running(r["id"]),
+            max_loops=sm._resolve_max_loops(r),
         )
         for r in rows
     ]
@@ -283,7 +292,12 @@ async def get_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
         raise NotFoundError(f"design_work {dw_id!r} not found")
     refs = await _load_repo_refs(db, dw_id)
     sm = request.app.state.design_work_sm
-    return _row_to_progress(row, refs, is_running=sm.is_running(dw_id))
+    return _row_to_progress(
+        row,
+        refs,
+        is_running=sm.is_running(dw_id),
+        max_loops=sm._resolve_max_loops(row),
+    )
 
 
 @router.post("/design-works/{dw_id}/tick")
@@ -292,7 +306,12 @@ async def tick_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
     sm = request.app.state.design_work_sm
     dw = await sm.tick(dw_id)
     refs = await _load_repo_refs(request.app.state.db, dw_id)
-    return _row_to_progress(dw, refs, is_running=sm.is_running(dw_id))
+    return _row_to_progress(
+        dw,
+        refs,
+        is_running=sm.is_running(dw_id),
+        max_loops=sm._resolve_max_loops(dw),
+    )
 
 
 @router.get("/design-works/{dw_id}/retry-source")
@@ -389,6 +408,7 @@ async def retry_design_work(
         created,
         created_refs,
         is_running=sm.is_running(created["id"]),
+        max_loops=sm._resolve_max_loops(created),
     )
 
 

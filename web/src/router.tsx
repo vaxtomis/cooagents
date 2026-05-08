@@ -86,7 +86,7 @@ function resolvePageMeta(pathname: string): PageMeta {
 
   if (/^\/workspaces\/[^/]+\/design-works\/[^/]+$/.test(pathname)) {
     return {
-      title: "DesignWork 详情",
+      title: "",
       description: "查看状态推进、设计文档产物、校验缺口和审核历史。",
       compact: true,
     };
@@ -94,7 +94,7 @@ function resolvePageMeta(pathname: string): PageMeta {
 
   if (/^\/workspaces\/[^/]+\/dev-works\/[^/]+$/.test(pathname)) {
     return {
-      title: "DevWork 详情",
+      title: "",
       description: "查看开发进度、迭代文档、评审记录和闸门动作。",
       compact: true,
     };
@@ -391,16 +391,18 @@ function ShellLayout() {
                       {meta.eyebrow}
                     </p>
                   ) : null}
-                  <h1
-                    className={[
-                      "font-semibold leading-tight text-copy",
-                      compactMasthead
-                        ? "text-[1.25rem] md:text-[1.45rem]"
-                        : "mt-1 text-[1.55rem] md:text-[1.9rem]",
-                    ].join(" ")}
-                  >
-                    {meta.title}
-                  </h1>
+                  {meta.title ? (
+                    <h1
+                      className={[
+                        "font-semibold leading-tight text-copy",
+                        compactMasthead
+                          ? "text-[1.25rem] md:text-[1.45rem]"
+                          : "mt-1 text-[1.55rem] md:text-[1.9rem]",
+                      ].join(" ")}
+                    >
+                      {meta.title}
+                    </h1>
+                  ) : null}
                   <p
                     className={
                       compactMasthead
