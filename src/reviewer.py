@@ -31,6 +31,13 @@ _FENCE_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 # out in ``_NEXT_ROUND_HINTS_GUIDE`` in dev_prompt_composer — extending
 # either side requires updating both in lockstep.
 _NEXT_ROUND_HINT_KINDS = ("missing_feature", "optimization")
+_PLAN_VERIFICATION_STATUSES = (
+    "done",
+    "deferred",
+    "blocked",
+    "failed",
+    "unverified",
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +46,7 @@ class ReviewOutcome:
     issues: list[dict]
     problem_category: ProblemCategory | None
     next_round_hints: list[dict] = field(default_factory=list)
+    plan_verification: list[dict] = field(default_factory=list)
 
 
 def _coerce(payload: dict) -> ReviewOutcome:
@@ -98,11 +106,44 @@ def _coerce(payload: dict) -> ReviewOutcome:
             "review output 'next_round_hints' must be a list"
         )
 
+    raw_plan = payload.get("plan_verification")
+    if raw_plan is None:
+        plan_verification: list[dict] = []
+    elif isinstance(raw_plan, list):
+        plan_verification = []
+        for item in raw_plan:
+            if not isinstance(item, dict):
+                raise BadRequestError(
+                    "review output 'plan_verification' items must be objects"
+                )
+            plan_id = item.get("id")
+            if not isinstance(plan_id, str) or not plan_id.strip():
+                raise BadRequestError(
+                    "review output 'plan_verification[].id' must be a "
+                    "non-empty string"
+                )
+            status = item.get("status")
+            if status not in _PLAN_VERIFICATION_STATUSES:
+                raise BadRequestError(
+                    "review output 'plan_verification[].status' must be one "
+                    f"of {list(_PLAN_VERIFICATION_STATUSES)}; got {status!r}"
+                )
+            if not isinstance(item.get("verified"), bool):
+                raise BadRequestError(
+                    "review output 'plan_verification[].verified' must be a bool"
+                )
+            plan_verification.append(item)
+    else:
+        raise BadRequestError(
+            "review output 'plan_verification' must be a list"
+        )
+
     return ReviewOutcome(
         score=score,
         issues=issues,
         problem_category=category,
         next_round_hints=hints,
+        plan_verification=plan_verification,
     )
 
 

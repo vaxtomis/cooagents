@@ -184,3 +184,60 @@ def test_parse_review_allows_omitted_hint_kind():
     assert len(out.next_round_hints) == 2
     assert "kind" not in out.next_round_hints[0]
     assert out.next_round_hints[1]["kind"] == ""
+
+
+def test_parse_review_extracts_plan_verification():
+    out = parse_review_output(json.dumps({
+        "score": 90,
+        "issues": [],
+        "plan_verification": [
+            {"id": "DW-01", "status": "done", "verified": True},
+            {"id": "DW-02", "status": "deferred", "verified": True},
+        ],
+        "problem_category": None,
+    }))
+    assert out.plan_verification == [
+        {"id": "DW-01", "status": "done", "verified": True},
+        {"id": "DW-02", "status": "deferred", "verified": True},
+    ]
+
+
+def test_parse_review_missing_plan_verification_defaults_empty():
+    out = parse_review_output(json.dumps({
+        "score": 90, "issues": [], "problem_category": None,
+    }))
+    assert out.plan_verification == []
+
+
+def test_parse_review_rejects_non_list_plan_verification():
+    with pytest.raises(BadRequestError, match="plan_verification"):
+        parse_review_output(json.dumps({
+            "score": 90,
+            "issues": [],
+            "plan_verification": "DW-01",
+            "problem_category": None,
+        }))
+
+
+def test_parse_review_rejects_invalid_plan_verification_status():
+    with pytest.raises(BadRequestError, match="plan_verification"):
+        parse_review_output(json.dumps({
+            "score": 90,
+            "issues": [],
+            "plan_verification": [
+                {"id": "DW-01", "status": "skipped", "verified": True},
+            ],
+            "problem_category": None,
+        }))
+
+
+def test_parse_review_rejects_non_bool_plan_verification_verified():
+    with pytest.raises(BadRequestError, match="plan_verification"):
+        parse_review_output(json.dumps({
+            "score": 90,
+            "issues": [],
+            "plan_verification": [
+                {"id": "DW-01", "status": "done", "verified": "true"},
+            ],
+            "problem_category": None,
+        }))

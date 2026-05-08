@@ -9,8 +9,8 @@ $retry_feedback
 ## 必读顺序
 
 1. **设计文档**：`$design_doc_path` —— 抽取 `## 打分 rubric` 段
-2. **本轮迭代设计**：`$iteration_note_path` —— Step2 写的「本轮目标 / 开发计划 / 用例清单」
-3. **Step4 自审 findings**：`$step4_findings_path` —— Step4 写的本轮 lint/typecheck/unittest 结果
+2. **本轮迭代设计**：`$iteration_note_path` —— Step2 写的「本轮目标 / 开发计划 / 用例清单」，其中「开发计划」应是带稳定 ID 的 checkbox checklist
+3. **Step4 自审 findings**：`$step4_findings_path` —— Step4 写的本轮 lint/typecheck/unittest 结果与 `plan_execution`
 4. **Step3 上下文与疑点**：`$context_path` —— 校验 Step4 是否处理了 Step3 raised 的疑点/风险
 
 ## 多仓改动表
@@ -27,6 +27,8 @@ $aggregation_rule
 
 $boundary_check
 
+$plan_verification_guide
+
 $next_round_hints_guide
 
 ## 输出要求
@@ -42,6 +44,7 @@ $next_round_hints_guide
     {"mount": "<mount_name>", "dimension": "<rubric维度>", "severity": "<info|warn|error>", "message": "<具体问题>"},
     {"kind": "boundary_violation", "step": "step4", "severity": "<info|warn|error>", "message": "<越界事实>"}
   ],
+  "plan_verification": [{"id": "DW-01", "status": "done", "verified": true, "evidence": ["path/to/file.ts:10"]}],
   "next_round_hints": [
     {"kind": "missing_feature", "mount": "<mount_name>", "severity": "info", "message": "<未实现的功能 + 可选代码引用>"},
     {"kind": "optimization", "mount": "<mount_name>", "severity": "info", "message": "<可优化位置 + 代码引用>"}
@@ -54,6 +57,7 @@ $next_round_hints_guide
 
 - `score`：整数 0-100；多仓时为整体打分（不是各仓加权平均）。
 - `issues`：数组；常规 rubric 问题带 `mount` / `dimension`（`mount` 可选）；越界类问题带 `kind="boundary_violation"` 与 `step` 字段；`score >= $rubric_threshold` 且未发现越界时可以为空数组 `[]`。
+- `plan_verification`：数组；核验 Step4 `plan_execution` 与 checklist、git diff、测试是否一致。每项必须带 `id/status/verified`；`status` 仅可为 `"done"`、`"deferred"`、`"blocked"`、`"failed"`、`"unverified"`。只有证据充分的项才能写 `{"status":"done","verified":true}`；不要改迭代设计文件。
 - `next_round_hints`：数组；面向**下一轮**的提示，每条带 `kind` 与 `message`；详见上方「下一轮提示」段；本轮无缺失功能且无优化项时为空数组 `[]`。**不要**与 `issues` 重复内容。
 - `problem_category`：枚举，**仅可取** `"req_gap"`、`"impl_gap"`、`"design_hollow"` 之一，或 `null`。按上面「打分聚合规则」选取；`null` 仅当 `score >= $rubric_threshold` 时使用。
 

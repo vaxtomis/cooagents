@@ -1388,7 +1388,14 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 round_n,
                 outcome.score,
                 json.dumps(outcome.issues, ensure_ascii=False),
-                None,
+                (
+                    json.dumps(
+                        outcome.plan_verification,
+                        ensure_ascii=False,
+                    )
+                    if outcome.plan_verification
+                    else None
+                ),
                 (
                     json.dumps(outcome.next_round_hints, ensure_ascii=False)
                     if outcome.next_round_hints

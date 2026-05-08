@@ -66,7 +66,8 @@ _STEP_WALL_STEP2 = (
     "\n"
     "**单一职责**：基于设计文档 + 上轮反馈，决定「做什么、怎么验」。\n"
     "**唯一输出**：在 iteration-round-N.md 末尾追加三段 H2"
-    "（本轮目标 / 开发计划 / 用例清单）。\n"
+    "（本轮目标 / 开发计划 / 用例清单），其中开发计划必须是带稳定 "
+    "DW-xx ID 的 checkbox checklist。\n"
     "**明确禁止**：不扫代码、不写代码、不决定文件级实现路径、"
     "不修改 front-matter、不写入其它文件。\n"
     "**越界即失败**：违反任何上述禁止，本轮 Step5 将以 "
@@ -96,8 +97,10 @@ _STEP_WALL_STEP4 = (
     "**单一职责**：基于规划+上下文，写代码 + 跑既有 lint/typecheck/"
     "unit + 自审。\n"
     "**唯一输出**：worktree 源码改动（保留为未提交变更）+ "
-    "step4-findings-roundN.json。\n"
-    "**明确禁止**：不修改 iteration_note 文件、不修改 ctx 文件、"
+    "step4-findings-roundN.json，其中 `plan_execution` 申报已执行、"
+    "延期或阻塞的计划项。\n"
+    "**明确禁止**：不修改 iteration_note 文件、不勾选开发计划 checkbox、"
+    "不修改 ctx 文件、"
     "不重新规划、不 `git commit` / `git push`、不写入 `.coop/` 之外的诊断文件。\n"
     "**越界即失败**：违反任何上述禁止，本轮 Step5 将以 "
     "`kind=\"boundary_violation\"` 记录并影响打分。"
@@ -131,7 +134,8 @@ _BOUNDARY_CHECK_RUBRIC = (
     "（浓缩上下文 / 疑点风险）？是否拷贝了整段源代码而非摘要？"
     "是否反向修改了设计文档或 iteration-round-N.md？\n"
     "3. **Step4 是否越界**：iteration-round-N.md / ctx-round-N.md "
-    "是否被 Step4 改动？是否产生了 `.coop/` 之外的诊断文件？"
+    "是否被 Step4 改动（包括擅自勾选开发计划 checkbox）？"
+    "是否产生了 `.coop/` 之外的诊断文件？"
     "是否擅自 `git commit`？\n"
     "\n"
     "对每一条**越界**事实，向 `issues` 数组追加一条对象，**必须**带 "
@@ -145,6 +149,17 @@ _BOUNDARY_CHECK_RUBRIC = (
     "```\n"
     "\n"
     "未发现越界时，**不要**追加占位条目；越界检查仅在确实命中时报告。"
+)
+
+_PLAN_VERIFICATION_GUIDE = (
+    "## 计划执行核验（plan_verification）\n"
+    "\n"
+    "对照迭代设计 `## 开发计划`、Step4 `plan_execution`、git diff 与"
+    "测试结果，输出顶层数组 `plan_verification`。每项必须带 "
+    "`id/status/verified`；`status` 仅可取 `done/deferred/blocked/"
+    "failed/unverified`。只有证据充分时才写 `status=done, verified=true`。"
+    "不要修改迭代设计文件；状态机会根据审核通过的 `done` 项只回写 "
+    "checkbox。"
 )
 
 # Forward-looking hints written to next_round_hints[] for Round N+1's
@@ -373,6 +388,7 @@ def compose_step5(inputs: Step5Inputs) -> str:
         output_json_path=inputs.output_json_path,
         step_wall=_STEP_WALL_STEP5,
         boundary_check=_BOUNDARY_CHECK_RUBRIC,
+        plan_verification_guide=_PLAN_VERIFICATION_GUIDE,
         next_round_hints_guide=_NEXT_ROUND_HINTS_GUIDE,
         retry_feedback=_render_retry_feedback(inputs.retry_feedback),
     )

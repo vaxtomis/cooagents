@@ -13,6 +13,7 @@ from src.agent_hosts.repo import AgentHostRepo
 from src.database import Database
 from src.design_doc_manager import DesignDocManager
 from src.dev_iteration_note_manager import DevIterationNoteManager
+from src.dev_work_steps import _apply_plan_verification_checkboxes
 from src.dev_work_sm import DevWorkStateMachine
 from src.exceptions import BadRequestError, NotFoundError
 from src.storage import LocalFileStore
@@ -143,7 +144,8 @@ def step2_append_h2(step_tag, round_n, prompt, worktree):
         "\n## 本轮目标\n"
         "\n实现登录闭环。\n"
         "\n## 开发计划\n"
-        "\n1. 加表单\n2. 加校验\n"
+        "\n- [ ] DW-01: 加表单\n- [ ] DW-02: 加校验\n"
+        "- [ ] DW-03: 补充失败态\n"
         "\n## 用例清单\n"
         "\n| 用例 | 输入 | 预期 | 对应设计章节 |\n"
         "|---|---|---|---|\n"
@@ -190,7 +192,14 @@ def step4_write_findings(step_tag, round_n, prompt, worktree):
     out = Path(m.group(1))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
-        json.dumps({"pass": True, "findings": []}), encoding="utf-8"
+        json.dumps({
+            "pass": True,
+            "plan_execution": [
+                {"id": "DW-01", "status": "done", "evidence": ["login.py:1"]},
+            ],
+            "findings": [],
+        }),
+        encoding="utf-8",
     )
     return ("ok", 0)
 
@@ -262,6 +271,30 @@ def _step5_writer(payload: dict):
         # Also echo on stdout as a fenced block (reviewer prefers file though).
         return (f"```json\n{json.dumps(payload)}\n```", 0)
     return _w
+
+
+def test_plan_verification_checkbox_patch_only_checks_verified_done_items():
+    body = (
+        "# 迭代设计 — Round 1\n\n"
+        "## 本轮目标\n\n做登录。\n\n"
+        "## 开发计划\n\n"
+        "- [ ] DW-01: 加表单\n"
+        "- [ ] DW-02: 加校验\n"
+        "- [ ] DW-03: 补充失败态\n\n"
+        "## 用例清单\n\n"
+        "- [ ] 非计划 checkbox 不应改变\n"
+    )
+
+    updated = _apply_plan_verification_checkboxes(body, [
+        {"id": "DW-01", "status": "done", "verified": True},
+        {"id": "DW-02", "status": "deferred", "verified": True},
+        {"id": "DW-03", "status": "done", "verified": False},
+    ])
+
+    assert "- [x] DW-01: 加表单" in updated
+    assert "- [ ] DW-02: 加校验" in updated
+    assert "- [ ] DW-03: 补充失败态" in updated
+    assert "- [ ] 非计划 checkbox 不应改变" in updated
 
 
 # ---------------------------------------------------------------------------
@@ -945,6 +978,49 @@ async def test_step5_parse_error_is_visible_in_retry_prompt(env):
     )
     final = await sm.run_to_completion(dw["id"])
     assert final["current_step"] == "COMPLETED"
+
+
+async def test_step5_plan_verification_checks_iteration_plan_items(env):
+    payload = {
+        "score": 90,
+        "issues": [],
+        "plan_verification": [
+            {"id": "DW-01", "status": "done", "verified": True},
+            {"id": "DW-02", "status": "deferred", "verified": True},
+            {"id": "DW-03", "status": "done", "verified": False},
+        ],
+        "problem_category": None,
+    }
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        _step5_writer(payload),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "COMPLETED"
+    note_body = await env["registry"].read_text(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"devworks/{dw['id']}/iteration-round-1.md",
+    )
+    assert "- [x] DW-01: 加表单" in note_body
+    assert "- [ ] DW-02: 加校验" in note_body
+    assert "- [ ] DW-03: 补充失败态" in note_body
+
+    review = await env["db"].fetchone(
+        "SELECT findings_json FROM reviews WHERE dev_work_id=?",
+        (dw["id"],),
+    )
+    assert json.loads(review["findings_json"]) == payload["plan_verification"]
 
 
 async def test_step2_front_matter_not_tampered(env):

@@ -10,6 +10,7 @@ from src.dev_prompt_composer import (
     Step5Inputs,
     _BOUNDARY_CHECK_RUBRIC,
     _NEXT_ROUND_HINTS_GUIDE,
+    _PLAN_VERIFICATION_GUIDE,
     _STEP_WALL_STEP2,
     _STEP_WALL_STEP3,
     _STEP_WALL_STEP4,
@@ -331,6 +332,8 @@ def test_step2_prompt_carries_step_wall():
     assert _STEP_WALL_STEP2 in out
     assert out.index("## 本步职责墙") < out.index("## 必读路径")
     assert "boundary_violation" in out
+    assert "- [ ] DW-01" in out
+    assert "checkbox checklist" in out
 
 
 def test_step3_prompt_carries_step_wall():
@@ -353,8 +356,10 @@ def test_step4_prompt_carries_step_wall():
     ))
     assert _STEP_WALL_STEP4 in out
     assert out.index("## 本步职责墙") < out.index("## 工作树")
-    assert "不修改 iteration_note" in out
+    assert "不勾选开发计划 checkbox" in out
     assert "不修改 ctx 文件" in out
+    assert "plan_execution" in out
+    assert "任务过大" in out
 
 
 def test_step5_prompt_carries_step_wall():
@@ -375,13 +380,24 @@ def test_step5_prompt_carries_boundary_check_rubric():
     assert out.index("## 越界检查") < out.index("## 输出要求")
     assert "\"kind\": \"boundary_violation\"" in out
     assert "\"step\": \"step4\"" in out
+    assert "擅自勾选开发计划 checkbox" in out
+
+
+def test_step5_prompt_carries_plan_verification_guide():
+    out = compose_step5(_step5_minimal())
+    assert _PLAN_VERIFICATION_GUIDE in out
+    assert out.index("## 计划执行核验") > out.index("## 越界检查")
+    assert out.index("## 计划执行核验") < out.index("## 下一轮提示")
+    assert "\"plan_verification\":" in out
+    assert "\"verified\": true" in out
+    assert "状态机会根据审核通过的 `done` 项只回写 checkbox" in out
 
 
 def test_step5_prompt_carries_next_round_hints_guide():
     out = compose_step5(_step5_minimal())
     assert _NEXT_ROUND_HINTS_GUIDE in out
     # Hints guide must come AFTER boundary check and BEFORE output spec.
-    assert out.index("## 下一轮提示") > out.index("## 越界检查")
+    assert out.index("## 下一轮提示") > out.index("## 计划执行核验")
     assert out.index("## 下一轮提示") < out.index("## 输出要求")
     # JSON example shows the new top-level field.
     assert "\"next_round_hints\":" in out
@@ -425,14 +441,14 @@ def test_step4_rendered_size_budget():
         context_path="/c.md", findings_output_path="/f.json",
         mount_table_entries=(),
     ))
-    assert len(out.encode("utf-8")) <= 2000
+    assert len(out.encode("utf-8")) <= 2700
 
 
 def test_step5_rendered_size_budget():
     out = compose_step5(_step5_minimal())
     # Budget covers wall + boundary check + next-round-hints guide +
     # aggregation rule + tail JSON schema + field rules.
-    assert len(out.encode("utf-8")) <= 5800
+    assert len(out.encode("utf-8")) <= 7000
 
 
 def test_step3_dropped_reference_paths_heading():

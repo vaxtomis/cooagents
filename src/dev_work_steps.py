@@ -50,6 +50,53 @@ from src.workspace_events import emit_and_deliver
 logger = logging.getLogger(__name__)
 
 _REQUIRED_H2 = ("本轮目标", "开发计划", "用例清单")
+_PLAN_CHECKBOX_RE = re.compile(
+    r"^(\s*[-*]\s+\[)([ xX])(\]\s+)"
+    r"([A-Za-z][A-Za-z0-9_-]*-\d+)(\s*[:：].*)$"
+)
+
+
+def _apply_plan_verification_checkboxes(
+    markdown: str, plan_verification: list[dict],
+) -> str:
+    """Check off only Step5-verified done items in ``## 开发计划``."""
+    done_ids = {
+        item.get("id")
+        for item in plan_verification
+        if (
+            isinstance(item, dict)
+            and item.get("status") == "done"
+            and item.get("verified") is True
+            and isinstance(item.get("id"), str)
+        )
+    }
+    if not done_ids:
+        return markdown
+
+    lines = markdown.splitlines(keepends=True)
+    in_plan = False
+    changed = False
+    for idx, line in enumerate(lines):
+        body = line.rstrip("\r\n")
+        newline = line[len(body):]
+        h2 = re.match(r"^##\s+(.+?)\s*$", body)
+        if h2:
+            in_plan = h2.group(1) == "开发计划"
+            continue
+        if not in_plan:
+            continue
+        match = _PLAN_CHECKBOX_RE.match(body)
+        if not match or match.group(4) not in done_ids:
+            continue
+        if match.group(2).lower() == "x":
+            continue
+        lines[idx] = (
+            f"{match.group(1)}x{match.group(3)}{match.group(4)}"
+            f"{match.group(5)}{newline}"
+        )
+        changed = True
+
+    return "".join(lines) if changed else markdown
 
 
 class DevWorkStepHandlersMixin:
@@ -413,6 +460,32 @@ class DevWorkStepHandlersMixin:
             dw, DevWorkStep.STEP4_DEVELOP, DevWorkStep.STEP5_REVIEW
         )
 
+    async def _apply_step5_plan_verification(
+        self,
+        *,
+        workspace_row: dict[str, Any],
+        note: dict[str, Any],
+        outcome: ReviewOutcome,
+    ) -> None:
+        """Apply Step5-confirmed plan completion as a constrained note patch."""
+        if not outcome.plan_verification:
+            return
+        body = await self.registry.read_text(
+            workspace_slug=workspace_row["slug"],
+            relative_path=note["markdown_path"],
+        )
+        updated = _apply_plan_verification_checkboxes(
+            body, outcome.plan_verification,
+        )
+        if updated == body:
+            return
+        await self.registry.put_markdown(
+            workspace_row=workspace_row,
+            relative_path=note["markdown_path"],
+            text=updated,
+            kind="iteration_note",
+        )
+
     async def _s5_review(self, dw: dict[str, Any]) -> None:
         """Rubric scoring; in-place retry once on parse failure.
 
@@ -580,6 +653,25 @@ class DevWorkStepHandlersMixin:
             round_n=round_n,
             outcome=outcome,
         )
+
+        try:
+            await self._apply_step5_plan_verification(
+                workspace_row=ws,
+                note=note,
+                outcome=outcome,
+            )
+        except Exception as exc:
+            logger.exception(
+                "dev_work %s Step5 plan checkbox update failed (round=%s)",
+                dw["id"],
+                round_n,
+            )
+            await self._escalate(
+                dw,
+                reason=f"Step5 plan checkbox update failed: {exc}",
+                problem_category=None,
+            )
+            return
 
         category_value = (
             outcome.problem_category.value
