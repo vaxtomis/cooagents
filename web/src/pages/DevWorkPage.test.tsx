@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -401,6 +401,11 @@ describe("DevWorkPage", () => {
         ],
         findings: [
           {
+            id: "DW-01",
+            status: "done",
+            verified: true,
+          },
+          {
             title: "Validation guard is present",
             kind: "positive",
             mount: "frontend",
@@ -433,7 +438,12 @@ describe("DevWorkPage", () => {
     fireEvent.click(reviewsTab!);
 
     expect(await screen.findByText("Login button does not submit")).toBeInTheDocument();
+    const findingsTable = screen.getByRole("table", { name: "发现项" });
+    expect(within(findingsTable).getByText("DW-01")).toBeInTheDocument();
+    expect(within(findingsTable).getByText("done")).toBeInTheDocument();
+    expect(within(findingsTable).getByText("true")).toBeInTheDocument();
     expect(screen.getByText("Validation guard is present")).toBeInTheDocument();
+    expect(within(findingsTable).getByText("schema guard exists")).toBeInTheDocument();
     expect(screen.getByText("Add logout route")).toBeInTheDocument();
     expect(screen.getByText("src/Login.tsx:42")).toBeInTheDocument();
     expect(screen.getByText("routes/auth.py")).toBeInTheDocument();
