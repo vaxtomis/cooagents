@@ -50,6 +50,19 @@ const FORM_SELECT_CLASSNAME =
   "w-full rounded-2xl border border-border-strong bg-panel-strong px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)] [&_option]:bg-panel-strong";
 const DIALOG_FOOTER_CLASSNAME =
   "flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end";
+const DESIGN_EXECUTION_STARTED_STATES = new Set<DesignWork["current_state"]>([
+  "PROMPT_COMPOSE",
+  "LLM_GENERATE",
+  "MOCKUP",
+  "POST_VALIDATE",
+  "PERSIST",
+  "COMPLETED",
+]);
+const EXECUTION_ESCALATION_REASONS = [
+  "LLM call failed",
+  "output file missing",
+  "post-validate failed",
+];
 
 const DESIGN_DETAIL_TABS = ["overview", "delivery", "reviews", "activity"] as const;
 type DesignDetailTab = (typeof DESIGN_DETAIL_TABS)[number];
@@ -99,6 +112,22 @@ function toEditorRows(refs: RepoRef[]): RepoRefsEditorRow[] {
     base_rev_lock: false,
     is_primary: false,
   }));
+}
+
+function escalatedAfterExecution(designWork: DesignWork) {
+  if (designWork.current_state !== "ESCALATED") return false;
+  const reason = designWork.escalation_reason ?? "";
+  return EXECUTION_ESCALATION_REASONS.some((token) => reason.includes(token));
+}
+
+function executedLoopCount(designWork: DesignWork) {
+  if (
+    DESIGN_EXECUTION_STARTED_STATES.has(designWork.current_state) ||
+    escalatedAfterExecution(designWork)
+  ) {
+    return designWork.loop + 1;
+  }
+  return designWork.loop;
 }
 
 function DesignWorkRetryForm({
@@ -348,9 +377,8 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
   }
 
   const maxLoops = designWork.max_loops ?? Math.max(designWork.loop, 1);
-  const activeLoopValue = designWork.is_running && !terminal
-    ? Math.min(designWork.loop + 1, Math.max(maxLoops, 1))
-    : designWork.loop;
+  const executedLoops = executedLoopCount(designWork);
+  const ringMaxLoops = Math.max(maxLoops, executedLoops, 1);
   const activityEvents = workspaceEventsQuery.data?.events ?? [];
 
   async function cancelWork() {
@@ -433,11 +461,11 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
         titleAccessory={
           <LoopSegmentRing
             active={designWork.is_running && !terminal}
-            completed={designWork.loop}
-            label="DesignWork 循环"
-            max={maxLoops}
+            completed={terminal ? executedLoops : Math.max(executedLoops - 1, 0)}
+            label="DesignWork 实际执行轮次"
+            max={ringMaxLoops}
             maxReached={designWork.loop >= maxLoops}
-            value={activeLoopValue}
+            value={executedLoops}
           />
         }
       >

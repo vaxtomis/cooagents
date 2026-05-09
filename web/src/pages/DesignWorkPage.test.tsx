@@ -93,7 +93,7 @@ describe("DesignWorkPage", () => {
 
     expect(await screen.findByText(/DesignWork 已升级/)).toBeInTheDocument();
     expect(
-      screen.getByRole("img", { name: "DesignWork 循环 2/2，已达最大次数" }),
+      screen.getByRole("img", { name: "DesignWork 实际执行轮次 3/3，已达最大次数" }),
     ).toBeInTheDocument();
     expect(screen.getByText("后校验")).toBeInTheDocument();
     expect(screen.getByText("architecture")).toBeInTheDocument();
@@ -102,6 +102,25 @@ describe("DesignWorkPage", () => {
 
     expect(screen.queryByRole("button", { name: "推进" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry as new DesignWork" })).toBeEnabled();
+  });
+
+  it("shows completed DesignWork actual executed rounds", async () => {
+    vi.mocked(getDesignWork).mockResolvedValue({
+      ...baseDesignWork,
+      current_state: "COMPLETED",
+      loop: 1,
+      max_loops: 4,
+      output_design_doc_id: "doc-1",
+    });
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(getDesignDocContent).mockResolvedValue("# Design doc");
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("img", { name: "DesignWork 实际执行轮次 2/4，已记录" }),
+    ).toBeInTheDocument();
   });
 
   it("opens editable retry form before creating the new row", async () => {
