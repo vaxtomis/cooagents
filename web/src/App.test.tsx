@@ -105,6 +105,12 @@ describe("App shell", () => {
       expect(screen.getByRole("heading", { name: agentHostsLabel })).toBeInTheDocument(),
     );
     hosts.unmount();
+
+    const repoDetail = renderAt("/repos/repo-aaa111");
+    expect(await screen.findByText("repo detail page")).toBeInTheDocument();
+    expect(document.querySelector('[data-console-chrome="masthead"]')).toBeNull();
+    expect(screen.queryByRole("heading", { name: "仓库详情" })).not.toBeInTheDocument();
+    repoDetail.unmount();
   });
 
   it("collapses and expands the desktop sidebar", async () => {

@@ -134,9 +134,9 @@ function resolvePageMeta(pathname: string): PageMeta {
 
   if (/^\/repos\/[^/]+$/.test(pathname)) {
     return {
-      title: "仓库详情",
-      eyebrow: "代码侦测器",
+      title: "",
       description: "浏览分支、目录树、文件内容和提交历史。",
+      compact: true,
     };
   }
 
