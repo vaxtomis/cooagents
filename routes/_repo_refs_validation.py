@@ -4,9 +4,8 @@ Two coroutines:
 
 - :func:`validate_dev_repo_refs` — for ``CreateDevWorkRequest``. Runs the
   4-step chain: existence → fetch_status='healthy' → branch resolves
-  (``inspector.rev_parse``) → in-payload ``mount_name`` uniqueness. When
-  ``DevRepoRef.base_rev_lock`` is True, also resolves ``origin/<branch>``
-  to a SHA and returns it for ``dev_work_repos.base_rev``.
+  (``inspector.rev_parse``) and in-payload ``mount_name`` uniqueness, then
+  returns that SHA for ``dev_work_repos.base_rev``.
 - :func:`validate_design_repo_refs` — for ``CreateDesignWorkRequest``.
   Subset chain (no ``mount_name``): existence → health → branch resolves.
 
@@ -76,11 +75,10 @@ async def validate_dev_repo_refs(
 ) -> list[tuple[DevRepoRef, str | None]]:
     """Four-step chain: existence → health → branch resolves → mount unique.
 
-    When ``DevRepoRef.base_rev_lock`` is True, also resolves
-    ``origin/<base_branch>`` and stores the SHA in the returned tuple so
-    the caller can persist it on ``dev_work_repos.base_rev``.
+    Stores the resolved ``base_branch`` SHA in the returned tuple so the
+    caller can persist it on ``dev_work_repos.base_rev``.
 
-    Returns ``[(ref, base_rev_or_none), ...]`` in the input order.
+    Returns ``[(ref, base_rev), ...]`` in the input order.
     """
     out: list[tuple[DevRepoRef, str | None]] = []
     seen_mounts: set[str] = set()
@@ -101,18 +99,5 @@ async def validate_dev_repo_refs(
             )
         seen_mounts.add(ref.mount_name)
 
-        base_rev: str | None = None
-        if ref.base_rev_lock:
-            base_rev = await inspector.rev_parse(
-                ref.repo_id, f"origin/{ref.base_branch}", _row=row,
-            )
-            # ``origin/<branch>`` should always resolve in a healthy bare
-            # clone; surface a precise 400 if it doesn't (corrupted mirror
-            # or a fresh branch that hasn't been pushed yet).
-            if base_rev is None:
-                raise BadRequestError(
-                    f"could not lock base_rev for {ref.repo_id!r}: "
-                    f"origin/{ref.base_branch} not found"
-                )
-        out.append((ref, base_rev))
+        out.append((ref, sha))
     return out

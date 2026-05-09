@@ -715,7 +715,8 @@ class RepoRef(BaseModel):
 
 class DevRepoRef(RepoRef):
     """DevWork-side repo binding. Adds ``mount_name`` (unique per DevWork),
-    ``base_rev_lock`` (snapshot ``origin/<branch>`` SHA at create), and
+    ``base_rev_lock`` (legacy request flag; base SHA is always captured at
+    create), and
     ``is_primary`` (explicit override of role-based primary selection)."""
     mount_name: str = Field(..., min_length=1, max_length=63)
     base_rev_lock: bool = False

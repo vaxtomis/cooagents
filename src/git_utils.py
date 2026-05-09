@@ -77,6 +77,33 @@ async def run_git(
     return out, err, proc.returncode
 
 
+async def _ensure_branch_descends_from(
+    repo_path: str,
+    branch_name: str,
+    start_point: str | None,
+) -> None:
+    if start_point is None:
+        return
+    base_sha, _, _ = await run_git(
+        "rev-parse", "--verify", f"{start_point}^{{commit}}",
+        cwd=repo_path,
+    )
+    branch_sha, _, _ = await run_git(
+        "rev-parse", "--verify", f"refs/heads/{branch_name}^{{commit}}",
+        cwd=repo_path,
+    )
+    _, _, rc = await run_git(
+        "merge-base", "--is-ancestor", base_sha, branch_sha,
+        cwd=repo_path,
+        check=False,
+    )
+    if rc != 0:
+        raise RuntimeError(
+            f"branch {branch_name!r} is not based on start_point "
+            f"{start_point!r}"
+        )
+
+
 async def ensure_worktree(
     repo_path: str,
     branch_name: str,
@@ -123,6 +150,17 @@ async def ensure_worktree(
     out, _, _ = await run_git("worktree", "list", "--porcelain", cwd=repo_path)
     wt_path_forward = wt_path.replace("\\", "/")
     if wt_path_forward in out or wt_path in out:
+        head, _, _ = await run_git(
+            "rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path,
+        )
+        if head != branch_name:
+            raise RuntimeError(
+                f"worktree {wt_path!r} is checked out at {head!r}, "
+                f"expected {branch_name!r}"
+            )
+        await _ensure_branch_descends_from(
+            repo_path, branch_name, start_point,
+        )
         return branch_name, wt_path
 
     # Create branch if it doesn't exist
@@ -135,6 +173,10 @@ async def ensure_worktree(
             await run_git("branch", branch_name, cwd=repo_path)
         else:
             await run_git("branch", branch_name, start_point, cwd=repo_path)
+    else:
+        await _ensure_branch_descends_from(
+            repo_path, branch_name, start_point,
+        )
 
     Path(wt_path).parent.mkdir(parents=True, exist_ok=True)
     await run_git("worktree", "add", wt_path, branch_name, cwd=repo_path)

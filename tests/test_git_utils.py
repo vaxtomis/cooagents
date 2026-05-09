@@ -87,6 +87,26 @@ async def test_ensure_worktree_creates_branch_from_start_point(
     assert (Path(wt) / "release.txt").read_text(encoding="utf-8") == "release\n"
 
 
+async def test_ensure_worktree_rejects_existing_branch_not_from_start_point(
+    repo: Path, tmp_path: Path
+) -> None:
+    main_sha = await _git("rev-parse", "main", cwd=repo)
+    await _git("checkout", "--orphan", "devwork/bad-base", cwd=repo)
+    await _git("rm", "-rf", ".", cwd=repo)
+    (repo / "orphan.txt").write_text("orphan\n", encoding="utf-8")
+    await _git("add", "orphan.txt", cwd=repo)
+    await _git("commit", "-m", "orphan commit", cwd=repo)
+    await _git("checkout", "main", cwd=repo)
+
+    with pytest.raises(RuntimeError, match="not based on start_point"):
+        await ensure_worktree(
+            str(repo),
+            "devwork/bad-base",
+            _wt(tmp_path, "bad-base"),
+            start_point=main_sha,
+        )
+
+
 async def test_ensure_worktree_reuses_existing(
     repo: Path, tmp_path: Path
 ) -> None:

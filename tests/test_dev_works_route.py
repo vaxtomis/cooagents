@@ -334,6 +334,7 @@ async def test_create_201_returns_repo_refs(client):
     assert len(refs) == 1
     assert refs[0]["repo_id"] == app.state._repo_id
     assert refs[0]["mount_name"] == "backend"
+    assert refs[0]["base_rev"]
     assert refs[0]["devwork_branch"].startswith("devwork/")
 
 

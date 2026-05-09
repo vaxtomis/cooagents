@@ -135,6 +135,7 @@ class DevWorkPublisher:
             )
 
         env = self._build_env(row)
+        await self._verify_publish_base(worktree, row, env)
         status_out, _, _ = await self._git(
             "status", "--porcelain", cwd=str(worktree), env=env,
         )
@@ -161,6 +162,7 @@ class DevWorkPublisher:
                 env=env,
             )
 
+        await self._verify_publish_base(worktree, row, env)
         await self._git(
             "push",
             "origin",
@@ -176,6 +178,51 @@ class DevWorkPublisher:
             raise RuntimeError(
                 f"git operation exceeded {self.timeout_s}s timeout"
             ) from exc
+
+    async def _verify_publish_base(
+        self,
+        worktree: Path,
+        row: dict[str, Any],
+        env: dict[str, str],
+    ) -> None:
+        branch = row["devwork_branch"]
+        current_branch, _, _ = await self._git(
+            "rev-parse", "--abbrev-ref", "HEAD",
+            cwd=str(worktree),
+            env=env,
+        )
+        if current_branch != branch:
+            raise RuntimeError(
+                f"worktree for mount {row['mount_name']!r} is checked out "
+                f"at {current_branch!r}, expected {branch!r}"
+            )
+
+        base_ref = row.get("base_rev") or row.get("base_branch")
+        if not base_ref:
+            raise RuntimeError(
+                f"base ref missing for mount {row['mount_name']!r}"
+            )
+        base_sha, _, _ = await self._git(
+            "rev-parse", "--verify", f"{base_ref}^{{commit}}",
+            cwd=str(worktree),
+            env=env,
+        )
+        head_sha, _, _ = await self._git(
+            "rev-parse", "--verify", "HEAD^{commit}",
+            cwd=str(worktree),
+            env=env,
+        )
+        _, _, rc = await self._git(
+            "merge-base", "--is-ancestor", base_sha, head_sha,
+            cwd=str(worktree),
+            env=env,
+            check=False,
+        )
+        if rc != 0:
+            raise RuntimeError(
+                f"devwork branch {branch!r} is not based on selected "
+                f"base {row['base_branch']!r}"
+            )
 
     def _build_env(self, repo: dict[str, Any]) -> dict[str, str]:
         env = dict(os.environ)
