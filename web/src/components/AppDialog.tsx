@@ -12,6 +12,11 @@ interface AppDialogProps {
   bodyClassName?: string;
 }
 
+function ignoreImplicitClose() {
+  // Headless UI calls Dialog.onClose for backdrop clicks and Escape.
+  // Forms in this app should close only through explicit dialog actions.
+}
+
 export function AppDialog({
   open,
   title,
@@ -24,8 +29,11 @@ export function AppDialog({
   const panelSizeClassName = size === "wide" ? "max-w-5xl" : "max-w-4xl";
 
   return (
-    <Dialog className="relative z-50" onClose={onClose} open={open}>
-      <DialogBackdrop className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
+    <Dialog className="relative z-50" onClose={ignoreImplicitClose} open={open}>
+      <DialogBackdrop
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+        data-dialog-backdrop="true"
+      />
       <div className="fixed inset-0 overflow-y-auto p-3 sm:p-6 lg:p-8">
         <div className="flex min-h-full items-start justify-center sm:items-center">
           <DialogPanel
