@@ -3,7 +3,14 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import type { DevWork, GateInfo, Review, WorkerRepoHandoff, WorkspaceEventsEnvelope } from "../types";
+import type {
+  DevIterationNote,
+  DevWork,
+  GateInfo,
+  Review,
+  WorkerRepoHandoff,
+  WorkspaceEventsEnvelope,
+} from "../types";
 import { DevWorkPage } from "./DevWorkPage";
 
 vi.mock("../api/devWorks", () => ({
@@ -94,7 +101,9 @@ describe("DevWorkPage", () => {
     renderPage();
 
     await waitFor(() => expect(getDevWork).toHaveBeenCalled());
-    expect(screen.getByRole("img", { name: "DevWork 轮次 2/5，已记录" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("img", { name: /DevWork 实际执行轮次 3\/5/ }),
+    ).toBeInTheDocument();
 
     // Switch to the gate tab.
     fireEvent.click(screen.getByRole("tab", { name: "闸门" }));
@@ -103,6 +112,44 @@ describe("DevWorkPage", () => {
       expect(screen.getByRole("button", { name: "批准" })).toBeEnabled();
       expect(screen.getByRole("button", { name: "驳回" })).toBeEnabled();
     });
+  });
+
+  it("shows the actual executed round count from iteration notes after completion", async () => {
+    const notes: DevIterationNote[] = [
+      {
+        id: "note-1",
+        dev_work_id: "dv-1",
+        round: 1,
+        markdown_path: "devworks/dv-1/iteration-round-1.md",
+        score_history: [74],
+        created_at: "2026-04-23T00:00:01Z",
+      },
+      {
+        id: "note-2",
+        dev_work_id: "dv-1",
+        round: 2,
+        markdown_path: "devworks/dv-1/iteration-round-2.md",
+        score_history: [90],
+        created_at: "2026-04-23T00:00:02Z",
+      },
+    ];
+    vi.mocked(getDevWork).mockResolvedValue({
+      ...devWork,
+      current_step: "COMPLETED",
+      iteration_rounds: 1,
+      first_pass_success: false,
+      last_score: 90,
+      completed_at: "2026-04-23T00:00:03Z",
+    });
+    vi.mocked(listIterationNotes).mockResolvedValue(notes);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("img", { name: /DevWork 实际执行轮次 2\/5/ }),
+    ).toBeInTheDocument();
   });
 
   it("renders the per-mount push status grid with err tooltip", async () => {

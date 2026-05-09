@@ -57,6 +57,13 @@ const DEV_WORK_EVENT_NAMES = [
 ] as const;
 
 const DEV_WORK_ID_RE = /^[a-zA-Z0-9_-]+$/;
+const ROUND_STARTED_STEPS = new Set<DevWork["current_step"]>([
+  "STEP2_ITERATION",
+  "STEP3_CONTEXT",
+  "STEP4_DEVELOP",
+  "STEP5_REVIEW",
+  "COMPLETED",
+]);
 
 function compactPayload(payload: WorkspaceEvent["payload"]) {
   if (!payload) return null;
@@ -68,6 +75,16 @@ function compactPayload(payload: WorkspaceEvent["payload"]) {
       return `${key}: ${rendered}`;
     })
     .join(" / ");
+}
+
+function highestNoteRound(notes: DevIterationNote[] | undefined) {
+  return notes?.reduce((highest, note) => Math.max(highest, note.round), 0) ?? 0;
+}
+
+function estimatedExecutedRound(devWork: DevWork) {
+  if (devWork.progress?.round) return devWork.progress.round;
+  if (ROUND_STARTED_STEPS.has(devWork.current_step)) return devWork.iteration_rounds + 1;
+  return devWork.iteration_rounds;
 }
 
 function ActivityRow({ event }: { event: WorkspaceEvent }) {
@@ -234,12 +251,11 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const cancelled = devWork.current_step === "CANCELLED";
   const terminal = escalated || cancelled || devWork.current_step === "COMPLETED";
   const maxRounds = devWork.max_rounds ?? Math.max(devWork.iteration_rounds, 1);
-  const activeRoundValue = devWork.is_running && !terminal
-    ? Math.min(
-        devWork.progress?.round ?? devWork.iteration_rounds + 1,
-        Math.max(maxRounds, 1),
-      )
-    : devWork.iteration_rounds;
+  const executedRounds = Math.max(
+    highestNoteRound(notesQuery.data),
+    estimatedExecutedRound(devWork),
+  );
+  const ringMaxRounds = Math.max(maxRounds, executedRounds, 1);
   const activityEvents = workspaceEventsQuery.data?.events ?? [];
   const repoPushRows = devWork.repos ?? [];
   const hasRepoPushRows = repoPushRows.length > 0;
@@ -336,11 +352,11 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
         titleAccessory={
           <LoopSegmentRing
             active={devWork.is_running && !terminal}
-            completed={devWork.iteration_rounds}
-            label="DevWork 轮次"
-            max={maxRounds}
+            completed={terminal ? executedRounds : Math.max(executedRounds - 1, 0)}
+            label="DevWork 实际执行轮次"
+            max={ringMaxRounds}
             maxReached={devWork.iteration_rounds >= maxRounds}
-            value={activeRoundValue}
+            value={executedRounds}
           />
         }
       >
