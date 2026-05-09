@@ -487,7 +487,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
                     onClick={() => void pushBranches()}
                     type="button"
                   >
-                    {actionPending === "push" ? "推送中..." : pushActionLabel}
+                    <span>{actionPending === "push" ? "推送中..." : pushActionLabel}</span>
                   </button>
                 ) : null}
               </div>

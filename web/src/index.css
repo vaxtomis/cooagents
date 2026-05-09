@@ -408,13 +408,23 @@ h3 {
   }
 }
 
-@keyframes devwork-push-ring-spin {
-  from {
-    transform: rotate(0deg);
+@keyframes devwork-push-attention-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-135%);
   }
 
-  to {
-    transform: rotate(360deg);
+  18% {
+    opacity: 0.34;
+  }
+
+  62% {
+    opacity: 0.18;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(135%);
   }
 }
 
@@ -487,7 +497,7 @@ h3 {
 .devwork-push-attention {
   position: relative;
   isolation: isolate;
-  overflow: visible;
+  overflow: hidden;
   border-color: rgba(215, 154, 74, 0.62);
   background:
     linear-gradient(180deg, rgba(214, 160, 76, 0.32), rgba(70, 48, 18, 0.9)),
@@ -508,36 +518,37 @@ h3 {
   content: "";
   pointer-events: none;
   position: absolute;
-  border-radius: inherit;
+  z-index: 0;
 }
 
 .devwork-push-attention::before {
-  inset: -5px;
-  padding: 1.5px;
-  background: conic-gradient(
-    from 0deg,
-    rgba(255, 220, 138, 0.02) 0deg,
-    rgba(255, 220, 138, 0.82) 46deg,
-    rgba(255, 220, 138, 0.1) 72deg,
-    rgba(255, 220, 138, 0) 116deg,
-    rgba(214, 160, 76, 0) 224deg,
-    rgba(214, 160, 76, 0.74) 272deg,
-    rgba(255, 220, 138, 0.06) 304deg,
-    rgba(255, 220, 138, 0.02) 360deg
+  inset: -1px -44%;
+  background: linear-gradient(
+    112deg,
+    transparent 0%,
+    transparent 34%,
+    rgba(255, 231, 184, 0.32) 47%,
+    rgba(255, 231, 184, 0.13) 56%,
+    transparent 72%
   );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0.92;
-  animation: devwork-push-ring-spin 6.5s linear infinite;
+  mix-blend-mode: screen;
+  animation: devwork-push-attention-sheen 3.8s ease-in-out infinite;
 }
 
 .devwork-push-attention::after {
-  inset: -7px;
-  border: 1px solid rgba(255, 225, 162, 0.18);
-  opacity: 0.74;
+  inset: 1px;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 225, 162, 0.2);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 231, 184, 0.2), transparent 46%),
+    linear-gradient(180deg, rgba(255, 231, 184, 0.08), transparent 42%);
+  mix-blend-mode: screen;
+  opacity: 0.76;
+}
+
+.devwork-push-attention > span {
+  position: relative;
+  z-index: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
