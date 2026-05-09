@@ -81,6 +81,8 @@ async def ensure_worktree(
     repo_path: str,
     branch_name: str,
     worktree_path: str,
+    *,
+    start_point: str | None = None,
 ) -> tuple[str, str]:
     """Create or reuse a git worktree at *worktree_path* tracking *branch_name*.
 
@@ -88,6 +90,10 @@ async def ensure_worktree(
     layout — Phase 4 uses ``<workspace_root>/.coop/worktrees/<branch_safe>``
     so worktrees live alongside cooagents state instead of polluting the
     user's repo parent directory.
+
+    When the branch does not exist yet, ``start_point`` is passed to
+    ``git branch`` as the branch creation base. Existing branches are reused
+    as-is so retries do not rewrite operator-visible refs.
 
     Returns
     -------
@@ -104,6 +110,11 @@ async def ensure_worktree(
             f"invalid branch_name {branch_name!r}: must match "
             f"[a-zA-Z0-9][a-zA-Z0-9/_.-]{{0,199}}"
         )
+    if start_point is not None and not _BRANCH_RE.match(start_point):
+        raise ValueError(
+            f"invalid start_point {start_point!r}: must match "
+            f"[a-zA-Z0-9][a-zA-Z0-9/_.-]{{0,199}}"
+        )
     wt_path = str(Path(worktree_path))
 
     # Check if worktree already exists.
@@ -116,10 +127,14 @@ async def ensure_worktree(
 
     # Create branch if it doesn't exist
     _, _, rc = await run_git(
-        "rev-parse", "--verify", branch_name, cwd=repo_path, check=False
+        "rev-parse", "--verify", f"refs/heads/{branch_name}",
+        cwd=repo_path, check=False
     )
     if rc != 0:
-        await run_git("branch", branch_name, cwd=repo_path)
+        if start_point is None:
+            await run_git("branch", branch_name, cwd=repo_path)
+        else:
+            await run_git("branch", branch_name, start_point, cwd=repo_path)
 
     Path(wt_path).parent.mkdir(parents=True, exist_ok=True)
     await run_git("worktree", "add", wt_path, branch_name, cwd=repo_path)

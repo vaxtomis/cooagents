@@ -461,6 +461,55 @@ async def test_create_omitted_agent_uses_configured_agent(env):
     assert dw["agent_host_id"] == "local"
 
 
+async def test_s0_init_creates_devwork_branch_from_base_branch(env):
+    repo = Path(env["repo"])
+    await run_git("checkout", "-b", "develop", cwd=str(repo))
+    (repo / "develop-only.txt").write_text("develop\n", encoding="utf-8")
+    await run_git("add", "develop-only.txt", cwd=str(repo))
+    await run_git("commit", "-m", "develop commit", cwd=str(repo))
+
+    bare = (
+        env["ws_root"] / ".coop" / "registry" / "repos"
+        / f"{env['repo_id']}.git"
+    )
+    await run_git(
+        "--git-dir", str(bare),
+        "fetch", str(repo), "refs/heads/develop:refs/heads/develop",
+    )
+    develop_sha, _, _ = await run_git(
+        "--git-dir", str(bare), "rev-parse", "develop",
+    )
+
+    sm = _make_sm(env, ScriptedExecutor([]))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=[
+            (
+                DevRepoRef(
+                    repo_id=env["repo_id"],
+                    base_branch="develop",
+                    mount_name="backend",
+                ),
+                None,
+            ),
+        ],
+        prompt="build from develop",
+    )
+
+    await sm.tick(dw["id"])
+    refreshed = await env["db"].fetchone(
+        "SELECT worktree_path FROM dev_works WHERE id=?", (dw["id"],)
+    )
+    worktree = Path(refreshed["worktree_path"])
+
+    head_sha, _, _ = await run_git("rev-parse", "HEAD", cwd=str(worktree))
+    assert head_sha == develop_sha
+    assert (
+        worktree / "develop-only.txt"
+    ).read_text(encoding="utf-8") == "develop\n"
+
+
 async def test_happy_path_first_pass(env):
     script = [
         step2_append_h2,

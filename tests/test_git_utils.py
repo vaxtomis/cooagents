@@ -61,6 +61,32 @@ async def test_ensure_worktree_creates_new(repo: Path, tmp_path: Path) -> None:
     assert "feat/T-1-design" in branches_out
 
 
+async def test_ensure_worktree_creates_branch_from_start_point(
+    repo: Path, tmp_path: Path
+) -> None:
+    await _git("checkout", "-b", "release/2026.05", cwd=repo)
+    (repo / "release.txt").write_text("release\n", encoding="utf-8")
+    await _git("add", "release.txt", cwd=repo)
+    await _git("commit", "-m", "release commit", cwd=repo)
+    release_sha = await _git("rev-parse", "HEAD", cwd=repo)
+
+    await _git("checkout", "main", cwd=repo)
+    main_sha = await _git("rev-parse", "HEAD", cwd=repo)
+    assert release_sha != main_sha
+
+    wt_path_in = _wt(tmp_path, "devwork-from-release")
+    branch, wt = await ensure_worktree(
+        str(repo),
+        "devwork/demo-from-release",
+        wt_path_in,
+        start_point="release/2026.05",
+    )
+
+    assert branch == "devwork/demo-from-release"
+    assert await _git("rev-parse", "HEAD", cwd=wt) == release_sha
+    assert (Path(wt) / "release.txt").read_text(encoding="utf-8") == "release\n"
+
+
 async def test_ensure_worktree_reuses_existing(
     repo: Path, tmp_path: Path
 ) -> None:

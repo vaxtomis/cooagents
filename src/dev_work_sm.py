@@ -706,9 +706,10 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 )
                 return
             wt_path = str(wt_path_obj)
+            start_point = ref.get("base_rev") or ref["base_branch"]
             try:
                 _, wt_path = await ensure_worktree(
-                    str(bare), branch, wt_path
+                    str(bare), branch, wt_path, start_point=start_point,
                 )
             except Exception as exc:
                 logger.exception(
