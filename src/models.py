@@ -442,6 +442,10 @@ class CreateDevWorkRequest(BaseModel):
         return self
 
 
+class ContinueDevWorkRequest(BaseModel):
+    additional_rounds: int = Field(..., ge=1, le=50)
+
+
 class ProgressSnapshot(BaseModel):
     """Phase 3 (devwork-acpx-overhaul): one heartbeat tick projected onto
     the GET /dev-works/{id} response.
@@ -477,6 +481,7 @@ class DevWorkProgress(BaseModel):
     created_at: str
     updated_at: str
     is_running: bool = False
+    continue_available: bool = False
     # Phase 3 (devwork-acpx-overhaul): latest heartbeat tick from the
     # in-flight LLM call. ``None`` when no call is running (or this DevWork
     # has never reached an LLM step).

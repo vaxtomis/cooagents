@@ -52,6 +52,9 @@
     "dev_work.escalated": {
       "required_payload": ["reason", "rounds"]
     },
+    "dev_work.continued": {
+      "required_payload": ["additional_rounds", "max_rounds"]
+    },
     "dev_work.cancelled": {
       "required_payload": []
     },

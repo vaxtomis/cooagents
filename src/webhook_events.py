@@ -45,6 +45,7 @@ class WebhookEvent(StrEnum):
     DEV_WORK_ROUND_COMPLETED = "dev_work.round_completed"
     DEV_WORK_SCORE_PASSED = "dev_work.score_passed"
     DEV_WORK_ESCALATED = "dev_work.escalated"
+    DEV_WORK_CONTINUED = "dev_work.continued"
     DEV_WORK_CANCELLED = "dev_work.cancelled"
     DEV_WORK_COMPLETED = "dev_work.completed"
 

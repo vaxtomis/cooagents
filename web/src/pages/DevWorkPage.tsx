@@ -2,7 +2,7 @@ import { useMemo, useState, type KeyboardEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
-import { cancelDevWork, getDevWork, pushDevWorkBranches } from "../api/devWorks";
+import { cancelDevWork, continueDevWork, getDevWork, pushDevWorkBranches } from "../api/devWorks";
 import { getIterationNoteContent, listIterationNotes } from "../api/devIterationNotes";
 import { getGate } from "../api/gates";
 import { listReviews } from "../api/reviews";
@@ -50,6 +50,7 @@ const DEV_WORK_EVENT_NAMES = [
   "dev_work.round_completed",
   "dev_work.score_passed",
   "dev_work.escalated",
+  "dev_work.continued",
   "dev_work.cancelled",
   "dev_work.completed",
   "dev_work.gate.exit_waiting",
@@ -167,8 +168,9 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const detailPolling = useWorkspaceDetailPolling<DevWork>((latest) => Boolean(latest?.is_running));
   const [tab, setTab] = useState<TabId>("overview");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState<"cancel" | "push" | null>(null);
+  const [actionPending, setActionPending] = useState<"cancel" | "continue" | "push" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [continueRounds, setContinueRounds] = useState("3");
 
   const dvQuery = useSWR(["dev-work", dvId], () => getDevWork(dvId), detailPolling);
   const notesQuery = useSWR(
@@ -303,6 +305,26 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
     }
   }
 
+  async function continueWork() {
+    const normalized = continueRounds.trim();
+    const parsed = Number(normalized);
+    if (!/^\d+$/.test(normalized) || !Number.isInteger(parsed) || parsed < 1 || parsed > 50) {
+      setActionError("继续循环次数必须是 1-50 的整数。");
+      return;
+    }
+    setActionPending("continue");
+    setActionError(null);
+    try {
+      const updated = await continueDevWork(dvId, parsed);
+      await dvQuery.mutate(updated, { revalidate: false });
+      await workspaceEventsQuery.mutate();
+    } catch (err) {
+      setActionError(extractError(err, "继续循环失败"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
   function activateTab(id: TabId) {
     setTab(id);
     window.setTimeout(() => {
@@ -380,9 +402,41 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
         </div>
 
         {escalated ? (
-          <p className="mt-4 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
-            DevWork 已升级，需人工介入；闸门面板已隐藏。
-          </p>
+          devWork.continue_available ? (
+            <div className="mt-4 rounded-2xl border border-warning/25 bg-warning/10 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <p className="text-sm text-warning">
+                  DevWork 已因达到循环上限升级，可人工追加轮次后继续推进。
+                </p>
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="flex flex-col gap-1 text-xs text-muted">
+                    <span>继续循环次数</span>
+                    <input
+                      aria-label="继续循环次数"
+                      className="w-28 rounded-lg border border-border bg-panel px-3 py-1.5 text-sm text-copy"
+                      min={1}
+                      max={50}
+                      onChange={(event) => setContinueRounds(event.target.value)}
+                      type="number"
+                      value={continueRounds}
+                    />
+                  </label>
+                  <button
+                    className="rounded-lg bg-warning px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-50"
+                    disabled={actionPending !== null}
+                    onClick={() => void continueWork()}
+                    type="button"
+                  >
+                    {actionPending === "continue" ? "继续中..." : "继续循环"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-4 rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm text-warning">
+              DevWork 已升级，需人工介入；闸门面板已隐藏。
+            </p>
+          )
         ) : null}
 
         {devWork.is_running ? (

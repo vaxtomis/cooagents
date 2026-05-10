@@ -300,7 +300,8 @@ stateDiagram-v2
   STEP4_DEVELOP --> STEP5_REVIEW
   STEP5_REVIEW --> COMPLETED: score >= rubric_threshold
   STEP5_REVIEW --> STEP2_ITERATION: req_gap / impl_gap
-  STEP5_REVIEW --> ESCALATED: design_hollow / rounds > max_rounds
+  STEP5_REVIEW --> ESCALATED: design_hollow / rounds >= max_rounds
+  ESCALATED --> STEP2_ITERATION: manual continue after max_rounds
   COMPLETED --> [*]
   ESCALATED --> [*]
   CANCELLED --> [*]

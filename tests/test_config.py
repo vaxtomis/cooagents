@@ -14,6 +14,11 @@ def test_load_settings_defaults():
     assert settings.server.host == "127.0.0.1"
     assert settings.server.port == 8321
     assert settings.timeouts.dispatch_startup == 300
+    assert settings.devwork.max_rounds == 10
+
+def test_settings_devwork_defaults():
+    settings = Settings()
+    assert settings.devwork.max_rounds == 10
 
 def test_load_settings_from_path(tmp_path):
     cfg = tmp_path / "settings.yaml"

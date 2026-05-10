@@ -37,6 +37,13 @@ export async function tickDevWork(id: string): Promise<DevWork> {
   return apiFetch<DevWork>(`/dev-works/${encodeURIComponent(id)}/tick`, { method: "POST" });
 }
 
+export async function continueDevWork(id: string, additionalRounds: number): Promise<DevWork> {
+  return apiFetch<DevWork>(`/dev-works/${encodeURIComponent(id)}/continue`, {
+    method: "POST",
+    body: { additional_rounds: additionalRounds },
+  });
+}
+
 export async function cancelDevWork(id: string): Promise<void> {
   await apiFetch<void>(`/dev-works/${encodeURIComponent(id)}/cancel`, { method: "POST" });
 }

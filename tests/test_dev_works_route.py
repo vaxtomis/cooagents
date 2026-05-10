@@ -39,7 +39,7 @@ def _build_settings(workspace_root: Path | None = None):
         ),
         scoring=SimpleNamespace(default_threshold=80),
         devwork=SimpleNamespace(
-            max_rounds=5, step2_timeout=10, step3_timeout=10,
+            max_rounds=10, step2_timeout=10, step3_timeout=10,
             step5_timeout=10,
             # Phase 3: keep heartbeats fast and idle window short.
             progress_heartbeat_interval_s=0.01,
@@ -328,7 +328,7 @@ async def test_create_201_returns_repo_refs(client):
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["id"].startswith("dev-")
-    assert body["max_rounds"] == 5
+    assert body["max_rounds"] == 10
     assert r.headers["Location"] == f"/api/v1/dev-works/{body['id']}"
     refs = body["repo_refs"]
     assert len(refs) == 1
@@ -750,6 +750,79 @@ async def test_get_projects_running_state_and_tick_rejects_live_driver(client):
 
     resumed = await client.post(f"/api/v1/dev-works/{dev_id}/tick")
     assert resumed.status_code == 200
+
+
+async def test_continue_max_rounds_escalation_projects_resume_state(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    assert create.status_code == 201, create.text
+    dev_id = create.json()["id"]
+    await _wait_for_terminal(client, dev_id)
+
+    gates = {
+        "resume_after_max_rounds": {
+            "back_to": "STEP2_ITERATION",
+            "reason": "req_gap score=10",
+            "problem_category": "req_gap",
+            "completed_round": 2,
+            "max_rounds": 2,
+            "created_at": "2026-04-23T00:00:00Z",
+        }
+    }
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_step='ESCALATED', iteration_rounds=1, "
+        "first_pass_success=NULL, completed_at=NULL, escalated_at=?, "
+        "gates_json=? WHERE id=?",
+        ("2026-04-23T00:00:01Z", json.dumps(gates), dev_id),
+    )
+
+    projected = await client.get(f"/api/v1/dev-works/{dev_id}")
+    assert projected.status_code == 200
+    assert projected.json()["continue_available"] is True
+
+    resumed = await client.post(
+        f"/api/v1/dev-works/{dev_id}/continue",
+        json={"additional_rounds": 2},
+    )
+
+    assert resumed.status_code == 200, resumed.text
+    body = resumed.json()
+    assert body["current_step"] == "STEP2_ITERATION"
+    assert body["iteration_rounds"] == 2
+    assert body["max_rounds"] == 4
+    assert body["continue_available"] is False
+    assert body["is_running"] is True
+
+    event = await app.state.db.fetchone(
+        "SELECT * FROM workspace_events "
+        "WHERE event_name='dev_work.continued' AND correlation_id=?",
+        (dev_id,),
+    )
+    assert event is not None
+    payload = json.loads(event["payload_json"])
+    assert payload["additional_rounds"] == 2
+    assert payload["max_rounds"] == 4
+    await _wait_for_terminal(client, dev_id)
+
+
+async def test_continue_rejects_non_max_rounds_escalation(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+    await _wait_for_terminal(client, dev_id)
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_step='ESCALATED', completed_at=NULL, "
+        "escalated_at=?, gates_json=NULL WHERE id=?",
+        ("2026-04-23T00:00:01Z", dev_id),
+    )
+
+    resumed = await client.post(
+        f"/api/v1/dev-works/{dev_id}/continue",
+        json={"additional_rounds": 1},
+    )
+
+    assert resumed.status_code == 409
+    assert resumed.json()["current_stage"] == "ESCALATED"
 
 
 async def test_get_dev_work_progress_field_tolerates_malformed_json(client):

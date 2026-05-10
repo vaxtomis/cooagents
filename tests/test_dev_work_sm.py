@@ -248,6 +248,26 @@ def step5_invalid_review_json(step_tag, round_n, prompt, worktree):
     return ("not json", 0)
 
 
+def step5_missing_review_file_with_stdout(step_tag, round_n, prompt, worktree):
+    payload = {"score": 90, "issues": [], "problem_category": None}
+    return (f"review chatter\n```json\n{json.dumps(payload)}\n```", 0)
+
+
+def step5_write_review_but_fail(step_tag, round_n, prompt, worktree):
+    writer = _step5_writer(
+        {"score": 90, "issues": [], "problem_category": None}
+    )
+    writer(step_tag, round_n, prompt, worktree)
+    return ("failed after writing review", 1)
+
+
+def step5_success_without_rewriting_review(step_tag, round_n, prompt, worktree):
+    assert "System retry feedback" in prompt
+    assert "Step5 unparseable" in prompt
+    payload = {"score": 90, "issues": [], "problem_category": None}
+    return (f"```json\n{json.dumps(payload)}\n```", 0)
+
+
 def _step5_writer_expect_retry_feedback(payload: dict):
     writer = _step5_writer(payload)
 
@@ -587,7 +607,7 @@ async def test_max_rounds_override_wins_over_config(env):
     )
     final = await sm.run_to_completion(dw["id"])
     assert final["current_step"] == "ESCALATED"
-    assert final["iteration_rounds"] == 0
+    assert final["iteration_rounds"] == 1
     gates = json.loads(final["gates_json"])
     assert gates["max_rounds_override"] == 0
 
@@ -807,8 +827,6 @@ async def test_max_rounds_escalates(env):
         step2_append_h2, step3_write_ctx, step4_write_findings,
         _step5_writer({"score": 10, "issues": [],
                         "problem_category": "req_gap"}),
-        # round 2 attempt: but max_rounds=1, so _loop_or_escalate on first
-        # failure already writes ESCALATED; SM won't call Step2 again.
     ]
     executor = ScriptedExecutor(script)
     sm = _make_sm(env, executor, cfg=_build_config(max_rounds=1))
@@ -820,6 +838,50 @@ async def test_max_rounds_escalates(env):
     )
     final = await sm.run_to_completion(dw["id"])
     assert final["current_step"] == "ESCALATED"
+    assert final["iteration_rounds"] == 1
+    assert len(executor.calls) == 4
+    gates = json.loads(final["gates_json"])
+    assert gates["resume_after_max_rounds"]["completed_round"] == 1
+
+
+async def test_continue_after_max_rounds_escalation_resumes_with_extra_rounds(env):
+    script = [
+        # round 1: fail and escalate because max_rounds=1.
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 10, "issues": [],
+                        "problem_category": "req_gap"}),
+        # round 2: after human continuation, pass.
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 95, "issues": [],
+                        "problem_category": None}),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor, cfg=_build_config(max_rounds=1))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    escalated = await sm.run_to_completion(dw["id"])
+    assert escalated["current_step"] == "ESCALATED"
+    assert sm.can_continue_after_escalation(escalated) is True
+
+    resumed = await sm.continue_after_escalation(
+        dw["id"], additional_rounds=1,
+    )
+    assert resumed["current_step"] == DevWorkStep.STEP2_ITERATION.value
+    assert resumed["iteration_rounds"] == 1
+    assert resumed["escalated_at"] is None
+    gates = json.loads(resumed["gates_json"])
+    assert gates["max_rounds_override"] == 2
+    assert "resume_after_max_rounds" not in gates
+
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "COMPLETED"
+    assert final["iteration_rounds"] == 1
+    assert final["first_pass_success"] == 0
 
 
 async def test_step1_invalid_design_escalates(env):
@@ -1027,6 +1089,118 @@ async def test_step5_parse_error_is_visible_in_retry_prompt(env):
     )
     final = await sm.run_to_completion(dw["id"])
     assert final["current_step"] == "COMPLETED"
+    assert final["iteration_rounds"] == 0
+    dev_root = env["ws_root"] / env["ws"]["slug"] / "devworks" / dw["id"]
+    assert not (dev_root / "iteration-round-2.md").exists()
+    assert not (dev_root / "prompts" / "step5-round2.md").exists()
+    reviews = await env["db"].fetchall(
+        "SELECT rv.round AS review_round, n.round AS note_round "
+        "FROM reviews rv "
+        "JOIN dev_iteration_notes n ON n.id=rv.dev_iteration_note_id "
+        "WHERE rv.dev_work_id=?",
+        (dw["id"],),
+    )
+    assert [(r["review_round"], r["note_round"]) for r in reviews] == [(1, 1)]
+
+
+async def test_step5_missing_review_file_records_failed_attempt(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        step5_missing_review_file_with_stdout,
+        _step5_writer_expect_retry_feedback(
+            {"score": 90, "issues": [], "problem_category": None}
+        ),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "COMPLETED"
+    assert final["iteration_rounds"] == 0
+    artifacts = env["ws_root"] / env["ws"]["slug"] / "devworks" / dw["id"] / "artifacts"
+    failure_meta = artifacts / "step5-review-round1-attempt1-failure.json"
+    failure_stdout = artifacts / "step5-review-round1-attempt1-stdout.md"
+    assert failure_meta.exists()
+    assert failure_stdout.exists()
+    payload = json.loads(failure_meta.read_text(encoding="utf-8"))
+    assert payload["parse_reason"].startswith("review artifact missing")
+    assert payload["stdout_artifact_path"].endswith(
+        "step5-review-round1-attempt1-stdout.md"
+    )
+    assert "review chatter" in failure_stdout.read_text(encoding="utf-8")
+    reviews = await env["db"].fetchall(
+        "SELECT round FROM reviews WHERE dev_work_id=? ORDER BY created_at",
+        (dw["id"],),
+    )
+    assert [r["round"] for r in reviews] == [1]
+
+
+async def test_step5_retry_does_not_accept_stale_review_file(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        step5_write_review_but_fail,
+        step5_success_without_rewriting_review,
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "ESCALATED"
+    assert final["iteration_rounds"] == 0
+    artifacts = env["ws_root"] / env["ws"]["slug"] / "devworks" / dw["id"] / "artifacts"
+    assert not (artifacts / "step5-review-round1.json").exists()
+    reviews = await env["db"].fetchall(
+        "SELECT id FROM reviews WHERE dev_work_id=?", (dw["id"],),
+    )
+    assert reviews == []
+
+
+async def test_step5_repeated_parse_failure_escalates_without_round_inflation(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        step5_invalid_review_json,
+        step5_invalid_review_json,
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "ESCALATED"
+    assert final["iteration_rounds"] == 0
+    dev_root = env["ws_root"] / env["ws"]["slug"] / "devworks" / dw["id"]
+    assert not (dev_root / "iteration-round-2.md").exists()
+    assert not (dev_root / "prompts" / "step5-round2.md").exists()
+    artifacts = dev_root / "artifacts"
+    assert (artifacts / "step5-review-round1-attempt1-failure.json").exists()
+    assert (artifacts / "step5-review-round1-attempt2-failure.json").exists()
+    reviews = await env["db"].fetchall(
+        "SELECT id FROM reviews WHERE dev_work_id=?", (dw["id"],),
+    )
+    assert reviews == []
 
 
 async def test_step5_plan_verification_checks_iteration_plan_items(env):

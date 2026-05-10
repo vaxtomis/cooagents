@@ -110,7 +110,7 @@ class DevWorkConfig(BaseModel):
     different (requirements refinement vs. code-quality scoring).
     """
 
-    max_rounds: int = Field(default=5, ge=0, le=50)
+    max_rounds: int = Field(default=10, ge=0, le=50)
     # Per-step LLM wall-clock timeouts (seconds). Step2 plans the
     # iteration design (F2=B); Step3 is prompt-side context retrieval;
     # Step5 is rubric scoring. Step4 is intentionally absent here — it
