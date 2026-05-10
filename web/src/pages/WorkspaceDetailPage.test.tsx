@@ -109,6 +109,7 @@ const devWork: DevWork = {
   created_at: "2026-04-01T00:00:00Z",
   updated_at: "2026-04-23T00:00:00Z",
   is_running: false,
+  continue_available: false,
   progress: null,
   repo_refs: [],
   repos: [],

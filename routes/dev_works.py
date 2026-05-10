@@ -5,6 +5,7 @@ Endpoints:
     GET    /api/v1/dev-works                — list; workspace_id REQUIRED
     GET    /api/v1/dev-works/{id}           — progress snapshot
     POST   /api/v1/dev-works/{id}/tick      — manual single-step advance
+    POST   /api/v1/dev-works/{id}/continue  — resume after max_rounds escalation
     POST   /api/v1/dev-works/{id}/cancel    — move to CANCELLED
     POST   /api/v1/dev-works/{id}/repos/{mount}/push-state
                                             — worker writeback for push
@@ -37,6 +38,7 @@ from slowapi import Limiter
 from routes._repo_refs_validation import validate_dev_repo_refs
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.models import (
+    ContinueDevWorkRequest,
     CreateDevWorkRequest,
     DevRepoRefView,
     DevWorkPage,
@@ -147,6 +149,23 @@ def _decode_progress(blob: str | None) -> ProgressSnapshot | None:
         return None
 
 
+def _decode_gates(blob: str | None) -> dict:
+    if not blob:
+        return {}
+    try:
+        data = json.loads(blob)
+    except (ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _continue_available(row: dict) -> bool:
+    if row.get("current_step") != DevWorkStep.ESCALATED.value:
+        return False
+    gates = _decode_gates(row.get("gates_json"))
+    return isinstance(gates.get("resume_after_max_rounds"), dict)
+
+
 def _row_to_progress(
     row: dict,
     repo_refs: list[DevRepoRefView] | None = None,
@@ -173,6 +192,7 @@ def _row_to_progress(
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         is_running=is_running,
+        continue_available=_continue_available(row),
         progress=_decode_progress(row.get("current_progress_json")),
         repo_refs=repo_refs or [],
         repos=repos or [],
@@ -345,6 +365,31 @@ async def tick_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
     sm = request.app.state.dev_work_sm
     state_repo = request.app.state.dev_work_repo_state
     dw = await sm.tick(dev_id)
+    repos = await _load_worker_repos(state_repo, dev_id)
+    refs = [_handoff_to_repo_ref(h) for h in repos]
+    return _row_to_progress(
+        dw,
+        refs,
+        repos,
+        is_running=sm.is_running(dev_id),
+        max_rounds=sm._resolve_max_rounds(dw),
+    )
+
+
+@router.post("/dev-works/{dev_id}/continue")
+@limiter.limit("10/minute")
+async def continue_dev_work(
+    dev_id: str,
+    payload: ContinueDevWorkRequest,
+    request: Request,
+) -> DevWorkProgress:
+    sm = request.app.state.dev_work_sm
+    state_repo = request.app.state.dev_work_repo_state
+    dw = await sm.continue_after_escalation(
+        dev_id,
+        additional_rounds=payload.additional_rounds,
+    )
+    sm.schedule_driver(dev_id)
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
     return _row_to_progress(

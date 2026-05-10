@@ -164,6 +164,7 @@ export interface DevWork {
   created_at: string;
   updated_at: string;
   is_running: boolean;
+  continue_available: boolean;
   progress: DevWorkProgressSnapshot | null;
   // Phase 4 (repo-registry): persisted refs from dev_work_repos.
   repo_refs: DevRepoRefView[];

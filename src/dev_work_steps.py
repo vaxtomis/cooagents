@@ -508,6 +508,76 @@ class DevWorkStepHandlersMixin:
         finally:
             await self._delete_role_session(dw["id"], round_n, "review")
 
+    async def _persist_step5_failed_attempt(
+        self,
+        *,
+        workspace_row: dict[str, Any],
+        dw: dict[str, Any],
+        round_n: int,
+        attempt: int,
+        review_rel: str,
+        review_exists: bool,
+        review_size: int,
+        rc: int,
+        stdout: str,
+        parse_reason: str,
+    ) -> None:
+        base_rel = (
+            f"devworks/{dw['id']}/artifacts/"
+            f"step5-review-round{round_n}-attempt{attempt}"
+        )
+        stdout_rel = f"{base_rel}-stdout.md"
+        await self.registry.put_markdown(
+            workspace_row=workspace_row,
+            relative_path=stdout_rel,
+            text=stdout or "",
+            kind="artifact",
+        )
+
+        payload: dict[str, Any] = {
+            "dev_work_id": dw["id"],
+            "step": DevWorkStep.STEP5_REVIEW.value,
+            "round": round_n,
+            "attempt": attempt,
+            "rc": rc,
+            "parse_reason": parse_reason,
+            "expected_review_path": review_rel,
+            "review_artifact_exists": review_exists,
+            "review_artifact_size": review_size,
+            "stdout_artifact_path": stdout_rel,
+        }
+        if review_exists and review_size > 0:
+            review_copy_rel = f"{base_rel}-review-output.md"
+            try:
+                review_text = await self.registry.read_text(
+                    workspace_slug=workspace_row["slug"],
+                    relative_path=review_rel,
+                )
+            except Exception:
+                logger.warning(
+                    "dev_work %s Step5 failed review artifact unreadable "
+                    "(round=%s attempt=%s)",
+                    dw["id"],
+                    round_n,
+                    attempt,
+                    exc_info=True,
+                )
+            else:
+                await self.registry.put_markdown(
+                    workspace_row=workspace_row,
+                    relative_path=review_copy_rel,
+                    text=review_text,
+                    kind="artifact",
+                )
+                payload["review_output_artifact_path"] = review_copy_rel
+
+        await self.registry.put_json(
+            workspace_row=workspace_row,
+            relative_path=f"{base_rel}-failure.json",
+            payload=payload,
+            kind="artifact",
+        )
+
     async def _s5_review_body(
         self, dw: dict[str, Any], round_n: int,
     ) -> None:
@@ -545,6 +615,16 @@ class DevWorkStepHandlersMixin:
                 back_to=DevWorkStep.STEP2_ITERATION,
                 reason="Step5 found no iteration note",
                 problem_category=ProblemCategory.req_gap,
+            )
+            return
+        if note.get("round") != round_n:
+            await self._escalate(
+                dw,
+                reason=(
+                    "Step5 iteration note round mismatch: "
+                    f"note round {note.get('round')} != review round {round_n}"
+                ),
+                problem_category=None,
             )
             return
 
@@ -603,13 +683,24 @@ class DevWorkStepHandlersMixin:
 
         retry_key = f"step5_retry_round{round_n}"
         gates = await self._gates(dw["id"])
-        attempt = int(gates.get(retry_key, 0))
+        attempt_raw = gates.get(retry_key, 0)
+        attempt = attempt_raw if isinstance(attempt_raw, int) else 0
+        attempt_n = attempt + 1
 
         outcome: ReviewOutcome | None = None
         parse_reason: str | None = None
-        if rc == 0:
-            # Register the review artifact if the LLM produced it; missing
-            # file isn't fatal — parse_review_output will fall back to stdout.
+        review_ref = await self.registry.stat(
+            workspace_slug=ws["slug"], relative_path=review_rel,
+        )
+        review_exists = review_ref is not None
+        review_size = review_ref.size if review_ref is not None else 0
+        if rc == 0 and review_ref is None:
+            parse_reason = f"review artifact missing: {review_rel}"
+        elif rc == 0 and review_ref.size <= 0:
+            parse_reason = f"review artifact empty: {review_rel}"
+        elif rc == 0:
+            # Step5's DevWork contract requires a non-empty review file.
+            # stdout-only success remains a parser fallback outside this SM.
             try:
                 await self.registry.index_existing(
                     workspace_row=ws, relative_path=review_rel,
@@ -619,7 +710,7 @@ class DevWorkStepHandlersMixin:
                 pass
             try:
                 outcome = parse_review_output(
-                    stdout, output_json_path=review_abs
+                    "", output_json_path=review_abs
                 )
             except BadRequestError as exc:
                 parse_reason = str(exc)
@@ -627,22 +718,38 @@ class DevWorkStepHandlersMixin:
             parse_reason = f"rc={rc}"
 
         if outcome is None:
-            if attempt < 1:
-                await self._append_loop_feedback(
-                    dw["id"],
-                    for_round=round_n,
-                    back_to=DevWorkStep.STEP5_REVIEW,
-                    reason=f"Step5 unparseable: {parse_reason}",
-                    problem_category=None,
+            parse_reason = parse_reason or "unknown Step5 review failure"
+            try:
+                await self._persist_step5_failed_attempt(
+                    workspace_row=ws,
+                    dw=dw,
+                    round_n=round_n,
+                    attempt=attempt_n,
+                    review_rel=review_rel,
+                    review_exists=review_exists,
+                    review_size=review_size,
+                    rc=rc,
+                    stdout=stdout,
+                    parse_reason=parse_reason,
                 )
-                await self._update_gates_field(
-                    dw["id"], retry_key, attempt + 1
+            except Exception as exc:
+                logger.exception(
+                    "dev_work %s Step5 failed-attempt persistence failed "
+                    "(round=%s attempt=%s)",
+                    dw["id"],
+                    round_n,
+                    attempt_n,
+                )
+                await self._escalate(
+                    dw,
+                    reason=f"Step5 failed-attempt persistence failed: {exc}",
+                    problem_category=None,
                 )
                 return
             await self._loop_or_escalate(
                 dw,
                 back_to=DevWorkStep.STEP5_REVIEW,
-                reason=f"Step5 unparseable after retry: {parse_reason}",
+                reason=f"Step5 unparseable: {parse_reason}",
                 problem_category=None,
             )
             return

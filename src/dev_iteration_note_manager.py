@@ -23,8 +23,8 @@ from src.storage.base import normalize_key
 
 logger = logging.getLogger(__name__)
 
-# Hard cap on the score_history_json array length. max_rounds=5 means at
-# most ~5 entries per note in normal operation; 100 is defense against
+# Hard cap on the score_history_json array length. max_rounds=10 means at
+# most ~10 entries per note in normal operation; 100 is defense against
 # backfill / migration abuse that could grow the row without bound.
 _SCORE_HISTORY_MAX = 100
 

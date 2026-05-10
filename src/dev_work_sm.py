@@ -9,7 +9,7 @@ Steps (PRD L184-189):
         (impl gaps are part of the iteration: re-plan with the failure
         signal as input rather than blindly re-coding the same design)
     STEP5 problem_category=design_hollow -> ESCALATED
-    iteration_rounds > max_rounds -> ESCALATED
+    iteration_rounds reaches max_rounds -> ESCALATED; explicit continue resumes
 
 Drives asynchronously after ``create()``: the caller schedules
 ``asyncio.create_task(self.run_to_completion(id))``. Each step handler is
@@ -47,13 +47,14 @@ _TERMINAL = {
     DevWorkStep.ESCALATED,
     DevWorkStep.CANCELLED,
 }
+_HARD_MAX_ROUNDS = 50
 
 # Hard upper bound on ticks driven by ``run_to_completion``. Serves as a
 # circuit-breaker: if a retry path ever fails to transition the current_step
 # (intentionally in-place retries advance only via gates_json), the driver
-# would otherwise spin forever. With max_rounds=5 and at most a dozen ticks
-# per round, 100 leaves a comfortable headroom while still bounding runaway.
-_MAX_TICKS = 100
+# would otherwise spin forever. With max_rounds capped at 50 and at most a
+# dozen ticks per round, 600 leaves headroom while still bounding runaway.
+_MAX_TICKS = 600
 
 
 def _decode_gates(blob: str | None) -> dict:
@@ -276,9 +277,15 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
     def _resolve_max_rounds(self, dw: dict[str, Any]) -> int:
         gates = _decode_gates(dw.get("gates_json"))
         override = gates.get("max_rounds_override")
-        if isinstance(override, int) and 0 <= override <= 50:
+        if isinstance(override, int) and 0 <= override <= _HARD_MAX_ROUNDS:
             return override
         return self.config.devwork.max_rounds
+
+    def can_continue_after_escalation(self, dw: dict[str, Any]) -> bool:
+        if dw.get("current_step") != DevWorkStep.ESCALATED.value:
+            return False
+        gates = _decode_gates(dw.get("gates_json"))
+        return isinstance(gates.get("resume_after_max_rounds"), dict)
 
     def _validate_max_rounds_override(self, max_rounds: int | None) -> None:
         configured_cap = self.config.devwork.max_rounds
@@ -287,6 +294,39 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 f"max_rounds override {max_rounds} exceeds configured cap "
                 f"{configured_cap}"
             )
+
+    async def _store_max_rounds_resume(
+        self,
+        dw: dict[str, Any],
+        *,
+        completed_round: int,
+        max_rounds: int,
+        back_to: DevWorkStep,
+        reason: str,
+        problem_category: ProblemCategory | None,
+    ) -> None:
+        row = await self._get(dw["id"])
+        if row is None:
+            return
+        gates = _decode_gates(row.get("gates_json"))
+        gates["resume_after_max_rounds"] = {
+            "back_to": back_to.value,
+            "reason": reason,
+            "problem_category": (
+                problem_category.value if problem_category else None
+            ),
+            "completed_round": completed_round,
+            "max_rounds": max_rounds,
+            "created_at": self._now(),
+        }
+        await self.db.execute(
+            "UPDATE dev_works SET gates_json=?, updated_at=? WHERE id=?",
+            (
+                json.dumps(gates, ensure_ascii=False),
+                self._now(),
+                dw["id"],
+            ),
+        )
 
     # ---- Phase 8a host dispatch helpers ----
 
@@ -599,6 +639,135 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             workspace_id=dw["workspace_id"],
             correlation_id=dev_id,
         )
+
+    async def continue_after_escalation(
+        self, dev_id: str, *, additional_rounds: int
+    ) -> dict[str, Any]:
+        if type(additional_rounds) is not int or additional_rounds < 1:
+            raise BadRequestError("additional_rounds must be a positive integer")
+        dw = await self._get(dev_id)
+        if dw is None:
+            raise NotFoundError(f"dev_work {dev_id!r} not found")
+        if self.is_running(dev_id):
+            raise ConflictError(
+                f"dev_work {dev_id!r} is already being advanced",
+                current_stage=dw["current_step"],
+            )
+        if dw["current_step"] != DevWorkStep.ESCALATED.value:
+            raise ConflictError(
+                f"dev_work {dev_id!r} is not escalated",
+                current_stage=dw["current_step"],
+            )
+
+        gates = _decode_gates(dw.get("gates_json"))
+        resume = gates.get("resume_after_max_rounds")
+        if not isinstance(resume, dict):
+            raise ConflictError(
+                f"dev_work {dev_id!r} cannot continue; escalation was not "
+                "caused by max_rounds",
+                current_stage=dw["current_step"],
+            )
+        try:
+            back_to = DevWorkStep(resume["back_to"])
+        except (KeyError, ValueError) as exc:
+            raise BadRequestError(
+                "resume_after_max_rounds has invalid back_to"
+            ) from exc
+        if back_to in _TERMINAL:
+            raise BadRequestError("resume_after_max_rounds points to terminal step")
+
+        try:
+            completed_round = int(resume["completed_round"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise BadRequestError(
+                "resume_after_max_rounds has invalid completed_round"
+            ) from exc
+        completed_round = max(completed_round, int(dw["iteration_rounds"]))
+        max_rounds = completed_round + additional_rounds
+        if max_rounds > _HARD_MAX_ROUNDS:
+            raise BadRequestError(
+                f"continuation would set max_rounds={max_rounds}; "
+                f"hard limit is {_HARD_MAX_ROUNDS}"
+            )
+
+        now = self._now()
+        entries = gates.get("loop_feedback")
+        if not isinstance(entries, list):
+            entries = []
+        clean_entries = [item for item in entries if isinstance(item, dict)]
+        problem_category = resume.get("problem_category")
+        reason = str(resume.get("reason") or "max_rounds continuation")
+        clean_entries.append(
+            {
+                "for_round": completed_round + 1,
+                "back_to": back_to.value,
+                "reason": reason,
+                "problem_category": problem_category,
+            }
+        )
+        gates["loop_feedback"] = clean_entries[-50:]
+
+        history = gates.get("resume_history")
+        if not isinstance(history, list):
+            history = []
+        clean_history = [item for item in history if isinstance(item, dict)]
+        clean_history.append(
+            {
+                "at": now,
+                "completed_round": completed_round,
+                "additional_rounds": additional_rounds,
+                "max_rounds": max_rounds,
+                "back_to": back_to.value,
+            }
+        )
+        gates["resume_history"] = clean_history[-20:]
+        gates["max_rounds_override"] = max_rounds
+        gates.pop("resume_after_max_rounds", None)
+
+        category_value = str(problem_category) if problem_category else None
+        rowcount = await self.db.execute_rowcount(
+            "UPDATE dev_works SET iteration_rounds=?, current_step=?, "
+            "escalated_at=NULL, current_progress_json=NULL, "
+            "last_problem_category=?, gates_json=?, updated_at=? "
+            "WHERE id=? AND current_step=?",
+            (
+                completed_round,
+                back_to.value,
+                category_value,
+                json.dumps(gates, ensure_ascii=False),
+                now,
+                dev_id,
+                DevWorkStep.ESCALATED.value,
+            ),
+        )
+        if rowcount == 0:
+            raise ConflictError(
+                f"dev_work {dev_id!r} changed while continuing",
+                current_stage=dw["current_step"],
+            )
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="dev_work.continued",
+            workspace_id=dw["workspace_id"],
+            correlation_id=dev_id,
+            payload={
+                "additional_rounds": additional_rounds,
+                "max_rounds": max_rounds,
+                "from_round": completed_round,
+                "next_round": completed_round + 1,
+                "back_to": back_to.value,
+            },
+        )
+        try:
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
+        except Exception:
+            logger.exception(
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
+            )
+        refreshed = await self._get(dev_id)
+        assert refreshed is not None
+        return refreshed
 
     # ---- step handlers ----
 
@@ -1438,11 +1607,40 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 dw, reason=reason, problem_category=problem_category
             )
             return
+        # Step5 parser/artifact failures are review retries for the current
+        # iteration note, not new planning rounds.
+        if back_to == DevWorkStep.STEP5_REVIEW:
+            await self._retry_step5_same_round_or_escalate(
+                dw, reason=reason, problem_category=problem_category
+            )
+            return
 
         next_round = dw["iteration_rounds"] + 1
-        if next_round > self._resolve_max_rounds(dw):
+        max_rounds = self._resolve_max_rounds(dw)
+        if next_round >= max_rounds:
+            await self._store_max_rounds_resume(
+                dw,
+                completed_round=next_round,
+                max_rounds=max_rounds,
+                back_to=back_to,
+                reason=reason,
+                problem_category=problem_category,
+            )
+            category_value = (
+                problem_category.value if problem_category else None
+            )
+            await self.db.execute(
+                "UPDATE dev_works SET iteration_rounds=?, "
+                "last_problem_category=?, updated_at=? WHERE id=?",
+                (next_round, category_value, self._now(), dw["id"]),
+            )
+            refreshed = await self._get(dw["id"])
+            if refreshed is not None:
+                dw = refreshed
             await self._escalate(
-                dw, reason=reason, problem_category=problem_category
+                dw,
+                reason=f"max_rounds reached ({max_rounds}); {reason}",
+                problem_category=problem_category,
             )
             return
         await self._append_loop_feedback(
@@ -1576,6 +1774,103 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             payload={
                 "round": round_n,
                 "back_to": DevWorkStep.STEP4_DEVELOP.value,
+                "problem_category": category_value,
+                "reason": reason,
+                "retry": True,
+            },
+        )
+        try:
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
+        except Exception:
+            logger.exception(
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
+            )
+
+    async def _retry_step5_same_round_or_escalate(
+        self,
+        dw: dict[str, Any],
+        *,
+        reason: str,
+        problem_category: ProblemCategory | None,
+    ) -> None:
+        round_n = dw["iteration_rounds"] + 1
+        retry_key = f"step5_retry_round{round_n}"
+        gates = await self._gates(dw["id"])
+        attempt_raw = gates.get(retry_key, 0)
+        attempt = attempt_raw if isinstance(attempt_raw, int) else 0
+        should_retry = attempt < 1
+        if should_retry:
+            await self._append_loop_feedback(
+                dw["id"],
+                for_round=round_n,
+                back_to=DevWorkStep.STEP5_REVIEW,
+                reason=reason,
+                problem_category=problem_category,
+            )
+
+        ws = await self.workspaces.get(dw["workspace_id"])
+        if ws is None:
+            await self._escalate(
+                dw,
+                reason="Step5 retry cleanup failed: workspace missing",
+                problem_category=problem_category,
+            )
+            return
+        review_rel = (
+            f"devworks/{dw['id']}/artifacts/"
+            f"step5-review-round{round_n}.json"
+        )
+        try:
+            await self.registry.delete(
+                workspace_row=ws,
+                relative_path=review_rel,
+            )
+        except Exception as exc:
+            logger.exception(
+                "delete stale Step5 review failed for %s round=%s",
+                dw["id"],
+                round_n,
+            )
+            await self._escalate(
+                dw,
+                reason=f"Step5 retry cleanup failed: {exc}",
+                problem_category=problem_category,
+            )
+            return
+
+        if not should_retry:
+            await self._escalate(
+                dw,
+                reason=f"{reason} after Step5 retry",
+                problem_category=problem_category,
+            )
+            return
+
+        await self._update_gates_field(dw["id"], retry_key, attempt + 1)
+        await self._delete_role_session(dw["id"], round_n, "review")
+        now = self._now()
+        category_value = (
+            problem_category.value if problem_category else None
+        )
+        await self.db.execute(
+            "UPDATE dev_works SET current_step=?, "
+            "last_problem_category=?, updated_at=? WHERE id=?",
+            (
+                DevWorkStep.STEP5_REVIEW.value,
+                category_value,
+                now,
+                dw["id"],
+            ),
+        )
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="dev_work.round_completed",
+            workspace_id=dw["workspace_id"],
+            correlation_id=dw["id"],
+            payload={
+                "round": round_n,
+                "back_to": DevWorkStep.STEP5_REVIEW.value,
                 "problem_category": category_value,
                 "reason": reason,
                 "retry": True,

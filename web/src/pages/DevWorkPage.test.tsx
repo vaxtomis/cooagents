@@ -16,6 +16,7 @@ import { DevWorkPage } from "./DevWorkPage";
 vi.mock("../api/devWorks", () => ({
   getDevWork: vi.fn(),
   cancelDevWork: vi.fn(),
+  continueDevWork: vi.fn(),
   pushDevWorkBranches: vi.fn(),
 }));
 vi.mock("../api/devIterationNotes", () => ({
@@ -32,7 +33,7 @@ vi.mock("../api/workspaceEvents", () => ({
   listWorkspaceEvents: vi.fn(),
 }));
 
-import { getDevWork, pushDevWorkBranches } from "../api/devWorks";
+import { continueDevWork, getDevWork, pushDevWorkBranches } from "../api/devWorks";
 import { listIterationNotes } from "../api/devIterationNotes";
 import { listReviews } from "../api/reviews";
 import { getGate } from "../api/gates";
@@ -63,6 +64,7 @@ const devWork: DevWork = {
   created_at: "2026-04-01T00:00:00Z",
   updated_at: "2026-04-23T00:00:00Z",
   is_running: false,
+  continue_available: false,
   progress: null,
   repo_refs: [],
   repos: [],
@@ -300,6 +302,41 @@ describe("DevWorkPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "重试推送" }));
 
     expect(await screen.findByText("push denied")).toBeInTheDocument();
+  });
+
+  it("continues an escalated max-round DevWork with the requested round count", async () => {
+    const escalated = {
+      ...devWork,
+      current_step: "ESCALATED" as const,
+      iteration_rounds: 10,
+      max_rounds: 10,
+      escalated_at: "2026-04-23T00:00:05Z",
+      continue_available: true,
+    };
+    vi.mocked(getDevWork).mockResolvedValue(escalated);
+    vi.mocked(continueDevWork).mockResolvedValue({
+      ...escalated,
+      current_step: "STEP2_ITERATION",
+      iteration_rounds: 10,
+      max_rounds: 13,
+      escalated_at: null,
+      continue_available: false,
+      is_running: true,
+    });
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText("继续循环次数"), {
+      target: { value: "3" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "继续循环" }));
+
+    await waitFor(() => {
+      expect(continueDevWork).toHaveBeenCalledWith("dv-1", 3);
+    });
   });
 
   it("treats 404 from getGate as no-gate state (not an error)", async () => {
