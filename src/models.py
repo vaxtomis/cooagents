@@ -444,6 +444,7 @@ class CreateDevWorkRequest(BaseModel):
 
 class ContinueDevWorkRequest(BaseModel):
     additional_rounds: int = Field(..., ge=1, le=50)
+    rubric_threshold: int | None = Field(default=None, ge=1, le=100)
 
 
 class ProgressSnapshot(BaseModel):

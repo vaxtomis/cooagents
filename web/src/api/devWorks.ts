@@ -37,10 +37,17 @@ export async function tickDevWork(id: string): Promise<DevWork> {
   return apiFetch<DevWork>(`/dev-works/${encodeURIComponent(id)}/tick`, { method: "POST" });
 }
 
-export async function continueDevWork(id: string, additionalRounds: number): Promise<DevWork> {
+export async function continueDevWork(
+  id: string,
+  additionalRounds: number,
+  rubricThreshold?: number,
+): Promise<DevWork> {
   return apiFetch<DevWork>(`/dev-works/${encodeURIComponent(id)}/continue`, {
     method: "POST",
-    body: { additional_rounds: additionalRounds },
+    body: {
+      additional_rounds: additionalRounds,
+      ...(rubricThreshold !== undefined ? { rubric_threshold: rubricThreshold } : {}),
+    },
   });
 }
 

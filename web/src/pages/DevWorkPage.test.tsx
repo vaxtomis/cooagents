@@ -332,10 +332,13 @@ describe("DevWorkPage", () => {
     fireEvent.change(await screen.findByLabelText("继续循环次数"), {
       target: { value: "3" },
     });
+    fireEvent.change(screen.getByLabelText("继续循环准出阈值"), {
+      target: { value: "90" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "继续循环" }));
 
     await waitFor(() => {
-      expect(continueDevWork).toHaveBeenCalledWith("dv-1", 3);
+      expect(continueDevWork).toHaveBeenCalledWith("dv-1", 3, 90);
     });
   });
 

@@ -60,6 +60,7 @@ class AcpxConfig(BaseModel):
     ttl: int = 600
     json_strict: bool = True
     model: str | None = None
+    session_mode: str | None = "auto"
 
 
 class TurnsConfig(BaseModel):

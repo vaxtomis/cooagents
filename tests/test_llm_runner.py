@@ -125,6 +125,12 @@ def test_build_ensure_cmd_shape(runner):
     assert cmd[-5:] == ["claude", "sessions", "ensure", "--name", "dw-x-r1-plan"]
 
 
+def test_build_set_mode_cmd_shape(runner):
+    cmd = runner._build_set_mode_cmd("dw-x-r1-review", "/A", "codex", "auto")
+    assert cmd[:6] == ["acpx", "--cwd", "/A", "--format", "json", "--approve-all"]
+    assert cmd[-5:] == ["codex", "set-mode", "--session", "dw-x-r1-review", "auto"]
+
+
 def test_build_prompt_cmd_with_text(runner):
     s = Session(name="n", anchor_cwd="/A", agent="claude", created_at=FIXED_CLOCK)
     cmd = runner._build_prompt_cmd(s, text="hello", task_file=None, timeout_sec=30)
@@ -237,6 +243,60 @@ async def test_start_session_runs_ensure_and_returns_session(monkeypatch, runner
     assert args[0] == "acpx"
     assert "sessions" in args and "ensure" in args
     assert captured["kwargs"]["cwd"] == "/A"
+
+
+@pytest.mark.asyncio
+async def test_start_codex_session_sets_writable_mode(monkeypatch):
+    s = Settings()
+    s.acpx.session_mode = "auto"
+    executor = AcpxExecutor(db=None, webhook_notifier=None, config=s)
+    runner = LLMRunner(executor=executor, config=s, clock=lambda: FIXED_CLOCK)
+    seen_cmds: list[list[str]] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen_cmds.append(list(args))
+        return _FakeProc(b"ok", b"", 0)
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+
+    session = await runner.start_session(
+        name="dw-x-r1-review", anchor_cwd="/A", agent="codex",
+    )
+
+    assert session.agent == "codex"
+    assert len(seen_cmds) == 2
+    assert seen_cmds[0][-5:] == [
+        "codex", "sessions", "ensure", "--name", "dw-x-r1-review",
+    ]
+    assert seen_cmds[1][-5:] == [
+        "codex", "set-mode", "--session", "dw-x-r1-review", "auto",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_codex_session_raises_when_set_mode_fails(monkeypatch):
+    s = Settings()
+    s.acpx.session_mode = "auto"
+    executor = AcpxExecutor(db=None, webhook_notifier=None, config=s)
+    runner = LLMRunner(executor=executor, config=s, clock=lambda: FIXED_CLOCK)
+    call = {"n": 0}
+
+    async def fake_exec(*args, **kwargs):
+        call["n"] += 1
+        if call["n"] == 1:
+            return _FakeProc(b"ok", b"", 0)
+        return _FakeProc(b"", b"bad mode", 2)
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+
+    with pytest.raises(SessionLifecycleError) as excinfo:
+        await runner.start_session(
+            name="dw-x-r1-review", anchor_cwd="/A", agent="codex",
+        )
+
+    assert excinfo.value.op == "set-mode"
+    assert excinfo.value.rc == 2
+    assert "bad mode" in excinfo.value.stderr_tail
 
 
 @pytest.mark.asyncio

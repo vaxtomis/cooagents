@@ -641,10 +641,22 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         )
 
     async def continue_after_escalation(
-        self, dev_id: str, *, additional_rounds: int
+        self,
+        dev_id: str,
+        *,
+        additional_rounds: int,
+        rubric_threshold: int | None = None,
     ) -> dict[str, Any]:
         if type(additional_rounds) is not int or additional_rounds < 1:
             raise BadRequestError("additional_rounds must be a positive integer")
+        if rubric_threshold is not None and (
+            type(rubric_threshold) is not int
+            or rubric_threshold < 1
+            or rubric_threshold > 100
+        ):
+            raise BadRequestError(
+                "rubric_threshold must be an integer from 1 to 100"
+            )
         dw = await self._get(dev_id)
         if dw is None:
             raise NotFoundError(f"dev_work {dev_id!r} not found")
@@ -711,17 +723,20 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         if not isinstance(history, list):
             history = []
         clean_history = [item for item in history if isinstance(item, dict)]
-        clean_history.append(
-            {
-                "at": now,
-                "completed_round": completed_round,
-                "additional_rounds": additional_rounds,
-                "max_rounds": max_rounds,
-                "back_to": back_to.value,
-            }
-        )
+        history_entry = {
+            "at": now,
+            "completed_round": completed_round,
+            "additional_rounds": additional_rounds,
+            "max_rounds": max_rounds,
+            "back_to": back_to.value,
+        }
+        if rubric_threshold is not None:
+            history_entry["rubric_threshold"] = rubric_threshold
+        clean_history.append(history_entry)
         gates["resume_history"] = clean_history[-20:]
         gates["max_rounds_override"] = max_rounds
+        if rubric_threshold is not None:
+            gates["rubric_threshold_override"] = rubric_threshold
         gates.pop("resume_after_max_rounds", None)
 
         category_value = str(problem_category) if problem_category else None
@@ -745,19 +760,23 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 f"dev_work {dev_id!r} changed while continuing",
                 current_stage=dw["current_step"],
             )
+        event_payload = {
+            "additional_rounds": additional_rounds,
+            "max_rounds": max_rounds,
+            "from_round": completed_round,
+            "next_round": completed_round + 1,
+            "back_to": back_to.value,
+        }
+        if rubric_threshold is not None:
+            event_payload["rubric_threshold"] = rubric_threshold
+
         await emit_and_deliver(
             self.db,
             self.webhooks,
             event_name="dev_work.continued",
             workspace_id=dw["workspace_id"],
             correlation_id=dev_id,
-            payload={
-                "additional_rounds": additional_rounds,
-                "max_rounds": max_rounds,
-                "from_round": completed_round,
-                "next_round": completed_round + 1,
-                "back_to": back_to.value,
-            },
+            payload=event_payload,
         )
         try:
             await self.workspaces.regenerate_workspace_md(dw["workspace_id"])

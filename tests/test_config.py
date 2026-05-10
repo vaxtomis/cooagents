@@ -33,6 +33,7 @@ def test_acpx_config_defaults():
     assert s.acpx.permission_mode == "approve-all"
     assert s.acpx.default_format == "json"
     assert s.acpx.ttl == 600
+    assert s.acpx.session_mode == "auto"
 
 def test_turns_config_defaults():
     from src.config import Settings

@@ -869,13 +869,15 @@ async def test_continue_after_max_rounds_escalation_resumes_with_extra_rounds(en
     assert sm.can_continue_after_escalation(escalated) is True
 
     resumed = await sm.continue_after_escalation(
-        dw["id"], additional_rounds=1,
+        dw["id"], additional_rounds=1, rubric_threshold=90,
     )
     assert resumed["current_step"] == DevWorkStep.STEP2_ITERATION.value
     assert resumed["iteration_rounds"] == 1
     assert resumed["escalated_at"] is None
     gates = json.loads(resumed["gates_json"])
     assert gates["max_rounds_override"] == 2
+    assert gates["rubric_threshold_override"] == 90
+    assert gates["resume_history"][-1]["rubric_threshold"] == 90
     assert "resume_after_max_rounds" not in gates
 
     final = await sm.run_to_completion(dw["id"])

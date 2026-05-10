@@ -171,6 +171,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const [actionPending, setActionPending] = useState<"cancel" | "continue" | "push" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [continueRounds, setContinueRounds] = useState("3");
+  const [continueThreshold, setContinueThreshold] = useState("");
 
   const dvQuery = useSWR(["dev-work", dvId], () => getDevWork(dvId), detailPolling);
   const notesQuery = useSWR(
@@ -312,10 +313,26 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
       setActionError("继续循环次数必须是 1-50 的整数。");
       return;
     }
+    const normalizedThreshold = continueThreshold.trim();
+    const parsedThreshold = Number(normalizedThreshold);
+    if (
+      normalizedThreshold &&
+      (!/^\d+$/.test(normalizedThreshold) ||
+        !Number.isInteger(parsedThreshold) ||
+        parsedThreshold < 1 ||
+        parsedThreshold > 100)
+    ) {
+      setActionError("准出阈值必须是 1-100 的整数。");
+      return;
+    }
     setActionPending("continue");
     setActionError(null);
     try {
-      const updated = await continueDevWork(dvId, parsed);
+      const updated = await continueDevWork(
+        dvId,
+        parsed,
+        normalizedThreshold ? parsedThreshold : undefined,
+      );
       await dvQuery.mutate(updated, { revalidate: false });
       await workspaceEventsQuery.mutate();
     } catch (err) {
@@ -419,6 +436,19 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
                       onChange={(event) => setContinueRounds(event.target.value)}
                       type="number"
                       value={continueRounds}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-muted">
+                    <span>准出阈值</span>
+                    <input
+                      aria-label="继续循环准出阈值"
+                      className="w-28 rounded-lg border border-border bg-panel px-3 py-1.5 text-sm text-copy"
+                      min={1}
+                      max={100}
+                      onChange={(event) => setContinueThreshold(event.target.value)}
+                      placeholder="沿用"
+                      type="number"
+                      value={continueThreshold}
                     />
                   </label>
                   <button

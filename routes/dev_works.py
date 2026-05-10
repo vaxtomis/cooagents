@@ -388,6 +388,7 @@ async def continue_dev_work(
     dw = await sm.continue_after_escalation(
         dev_id,
         additional_rounds=payload.additional_rounds,
+        rubric_threshold=payload.rubric_threshold,
     )
     sm.schedule_driver(dev_id)
     repos = await _load_worker_repos(state_repo, dev_id)

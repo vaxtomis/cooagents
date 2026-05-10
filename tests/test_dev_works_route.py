@@ -782,7 +782,7 @@ async def test_continue_max_rounds_escalation_projects_resume_state(client):
 
     resumed = await client.post(
         f"/api/v1/dev-works/{dev_id}/continue",
-        json={"additional_rounds": 2},
+        json={"additional_rounds": 2, "rubric_threshold": 90},
     )
 
     assert resumed.status_code == 200, resumed.text
@@ -802,6 +802,13 @@ async def test_continue_max_rounds_escalation_projects_resume_state(client):
     payload = json.loads(event["payload_json"])
     assert payload["additional_rounds"] == 2
     assert payload["max_rounds"] == 4
+    assert payload["rubric_threshold"] == 90
+    row = await app.state.db.fetchone(
+        "SELECT gates_json FROM dev_works WHERE id=?",
+        (dev_id,),
+    )
+    gates_after_continue = json.loads(row["gates_json"])
+    assert gates_after_continue["rubric_threshold_override"] == 90
     await _wait_for_terminal(client, dev_id)
 
 

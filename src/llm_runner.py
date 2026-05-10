@@ -207,6 +207,14 @@ class LLMRunner:
     def _build_ensure_cmd(self, name: str, anchor_cwd: str, agent: str) -> list[str]:
         return [*self._common_flags(anchor_cwd), agent, "sessions", "ensure", "--name", name]
 
+    def _build_set_mode_cmd(
+        self, name: str, anchor_cwd: str, agent: str, mode: str,
+    ) -> list[str]:
+        return [
+            *self._common_flags(anchor_cwd),
+            agent, "set-mode", "--session", name, mode,
+        ]
+
     def _build_prompt_cmd(
         self,
         session: Session,
@@ -494,6 +502,16 @@ class LLMRunner:
         )
         if rc != 0:
             raise SessionLifecycleError("ensure", rc, stderr[-512:])
+        session_mode = getattr(self._acpx_cfg(), "session_mode", None)
+        if session_mode and resolved == "codex":
+            mode_cmd = self._build_set_mode_cmd(
+                name, anchor_cwd, resolved, session_mode,
+            )
+            _stdout, stderr, rc = await self._run_local(
+                mode_cmd, anchor_cwd, timeout=30.0,
+            )
+            if rc != 0:
+                raise SessionLifecycleError("set-mode", rc, stderr[-512:])
         return Session(
             name=name,
             anchor_cwd=anchor_cwd,
