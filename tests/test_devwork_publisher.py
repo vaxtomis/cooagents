@@ -207,6 +207,43 @@ async def test_publisher_pushes_branch_based_on_selected_base_rev(env):
     assert out == "develop"
 
 
+async def test_publisher_repairs_unborn_branch_before_push(env):
+    origin_bare, worktree = await _make_origin_and_worktree(env["tmp"])
+    base_sha, _, _ = await run_git("rev-parse", "main", cwd=str(worktree))
+    await _seed(
+        env,
+        origin_bare=origin_bare,
+        worktree=worktree,
+        base_rev=base_sha,
+    )
+    await run_git(
+        "update-ref",
+        "-d",
+        f"refs/heads/{BRANCH}",
+        cwd=str(worktree),
+    )
+    (worktree / "feature.txt").write_text("hello\n", encoding="utf-8")
+
+    report = await env["publisher"].publish(DEV_ID, 1)
+
+    assert report.results[0].status == "pushed"
+    await run_git(
+        "--git-dir",
+        str(origin_bare),
+        "merge-base",
+        "--is-ancestor",
+        base_sha,
+        BRANCH,
+    )
+    out, _, _ = await run_git(
+        "--git-dir",
+        str(origin_bare),
+        "show",
+        f"{BRANCH}:feature.txt",
+    )
+    assert out == "hello"
+
+
 async def test_publisher_rejects_branch_not_based_on_selected_base(env):
     origin_bare, worktree = await _make_origin_and_worktree(env["tmp"])
     main_sha, _, _ = await run_git("rev-parse", "main", cwd=str(worktree))

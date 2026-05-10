@@ -186,11 +186,7 @@ class DevWorkPublisher:
         env: dict[str, str],
     ) -> None:
         branch = row["devwork_branch"]
-        current_branch, _, _ = await self._git(
-            "rev-parse", "--abbrev-ref", "HEAD",
-            cwd=str(worktree),
-            env=env,
-        )
+        current_branch = await self._current_branch(worktree, env)
         if current_branch != branch:
             raise RuntimeError(
                 f"worktree for mount {row['mount_name']!r} is checked out "
@@ -207,10 +203,8 @@ class DevWorkPublisher:
             cwd=str(worktree),
             env=env,
         )
-        head_sha, _, _ = await self._git(
-            "rev-parse", "--verify", "HEAD^{commit}",
-            cwd=str(worktree),
-            env=env,
+        head_sha = await self._ensure_head_commit(
+            worktree, row, base_sha, env,
         )
         _, _, rc = await self._git(
             "merge-base", "--is-ancestor", base_sha, head_sha,
@@ -223,6 +217,62 @@ class DevWorkPublisher:
                 f"devwork branch {branch!r} is not based on selected "
                 f"base {row['base_branch']!r}"
             )
+
+    async def _current_branch(
+        self, worktree: Path, env: dict[str, str],
+    ) -> str:
+        current_branch, _, rc = await self._git(
+            "symbolic-ref", "--quiet", "--short", "HEAD",
+            cwd=str(worktree),
+            env=env,
+            check=False,
+        )
+        if rc == 0 and current_branch:
+            return current_branch
+        detached, _, _ = await self._git(
+            "rev-parse", "--abbrev-ref", "HEAD",
+            cwd=str(worktree),
+            env=env,
+        )
+        return detached
+
+    async def _ensure_head_commit(
+        self,
+        worktree: Path,
+        row: dict[str, Any],
+        base_sha: str,
+        env: dict[str, str],
+    ) -> str:
+        head_sha, _, rc = await self._git(
+            "rev-parse", "--verify", "HEAD^{commit}",
+            cwd=str(worktree),
+            env=env,
+            check=False,
+        )
+        if rc == 0:
+            return head_sha
+
+        logger.warning(
+            "repairing unborn devwork branch before publish "
+            "dev_work_id=%s repo_id=%s mount=%s base_sha=%s",
+            row.get("dev_work_id"),
+            row.get("repo_id"),
+            row.get("mount_name"),
+            base_sha,
+        )
+        # The branch name is already verified. Mixed reset creates the branch
+        # ref at the selected base while preserving working-tree changes.
+        await self._git(
+            "reset", "--mixed", base_sha,
+            cwd=str(worktree),
+            env=env,
+        )
+        repaired_sha, _, _ = await self._git(
+            "rev-parse", "--verify", "HEAD^{commit}",
+            cwd=str(worktree),
+            env=env,
+        )
+        return repaired_sha
 
     def _build_env(self, repo: dict[str, Any]) -> dict[str, str]:
         env = dict(os.environ)
