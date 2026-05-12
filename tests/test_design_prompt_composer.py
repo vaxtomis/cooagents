@@ -1,5 +1,5 @@
 """Phase 3: D3 prompt composer tests."""
-from src.design_prompt_composer import PromptInputs, compose_prompt
+from src.design_prompt_composer import PromptAttachment, PromptInputs, compose_prompt
 
 
 def _base(**overrides):
@@ -59,3 +59,19 @@ def test_parent_version_empty_when_none():
     assert "`parent_version`:" in rendered
     rendered_with_parent = compose_prompt(_base(parent_version="1.0.0"))
     assert "`parent_version`: 1.0.0" in rendered_with_parent
+
+
+def test_attachments_are_rendered_as_supplemental_materials():
+    rendered = compose_prompt(
+        _base(
+            attachments=[
+                PromptAttachment(
+                    path="attachments/brief.md",
+                    content="# Brief\n\nMore details",
+                )
+            ]
+        )
+    )
+    assert "## Supplemental Materials" in rendered
+    assert "Attachment: `attachments/brief.md`" in rendered
+    assert "More details" in rendered

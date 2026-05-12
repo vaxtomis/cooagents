@@ -26,7 +26,12 @@ vi.mock("../api/repos", () => ({
   repoBranches: vi.fn(),
 }));
 
-import { getDesignWork, getDesignWorkRetrySource, retryDesignWork } from "../api/designWorks";
+import {
+  cancelDesignWork,
+  getDesignWork,
+  getDesignWorkRetrySource,
+  retryDesignWork,
+} from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
 import { listRepos } from "../api/repos";
 import { listReviews } from "../api/reviews";
@@ -72,6 +77,7 @@ const baseDesignWork: DesignWork = {
   updated_at: "2026-04-23T00:00:00Z",
   is_running: false,
   repo_refs: [],
+  attachment_paths: [],
 };
 
 const eventsEnvelope: WorkspaceEventsEnvelope = {
@@ -123,6 +129,26 @@ describe("DesignWorkPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("requires confirmation before cancelling a DesignWork", async () => {
+    vi.mocked(getDesignWork).mockResolvedValue(baseDesignWork);
+    vi.mocked(cancelDesignWork).mockResolvedValue(undefined);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+    expect(cancelDesignWork).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("确认取消 DesignWork")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认取消" }));
+
+    await waitFor(() => {
+      expect(cancelDesignWork).toHaveBeenCalledWith("dw-1");
+    });
+  });
+
   it("opens editable retry form before creating the new row", async () => {
     vi.mocked(getDesignWork).mockResolvedValue({
       ...baseDesignWork,
@@ -137,6 +163,7 @@ describe("DesignWorkPage", () => {
       needs_frontend_mockup: false,
       agent: "claude",
       repo_refs: [],
+      attachment_paths: [],
     });
     vi.mocked(listRepos).mockResolvedValue([]);
     vi.mocked(retryDesignWork).mockResolvedValue({ ...baseDesignWork, id: "dw-2" });
@@ -170,6 +197,44 @@ describe("DesignWorkPage", () => {
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       "/workspaces/ws-1/design-works/dw-2",
     );
+  });
+
+  it("lets retry remove inherited attachment paths", async () => {
+    vi.mocked(getDesignWork).mockResolvedValue({
+      ...baseDesignWork,
+      current_state: "ESCALATED",
+      escalation_reason: "post-validate failed",
+      max_loops: 2,
+    });
+    vi.mocked(getDesignWorkRetrySource).mockResolvedValue({
+      title: "Feature",
+      slug: "feature",
+      user_input: "old requirement text",
+      needs_frontend_mockup: false,
+      agent: "claude",
+      repo_refs: [],
+      attachment_paths: ["attachments/brief.md"],
+    });
+    vi.mocked(listRepos).mockResolvedValue([]);
+    vi.mocked(retryDesignWork).mockResolvedValue({ ...baseDesignWork, id: "dw-2" });
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry as new DesignWork" }));
+    expect(await screen.findByText("attachments/brief.md")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove attachments/brief.md" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create retry" }));
+
+    await waitFor(() => {
+      expect(retryDesignWork).toHaveBeenCalledWith(
+        "dw-1",
+        expect.objectContaining({
+          attachment_paths: [],
+        }),
+      );
+    });
   });
 
   it("renders the reconcile hint when design-doc content returns 410", async () => {

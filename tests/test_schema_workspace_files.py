@@ -51,9 +51,9 @@ async def test_workspace_files_kind_check_rejects_unknown(db):
 @pytest.mark.parametrize("kind", [
     "design_doc", "design_input", "iteration_note",
     "prompt", "image", "workspace_md",
-    "context", "artifact", "other",
+    "context", "artifact", "attachment", "feedback", "other",
 ])
-async def test_workspace_files_kind_check_accepts_all_nine(db, kind):
+async def test_workspace_files_kind_check_accepts_all_allowed(db, kind):
     await _seed_workspace(db, f"ws-{kind}", kind)
     await db.execute(
         "INSERT INTO workspace_files(id,workspace_id,relative_path,kind,"

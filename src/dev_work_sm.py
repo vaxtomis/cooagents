@@ -48,6 +48,7 @@ _TERMINAL = {
     DevWorkStep.CANCELLED,
 }
 _HARD_MAX_ROUNDS = 50
+_STEP_FAILURE_RESUME_KEY = "resume_after_step_failure"
 
 # Hard upper bound on ticks driven by ``run_to_completion``. Serves as a
 # circuit-breaker: if a retry path ever fails to transition the current_step
@@ -287,6 +288,20 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         gates = _decode_gates(dw.get("gates_json"))
         return isinstance(gates.get("resume_after_max_rounds"), dict)
 
+    def can_resume_step_after_escalation(self, dw: dict[str, Any]) -> bool:
+        if dw.get("current_step") != DevWorkStep.ESCALATED.value:
+            return False
+        gates = _decode_gates(dw.get("gates_json"))
+        return isinstance(gates.get(_STEP_FAILURE_RESUME_KEY), dict)
+
+    def resume_step_for_escalation(self, dw: dict[str, Any]) -> str | None:
+        gates = _decode_gates(dw.get("gates_json"))
+        resume = gates.get(_STEP_FAILURE_RESUME_KEY)
+        if not isinstance(resume, dict):
+            return None
+        step = resume.get("back_to")
+        return str(step) if step else None
+
     def _validate_max_rounds_override(self, max_rounds: int | None) -> None:
         configured_cap = self.config.devwork.max_rounds
         if max_rounds is not None and not 0 <= max_rounds <= configured_cap:
@@ -317,6 +332,36 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             ),
             "completed_round": completed_round,
             "max_rounds": max_rounds,
+            "created_at": self._now(),
+        }
+        await self.db.execute(
+            "UPDATE dev_works SET gates_json=?, updated_at=? WHERE id=?",
+            (
+                json.dumps(gates, ensure_ascii=False),
+                self._now(),
+                dw["id"],
+            ),
+        )
+
+    async def _store_step_failure_resume(
+        self,
+        dw: dict[str, Any],
+        *,
+        back_to: DevWorkStep,
+        reason: str,
+        problem_category: ProblemCategory | None,
+    ) -> None:
+        row = await self._get(dw["id"])
+        if row is None:
+            return
+        gates = _decode_gates(row.get("gates_json"))
+        gates[_STEP_FAILURE_RESUME_KEY] = {
+            "back_to": back_to.value,
+            "reason": reason,
+            "problem_category": (
+                problem_category.value if problem_category else None
+            ),
+            "round": int(row["iteration_rounds"]) + 1,
             "created_at": self._now(),
         }
         await self.db.execute(
@@ -788,6 +833,120 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         assert refreshed is not None
         return refreshed
 
+    async def resume_step_after_escalation(
+        self,
+        dev_id: str,
+    ) -> dict[str, Any]:
+        dw = await self._get(dev_id)
+        if dw is None:
+            raise NotFoundError(f"dev_work {dev_id!r} not found")
+        if self.is_running(dev_id):
+            raise ConflictError(
+                f"dev_work {dev_id!r} is already being advanced",
+                current_stage=dw["current_step"],
+            )
+        if dw["current_step"] != DevWorkStep.ESCALATED.value:
+            raise ConflictError(
+                f"dev_work {dev_id!r} is not escalated",
+                current_stage=dw["current_step"],
+            )
+
+        gates = _decode_gates(dw.get("gates_json"))
+        resume = gates.get(_STEP_FAILURE_RESUME_KEY)
+        if not isinstance(resume, dict):
+            raise ConflictError(
+                f"dev_work {dev_id!r} cannot resume from current step",
+                current_stage=dw["current_step"],
+            )
+        try:
+            back_to = DevWorkStep(resume["back_to"])
+        except (KeyError, ValueError) as exc:
+            raise BadRequestError(
+                "resume_after_step_failure has invalid back_to"
+            ) from exc
+        if back_to in _TERMINAL:
+            raise BadRequestError(
+                "resume_after_step_failure points to terminal step"
+            )
+        try:
+            round_n = int(resume.get("round") or int(dw["iteration_rounds"]) + 1)
+        except (TypeError, ValueError):
+            round_n = int(dw["iteration_rounds"]) + 1
+
+        now = self._now()
+        entries = gates.get("loop_feedback")
+        if not isinstance(entries, list):
+            entries = []
+        clean_entries = [item for item in entries if isinstance(item, dict)]
+        problem_category = resume.get("problem_category")
+        reason = str(resume.get("reason") or "manual step resume")
+        clean_entries.append(
+            {
+                "for_round": round_n,
+                "back_to": back_to.value,
+                "reason": f"manual resume after escalation: {reason}",
+                "problem_category": problem_category,
+            }
+        )
+        gates["loop_feedback"] = clean_entries[-50:]
+
+        history = gates.get("resume_history")
+        if not isinstance(history, list):
+            history = []
+        clean_history = [item for item in history if isinstance(item, dict)]
+        clean_history.append(
+            {
+                "at": now,
+                "round": round_n,
+                "back_to": back_to.value,
+                "mode": "step_failure",
+            }
+        )
+        gates["resume_history"] = clean_history[-20:]
+        gates.pop(_STEP_FAILURE_RESUME_KEY, None)
+
+        category_value = str(problem_category) if problem_category else None
+        rowcount = await self.db.execute_rowcount(
+            "UPDATE dev_works SET current_step=?, escalated_at=NULL, "
+            "current_progress_json=NULL, last_problem_category=?, "
+            "gates_json=?, updated_at=? "
+            "WHERE id=? AND current_step=?",
+            (
+                back_to.value,
+                category_value,
+                json.dumps(gates, ensure_ascii=False),
+                now,
+                dev_id,
+                DevWorkStep.ESCALATED.value,
+            ),
+        )
+        if rowcount == 0:
+            raise ConflictError(
+                f"dev_work {dev_id!r} changed while resuming",
+                current_stage=dw["current_step"],
+            )
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="dev_work.continued",
+            workspace_id=dw["workspace_id"],
+            correlation_id=dev_id,
+            payload={
+                "mode": "step_failure",
+                "round": round_n,
+                "back_to": back_to.value,
+            },
+        )
+        try:
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
+        except Exception:
+            logger.exception(
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
+            )
+        refreshed = await self._get(dev_id)
+        assert refreshed is not None
+        return refreshed
+
     # ---- step handlers ----
 
     async def _noop(self, dw: dict[str, Any]) -> None:
@@ -1164,7 +1323,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         session — lifecycle is owned by the calling step handler:
 
           * Step2 deletes the plan session in its finally block.
-          * Step3 / Step4 share the build session; Step5 entry deletes it.
+          * Step3 and Step4 both use the build role name, but Step4 closes
+            Step3's session before opening its own cold build session.
+            Step5 entry deletes the Step4 build session.
           * Step5 deletes the review session in its finally block; round
             transition / terminal cleanup catches anything that slipped.
         """
@@ -1725,6 +1886,12 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         attempt_raw = gates.get(retry_key, 0)
         attempt = attempt_raw if isinstance(attempt_raw, int) else 0
         if attempt >= 1:
+            await self._store_step_failure_resume(
+                dw,
+                back_to=DevWorkStep.STEP4_DEVELOP,
+                reason=f"{reason} after Step4 retry",
+                problem_category=problem_category,
+            )
             await self._escalate(
                 dw,
                 reason=f"{reason} after Step4 retry",
@@ -1858,6 +2025,12 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             return
 
         if not should_retry:
+            await self._store_step_failure_resume(
+                dw,
+                back_to=DevWorkStep.STEP5_REVIEW,
+                reason=f"{reason} after Step5 retry",
+                problem_category=problem_category,
+            )
             await self._escalate(
                 dw,
                 reason=f"{reason} after Step5 retry",

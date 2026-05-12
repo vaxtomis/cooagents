@@ -146,8 +146,8 @@ class Database:
                 "ALTER TABLE dev_work_repos ADD COLUMN worktree_path TEXT"
             )
 
-        # devwork-acpx phase 4: extend workspace_files.kind CHECK to permit
-        # 'feedback'. SQLite cannot ALTER a CHECK constraint in place, so we
+        # devwork-acpx phase 4+DesignWork attachments: extend
+        # workspace_files.kind CHECK. SQLite cannot ALTER a CHECK constraint in place, so we
         # rebuild the table when the existing definition pre-dates Phase 4.
         async with conn.execute(
             "SELECT sql FROM sqlite_master "
@@ -155,7 +155,7 @@ class Database:
         ) as cur:
             row = await cur.fetchone()
         wf_sql = row[0] if row else ""
-        if wf_sql and "'feedback'" not in wf_sql:
+        if wf_sql and ("'feedback'" not in wf_sql or "'attachment'" not in wf_sql):
             # Wrap the rebuild in an explicit transaction so a crash mid-script
             # cannot leave ``workspace_files_new`` orphaned. The leading
             # ``DROP IF EXISTS`` further protects against retry after an
@@ -171,7 +171,8 @@ class Database:
                   kind              TEXT NOT NULL CHECK(kind IN (
                                         'design_doc','design_input','iteration_note',
                                         'prompt','image','workspace_md',
-                                        'context','artifact','feedback','other')),
+                                        'context','artifact','attachment',
+                                        'feedback','other')),
                   content_hash      TEXT,
                   byte_size         INTEGER,
                   local_mtime_ns    INTEGER,

@@ -293,6 +293,35 @@ def _step5_writer(payload: dict):
     return _w
 
 
+def step4_write_findings(step_tag, round_n, prompt, worktree):
+    out = _last_json_output_path(prompt)
+    if out is None:
+        return ("", 1)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps({
+            "pass": True,
+            "plan_execution": [
+                {"id": "DW-01", "status": "done", "evidence": ["login.py:1"]},
+            ],
+            "findings": [],
+        }),
+        encoding="utf-8",
+    )
+    return ("ok", 0)
+
+
+def _step5_writer(payload: dict):
+    def _w(step_tag, round_n, prompt, worktree):
+        out = _last_json_output_path(prompt)
+        if out is None:
+            return ("", 1)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload), encoding="utf-8")
+        return (f"```json\n{json.dumps(payload)}\n```", 0)
+    return _w
+
+
 def test_plan_verification_checkbox_patch_only_checks_verified_done_items():
     body = (
         "# 迭代设计 — Round 1\n\n"
@@ -1038,6 +1067,14 @@ async def test_step4_second_validation_failure_escalates(env):
     assert final["current_step"] == "ESCALATED"
     assert final["iteration_rounds"] == 0
     assert final["last_problem_category"] == ProblemCategory.impl_gap.value
+    assert sm.can_resume_step_after_escalation(final) is True
+    assert sm.resume_step_for_escalation(final) == "STEP4_DEVELOP"
+
+    resumed = await sm.resume_step_after_escalation(dw["id"])
+    assert resumed["current_step"] == "STEP4_DEVELOP"
+    assert resumed["escalated_at"] is None
+    gates = json.loads(resumed["gates_json"])
+    assert "resume_after_step_failure" not in gates
 
 
 async def test_step4_retry_does_not_accept_stale_findings_file(env):
@@ -1666,7 +1703,8 @@ async def test_s4_develop_passes_wall_ceiling_to_run_llm(
     captured: dict[str, object] = {}
 
     async def _spy_run_llm(_dw, **kwargs):
-        captured.update(kwargs)
+        if not captured:
+            captured.update(kwargs)
         return (0, "")
 
     sm._run_llm = _spy_run_llm  # type: ignore[assignment]
@@ -1724,7 +1762,7 @@ async def test_s0_init_persists_session_anchor_path(env):
 
 
 async def test_round_uses_three_session_names(env):
-    """Phase 9: a single round opens plan + build + review sessions."""
+    """Phase 9: Step4 starts from a cold build session after Step3."""
     script = [
         step2_append_h2, step3_write_ctx, step4_write_findings,
         _step5_writer({"score": 92, "issues": [], "problem_category": None}),
@@ -1738,6 +1776,7 @@ async def test_round_uses_three_session_names(env):
     dev_id = dw["id"]
     expected = [
         f"dw-{dev_id}-r1-plan",
+        f"dw-{dev_id}-r1-build",
         f"dw-{dev_id}-r1-build",
         f"dw-{dev_id}-r1-review",
     ]

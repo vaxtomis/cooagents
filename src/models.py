@@ -249,6 +249,15 @@ class WorkspaceSyncReport(BaseModel):
     in_sync: list[str] = Field(default_factory=list)
 
 
+class WorkspaceAttachment(BaseModel):
+    filename: str
+    markdown_path: str
+    content_hash: str | None = None
+    byte_size: int | None = None
+    converted_from: Literal["md", "docx"]
+    image_paths: list[str] = Field(default_factory=list)
+
+
 class WorkspaceMetrics(BaseModel):
     """PRD Phase 8 Success Metrics — lifetime by default; windowed via ?since=&until=.
 
@@ -302,6 +311,9 @@ class CreateDesignWorkRequest(BaseModel):
     # Phase 4 (repo-registry): optional repo binding. Empty list keeps
     # pure-doc DesignWorks creatable.
     repo_refs: list["RepoRef"] = Field(default_factory=list)
+    # Uploaded supplemental markdown files under attachments/. .docx uploads
+    # are converted to markdown before their paths are referenced here.
+    attachment_paths: list[str] = Field(default_factory=list)
 
     @field_validator("slug")
     @classmethod
@@ -312,6 +324,13 @@ class CreateDesignWorkRequest(BaseModel):
                 "no consecutive dashes)"
             )
         return v
+
+    @field_validator("attachment_paths")
+    @classmethod
+    def _check_attachment_paths(cls, v: list[str]) -> list[str]:
+        from src.design_attachments import validate_attachment_paths
+
+        return validate_attachment_paths(v)
 
     @model_validator(mode="after")
     def _check_mode_parent_combo(self) -> "CreateDesignWorkRequest":
@@ -333,6 +352,8 @@ class RetryDesignWorkRequest(BaseModel):
     # Omitted means "reuse the source repo bindings"; [] means "retry with no
     # repo bindings".
     repo_refs: list["RepoRef"] | None = None
+    # Omitted means "reuse source attachments"; [] means "retry with none".
+    attachment_paths: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -348,6 +369,7 @@ class RetryDesignWorkRequest(BaseModel):
             "needs_frontend_mockup",
             "agent",
             "repo_refs",
+            "attachment_paths",
         }
         explicit_nulls = [
             name for name, value in data.items()
@@ -369,6 +391,15 @@ class RetryDesignWorkRequest(BaseModel):
             )
         return v
 
+    @field_validator("attachment_paths")
+    @classmethod
+    def _check_attachment_paths(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        from src.design_attachments import validate_attachment_paths
+
+        return validate_attachment_paths(v)
+
 
 class DesignWorkRetrySource(BaseModel):
     title: str
@@ -377,6 +408,7 @@ class DesignWorkRetrySource(BaseModel):
     needs_frontend_mockup: bool = False
     agent: AgentKind | None = None
     repo_refs: list["RepoRef"] = Field(default_factory=list)
+    attachment_paths: list[str] = Field(default_factory=list)
 
 
 class DesignWorkProgress(BaseModel):
@@ -398,6 +430,7 @@ class DesignWorkProgress(BaseModel):
     is_running: bool = False
     # Phase 4 (repo-registry): persisted refs from design_work_repos.
     repo_refs: list["DesignRepoRefView"] = Field(default_factory=list)
+    attachment_paths: list[str] = Field(default_factory=list)
 
 
 class DesignWorkPage(BaseModel):
@@ -483,6 +516,8 @@ class DevWorkProgress(BaseModel):
     updated_at: str
     is_running: bool = False
     continue_available: bool = False
+    resume_available: bool = False
+    resume_step: DevWorkStep | None = None
     # Phase 3 (devwork-acpx-overhaul): latest heartbeat tick from the
     # in-flight LLM call. ``None`` when no call is running (or this DevWork
     # has never reached an LLM step).

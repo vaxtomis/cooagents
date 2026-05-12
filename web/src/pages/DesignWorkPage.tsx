@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { FileText, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
@@ -151,7 +152,12 @@ function DesignWorkRetryForm({
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>(
     toEditorRows(source.repo_refs),
   );
+  const [attachmentPaths, setAttachmentPaths] = useState(source.attachment_paths ?? []);
   const [error, setError] = useState<string | null>(null);
+
+  function removeAttachmentPath(path: string) {
+    setAttachmentPaths((current) => current.filter((item) => item !== path));
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -184,6 +190,7 @@ function DesignWorkRetryForm({
         needs_frontend_mockup: needsFrontendMockup,
         agent: agent || null,
         repo_refs: refs,
+        attachment_paths: attachmentPaths,
       });
     } catch (err) {
       setError(extractError(err, "Retry failed"));
@@ -251,6 +258,31 @@ function DesignWorkRetryForm({
         value={repoRefs}
       />
 
+      {attachmentPaths.length > 0 ? (
+        <div className="space-y-2 rounded-2xl border border-border bg-panel-strong/55 p-4">
+          <p className="text-sm font-medium text-copy">Supplemental attachments</p>
+          {attachmentPaths.map((path) => (
+            <div
+              className="flex items-center justify-between gap-3 rounded-xl border border-border bg-panel/70 px-3 py-2 text-xs text-muted"
+              key={path}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <FileText aria-hidden="true" className="h-4 w-4 shrink-0 text-copy-soft" />
+                <span className="truncate font-mono text-copy-soft">{path}</span>
+              </span>
+              <button
+                aria-label={`Remove ${path}`}
+                className="rounded-lg border border-border px-2 py-1 text-muted transition hover:border-danger/30 hover:text-danger"
+                onClick={() => removeAttachmentPath(path)}
+                type="button"
+              >
+                <X aria-hidden="true" className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {error ? <p className="text-xs text-danger">{error}</p> : null}
 
       <div className={DIALOG_FOOTER_CLASSNAME}>
@@ -298,6 +330,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
   const detailPolling = useWorkspaceDetailPolling<DesignWork>((latest) => Boolean(latest?.is_running));
   const [actionPending, setActionPending] = useState<"cancel" | "retry" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [retryOpen, setRetryOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<DesignDetailTab>("overview");
 
@@ -386,6 +419,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
     setActionError(null);
     try {
       await cancelDesignWork(dwId);
+      setCancelConfirmOpen(false);
       await dwQuery.mutate();
     } catch (err) {
       setActionError(extractError(err, "操作失败"));
@@ -439,13 +473,44 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
 
   return (
     <div className="space-y-6">
+      <AppDialog
+        description="取消后当前 DesignWork 会停止推进，已产生的记录会保留。"
+        onClose={() => setCancelConfirmOpen(false)}
+        open={cancelConfirmOpen && !terminal}
+        title="确认取消 DesignWork"
+      >
+        <div className="space-y-5">
+          <p className="rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm leading-relaxed text-warning">
+            请确认这是一次有意操作，避免误触中断后台流程。
+          </p>
+          <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              className="inline-flex w-full items-center justify-center rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft transition hover:border-accent/50 hover:bg-panel hover:text-copy sm:w-auto"
+              disabled={actionPending === "cancel"}
+              onClick={() => setCancelConfirmOpen(false)}
+              type="button"
+            >
+              返回
+            </button>
+            <button
+              className="inline-flex w-full items-center justify-center rounded-2xl bg-danger px-5 py-3 text-sm font-semibold text-ink-invert disabled:opacity-50 sm:w-auto"
+              disabled={actionPending === "cancel"}
+              onClick={() => void cancelWork()}
+              type="button"
+            >
+              {actionPending === "cancel" ? "取消中..." : "确认取消"}
+            </button>
+          </div>
+        </div>
+      </AppDialog>
+
       <SectionPanel
         actions={
           <>
             <button
               className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
               disabled={actionPending !== null || terminal}
-              onClick={() => void cancelWork()}
+              onClick={() => setCancelConfirmOpen(true)}
               type="button"
             >
               {actionPending === "cancel" ? "取消中..." : "取消"}

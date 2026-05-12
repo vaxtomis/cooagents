@@ -1,11 +1,12 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { FileText, Upload, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import useSWR from "swr";
 import { createDesignWork, listDesignWorkPage } from "../api/designWorks";
 import { listDesignDocs } from "../api/designDocs";
 import { createDevWork, listDevWorkPage } from "../api/devWorks";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
-import { archiveWorkspace, getWorkspace } from "../api/workspaces";
+import { archiveWorkspace, getWorkspace, uploadWorkspaceAttachment } from "../api/workspaces";
 import { AppDialog } from "../components/AppDialog";
 import { PaginationControls } from "../components/PaginationControls";
 import { PolicyOverrideFields, parsePolicyOverrides } from "../components/PolicyOverrideFields";
@@ -19,6 +20,7 @@ import { SegmentedControl } from "../components/SegmentedControl";
 import { StatusBadge } from "../components/StatusBadge";
 import { useWorkspacePolling } from "../hooks/useWorkspacePolling";
 import { extractError } from "../lib/extractError";
+import { formatBytes } from "../lib/formatBytes";
 import type {
   AgentKind,
   DesignDoc,
@@ -52,11 +54,32 @@ const FORM_SELECT_CLASSNAME =
   "w-full rounded-2xl border border-border-strong bg-panel-strong px-4 py-3.5 text-sm text-copy outline-none transition focus:border-[color:var(--color-focus)] focus:shadow-[0_0_0_3px_rgba(56,152,236,0.18)] [&_option]:bg-panel-strong";
 const DIALOG_FOOTER_CLASSNAME =
   "flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end";
+const MAX_DESIGN_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
+const ATTACHMENT_EXT_RE = /\.(md|docx)$/i;
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function validateAttachments(files: File[]): string | null {
+  if (files.length > MAX_DESIGN_ATTACHMENTS) {
+    return `最多只能上传 ${MAX_DESIGN_ATTACHMENTS} 个附件`;
+  }
+  for (const file of files) {
+    if (!ATTACHMENT_EXT_RE.test(file.name)) {
+      return "附件只支持 .md 和 .docx";
+    }
+    if (file.size <= 0) {
+      return `附件 ${file.name} 不能为空`;
+    }
+    if (file.size > MAX_ATTACHMENT_UPLOAD_BYTES) {
+      return `附件 ${file.name} 超过 ${formatBytes(MAX_ATTACHMENT_UPLOAD_BYTES)} 限制`;
+    }
+  }
+  return null;
 }
 
 function DesignWorkRow({ workspaceId, dw }: { workspaceId: string; dw: DesignWork }) {
@@ -123,8 +146,23 @@ function DesignWorkCreateForm({
   const [rubricThreshold, setRubricThreshold] = useState("");
   const [showRepos, setShowRepos] = useState(false);
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
+  const [attachments, setAttachments] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function addAttachments(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const next = [...attachments, ...Array.from(files)];
+    const validationError = validateAttachments(next);
+    setError(validationError);
+    setAttachments(next);
+  }
+
+  function removeAttachment(index: number) {
+    const next = attachments.filter((_, itemIndex) => itemIndex !== index);
+    setAttachments(next);
+    setError(validateAttachments(next));
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -137,6 +175,8 @@ function DesignWorkCreateForm({
 
     const policyOverrides = parsePolicyOverrides({ maxLabel: "DesignWork max loops", maxRaw: maxLoops, thresholdLabel: "DesignWork rubric threshold", thresholdRaw: rubricThreshold });
     if (policyOverrides.error) return setError(policyOverrides.error);
+    const attachmentError = validateAttachments(attachments);
+    if (attachmentError) return setError(attachmentError);
 
     let designRefs: RepoRef[] | undefined;
     if (showRepos && repoRefs.length > 0) {
@@ -154,6 +194,10 @@ function DesignWorkCreateForm({
     setError(null);
     setSubmitting(true);
     try {
+      const uploadedAttachments = await Promise.all(
+        attachments.map((file) => uploadWorkspaceAttachment(workspaceId, file)),
+      );
+      const attachmentPaths = uploadedAttachments.map((attachment) => attachment.markdown_path);
       const created = await createDesignWork({
         workspace_id: workspaceId,
         title: trimmedTitle,
@@ -165,6 +209,7 @@ function DesignWorkCreateForm({
         ...(policyOverrides.maxValue !== undefined ? { max_loops: policyOverrides.maxValue } : {}),
         ...(policyOverrides.thresholdValue !== undefined ? { rubric_threshold: policyOverrides.thresholdValue } : {}),
         repo_refs: designRefs,
+        ...(attachmentPaths.length > 0 ? { attachment_paths: attachmentPaths } : {}),
       });
       setTitle("");
       setSlug("");
@@ -174,6 +219,7 @@ function DesignWorkCreateForm({
       setRubricThreshold("");
       setShowRepos(false);
       setRepoRefs([]);
+      setAttachments([]);
       onCreated(created);
     } catch (err) {
       setError(extractError(err, "创建设计工作失败"));
@@ -213,6 +259,53 @@ function DesignWorkCreateForm({
           onChange={(event) => setUserInput(event.target.value)}
         />
       </label>
+
+      <div className="space-y-3 rounded-2xl border border-border bg-panel-strong/55 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-copy">补充附件</p>
+            <p className="mt-1 text-xs text-muted">MD / DOCX</p>
+          </div>
+          <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-border-dark/60 bg-panel px-3 py-2 text-xs font-medium text-copy-soft transition hover:border-accent/45 hover:text-copy">
+            <Upload aria-hidden="true" className="h-4 w-4" />
+            <span>选择附件</span>
+            <input
+              className="sr-only"
+              type="file"
+              accept=".md,.docx"
+              multiple
+              onChange={(event) => {
+                addAttachments(event.target.files);
+                event.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+        {attachments.length > 0 ? (
+          <div className="space-y-2">
+            {attachments.map((file, index) => (
+              <div
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-panel/70 px-3 py-2 text-xs text-muted"
+                key={`${file.name}:${file.size}:${index}`}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <FileText aria-hidden="true" className="h-4 w-4 shrink-0 text-copy-soft" />
+                  <span className="truncate text-copy-soft">{file.name}</span>
+                  <span className="shrink-0">{formatBytes(file.size)}</span>
+                </span>
+                <button
+                  aria-label={`Remove ${file.name}`}
+                  className="rounded-lg border border-border px-2 py-1 text-muted transition hover:border-danger/30 hover:text-danger"
+                  onClick={() => removeAttachment(index)}
+                  type="button"
+                >
+                  <X aria-hidden="true" className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.95fr)]">
         <label className="flex items-center gap-3 rounded-2xl border border-border bg-panel-strong/55 px-4 py-3 text-sm text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">

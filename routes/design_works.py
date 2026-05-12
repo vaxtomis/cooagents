@@ -109,6 +109,7 @@ def _row_to_progress(
                 missing = None
         except Exception:
             missing = None
+    attachment_paths = _decode_attachment_paths(row.get("gates_json"))
     return DesignWorkProgress(
         id=row["id"],
         workspace_id=row["workspace_id"],
@@ -127,7 +128,21 @@ def _row_to_progress(
         updated_at=row["updated_at"],
         is_running=is_running,
         repo_refs=repo_refs or [],
+        attachment_paths=attachment_paths,
     )
+
+
+def _decode_attachment_paths(blob: str | None) -> list[str]:
+    if not blob:
+        return []
+    try:
+        gates = json.loads(blob)
+    except Exception:
+        return []
+    paths = gates.get("attachment_paths") if isinstance(gates, dict) else None
+    if not isinstance(paths, list):
+        return []
+    return [p for p in paths if isinstance(p, str)]
 
 
 def _ensure_retryable(source: dict) -> None:
@@ -185,6 +200,7 @@ async def create_design_work(
         rubric_threshold=req.rubric_threshold,  # U2 API override
         max_loops=req.max_loops,
         repo_refs=validated,
+        attachment_paths=req.attachment_paths,
     )
     # Fire-and-forget background driver; errors are logged inside the SM,
     # and the SM clears its own task-tracking map via add_done_callback.
@@ -332,6 +348,7 @@ async def get_design_work_retry_source(
         needs_frontend_mockup=bool(source.get("needs_frontend_mockup")),
         agent=source.get("agent"),
         repo_refs=refs,
+        attachment_paths=_decode_attachment_paths(source.get("gates_json")),
     )
 
 
@@ -358,6 +375,11 @@ async def retry_design_work(
         payload.repo_refs or []
         if payload is not None and "repo_refs" in fields_set
         else await _load_retry_repo_refs(db, dw_id)
+    )
+    attachment_paths = (
+        payload.attachment_paths or []
+        if payload is not None and "attachment_paths" in fields_set
+        else _decode_attachment_paths(source.get("gates_json"))
     )
     validated = (
         await validate_design_repo_refs(
@@ -400,6 +422,7 @@ async def retry_design_work(
         needs_frontend_mockup=bool(needs_frontend_mockup),
         agent=agent,
         repo_refs=validated,
+        attachment_paths=attachment_paths,
     )
     sm.schedule_driver(created["id"])
     response.headers["Location"] = f"/api/v1/design-works/{created['id']}"

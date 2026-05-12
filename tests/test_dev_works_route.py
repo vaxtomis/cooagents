@@ -82,7 +82,14 @@ class ScriptedExecutor:
         if m:
             p = Path(m.group(1))
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps({"pass": True, "findings": []}), encoding="utf-8")
+            p.write_text(
+                json.dumps({
+                    "pass": True,
+                    "plan_execution": [],
+                    "findings": [],
+                }),
+                encoding="utf-8",
+            )
             return ("ok", 0)
         m = re.search(r"将结果写入 `([^`]+\.json)`", text)
         if m:
@@ -830,6 +837,41 @@ async def test_continue_rejects_non_max_rounds_escalation(client):
 
     assert resumed.status_code == 409
     assert resumed.json()["current_stage"] == "ESCALATED"
+
+
+async def test_resume_step_escalation_projects_and_restarts_driver(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    dev_id = create.json()["id"]
+    await _wait_for_terminal(client, dev_id)
+
+    gates = {
+        "resume_after_step_failure": {
+            "back_to": "STEP5_REVIEW",
+            "reason": "review artifact missing after retry",
+            "problem_category": None,
+            "round": 1,
+            "created_at": "2026-04-23T00:00:00Z",
+        }
+    }
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_step='ESCALATED', completed_at=NULL, "
+        "escalated_at=?, gates_json=? WHERE id=?",
+        ("2026-04-23T00:00:01Z", json.dumps(gates), dev_id),
+    )
+
+    projected = await client.get(f"/api/v1/dev-works/{dev_id}")
+    assert projected.status_code == 200
+    assert projected.json()["resume_available"] is True
+    assert projected.json()["resume_step"] == "STEP5_REVIEW"
+
+    resumed = await client.post(f"/api/v1/dev-works/{dev_id}/resume-step")
+
+    assert resumed.status_code == 200, resumed.text
+    body = resumed.json()
+    assert body["current_step"] == "STEP5_REVIEW"
+    assert body["resume_available"] is False
+    assert body["is_running"] is True
 
 
 async def test_get_dev_work_progress_field_tolerates_malformed_json(client):

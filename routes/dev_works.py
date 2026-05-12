@@ -166,6 +166,17 @@ def _continue_available(row: dict) -> bool:
     return isinstance(gates.get("resume_after_max_rounds"), dict)
 
 
+def _resume_step(row: dict) -> str | None:
+    if row.get("current_step") != DevWorkStep.ESCALATED.value:
+        return None
+    gates = _decode_gates(row.get("gates_json"))
+    resume = gates.get("resume_after_step_failure")
+    if not isinstance(resume, dict):
+        return None
+    step = resume.get("back_to")
+    return str(step) if step else None
+
+
 def _row_to_progress(
     row: dict,
     repo_refs: list[DevRepoRefView] | None = None,
@@ -193,6 +204,8 @@ def _row_to_progress(
         updated_at=row["updated_at"],
         is_running=is_running,
         continue_available=_continue_available(row),
+        resume_available=_resume_step(row) is not None,
+        resume_step=_resume_step(row),
         progress=_decode_progress(row.get("current_progress_json")),
         repo_refs=repo_refs or [],
         repos=repos or [],
@@ -390,6 +403,27 @@ async def continue_dev_work(
         additional_rounds=payload.additional_rounds,
         rubric_threshold=payload.rubric_threshold,
     )
+    sm.schedule_driver(dev_id)
+    repos = await _load_worker_repos(state_repo, dev_id)
+    refs = [_handoff_to_repo_ref(h) for h in repos]
+    return _row_to_progress(
+        dw,
+        refs,
+        repos,
+        is_running=sm.is_running(dev_id),
+        max_rounds=sm._resolve_max_rounds(dw),
+    )
+
+
+@router.post("/dev-works/{dev_id}/resume-step")
+@limiter.limit("10/minute")
+async def resume_dev_work_step(
+    dev_id: str,
+    request: Request,
+) -> DevWorkProgress:
+    sm = request.app.state.dev_work_sm
+    state_repo = request.app.state.dev_work_repo_state
+    dw = await sm.resume_step_after_escalation(dev_id)
     sm.schedule_driver(dev_id)
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]

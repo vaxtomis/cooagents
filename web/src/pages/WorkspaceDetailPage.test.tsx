@@ -18,6 +18,7 @@ import { WorkspaceDetailPage } from "./WorkspaceDetailPage";
 vi.mock("../api/workspaces", () => ({
   getWorkspace: vi.fn(),
   archiveWorkspace: vi.fn(),
+  uploadWorkspaceAttachment: vi.fn(),
 }));
 vi.mock("../api/designWorks", () => ({
   listDesignWorks: vi.fn(),
@@ -51,7 +52,7 @@ vi.mock("../api/repos", () => ({
   repoLogPage: vi.fn(),
 }));
 
-import { getWorkspace } from "../api/workspaces";
+import { getWorkspace, uploadWorkspaceAttachment } from "../api/workspaces";
 import { createDesignWork, listDesignWorkPage } from "../api/designWorks";
 import { listDesignDocs } from "../api/designDocs";
 import { createDevWork, listDevWorkPage } from "../api/devWorks";
@@ -90,6 +91,7 @@ const designWork: DesignWork = {
   updated_at: "2026-04-23T00:00:00Z",
   is_running: false,
   repo_refs: [],
+  attachment_paths: [],
 };
 
 const devWork: DevWork = {
@@ -488,6 +490,68 @@ describe("WorkspaceDetailPage", () => {
       expect(args.repo_refs).toBeUndefined();
       expect(args.agent).toBeUndefined();
     });
+  });
+
+  it("DesignWork form uploads attachments before create", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listDesignDocs).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
+    vi.mocked(uploadWorkspaceAttachment).mockResolvedValue({
+      filename: "brief.md",
+      markdown_path: "attachments/brief.md",
+      content_hash: "hash",
+      byte_size: 7,
+      converted_from: "md",
+      image_paths: [],
+    });
+    vi.mocked(createDesignWork).mockResolvedValue(designWork);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "新建设计工作" }));
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Hello" } });
+    fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "feature-x" } });
+    fireEvent.change(screen.getByLabelText("需求说明"), { target: { value: "do something" } });
+    const file = new File(["# Brief"], "brief.md", { type: "text/markdown" });
+    fireEvent.change(screen.getByLabelText("选择附件"), { target: { files: [file] } });
+
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => {
+      expect(uploadWorkspaceAttachment).toHaveBeenCalledWith("ws-1", file);
+      const args = vi.mocked(createDesignWork).mock.calls[0][0];
+      expect(args.attachment_paths).toEqual(["attachments/brief.md"]);
+    });
+  });
+
+  it("DesignWork form rejects more than ten attachments before upload", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listDesignDocs).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
+    vi.mocked(createDesignWork).mockResolvedValue(designWork);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "新建设计工作" }));
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Hello" } });
+    fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "feature-x" } });
+    fireEvent.change(screen.getByLabelText("需求说明"), { target: { value: "do something" } });
+    const files = Array.from(
+      { length: 11 },
+      (_, index) => new File(["# Brief"], `brief-${index}.md`, { type: "text/markdown" }),
+    );
+    fireEvent.change(screen.getByLabelText("选择附件"), { target: { files } });
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    expect(await screen.findByText(/最多只能上传 10 个附件/)).toBeInTheDocument();
+    expect(uploadWorkspaceAttachment).not.toHaveBeenCalled();
+    expect(createDesignWork).not.toHaveBeenCalled();
   });
 
   it("DesignWork form sends explicitly selected agent", async () => {

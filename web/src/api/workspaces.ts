@@ -1,5 +1,6 @@
 import type {
   CreateWorkspacePayload,
+  WorkspaceAttachment,
   WorkspacePage,
   Workspace,
   WorkspaceStatus,
@@ -44,4 +45,16 @@ export async function archiveWorkspace(id: string): Promise<void> {
 
 export async function syncWorkspaces(): Promise<WorkspaceSyncReport> {
   return apiFetch<WorkspaceSyncReport>("/workspaces/sync", { method: "POST" });
+}
+
+export async function uploadWorkspaceAttachment(
+  workspaceId: string,
+  file: File,
+): Promise<WorkspaceAttachment> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch<WorkspaceAttachment>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/attachments`,
+    { method: "POST", body },
+  );
 }

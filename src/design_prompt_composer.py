@@ -14,6 +14,14 @@ _TPL_PATH = Path(__file__).resolve().parents[1] / "templates" / "design_prompt.m
 
 
 @dataclass(frozen=True)
+class PromptAttachment:
+    path: str
+    content: str
+    truncated: bool = False
+    original_chars: int | None = None
+
+
+@dataclass(frozen=True)
 class PromptInputs:
     workspace_slug: str
     title: str
@@ -23,6 +31,30 @@ class PromptInputs:
     output_path: str
     parent_version: str | None = None
     missing_sections: Sequence[str] = ()
+    attachments: Sequence[PromptAttachment] = ()
+
+
+def _render_attachments(attachments: Sequence[PromptAttachment]) -> str:
+    if not attachments:
+        return ""
+    parts = [
+        "## Supplemental Materials",
+        "",
+        "The following uploaded attachments are additional source material. "
+        "Use them to make the design more specific and complete.",
+    ]
+    for attachment in attachments:
+        parts.extend(["", f"### Attachment: `{attachment.path}`", ""])
+        parts.append(attachment.content.strip() or "(empty attachment)")
+        if attachment.truncated:
+            parts.extend([
+                "",
+                (
+                    f"[Truncated from {attachment.original_chars} characters "
+                    "to fit the prompt budget.]"
+                ),
+            ])
+    return "\n".join(parts) + "\n"
 
 
 def compose_prompt(inputs: PromptInputs) -> str:
@@ -44,6 +76,7 @@ def compose_prompt(inputs: PromptInputs) -> str:
         title=inputs.title,
         version=inputs.version,
         user_input=inputs.user_input,
+        supplemental_materials=_render_attachments(inputs.attachments),
         needs_frontend_mockup="true" if inputs.needs_frontend_mockup else "false",
         output_path=inputs.output_path,
         parent_version_or_empty=inputs.parent_version or "",

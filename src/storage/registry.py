@@ -55,6 +55,7 @@ _VALID_KINDS: frozenset[str] = frozenset({
     "workspace_md",
     "context",
     "artifact",
+    "attachment",
     "feedback",
     "other",
 })

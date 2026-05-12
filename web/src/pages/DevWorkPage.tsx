@@ -2,11 +2,18 @@ import { useMemo, useState, type KeyboardEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
-import { cancelDevWork, continueDevWork, getDevWork, pushDevWorkBranches } from "../api/devWorks";
+import {
+  cancelDevWork,
+  continueDevWork,
+  getDevWork,
+  pushDevWorkBranches,
+  resumeDevWorkStep,
+} from "../api/devWorks";
 import { getIterationNoteContent, listIterationNotes } from "../api/devIterationNotes";
 import { getGate } from "../api/gates";
 import { listReviews } from "../api/reviews";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
+import { AppDialog } from "../components/AppDialog";
 import { DevWorkStepProgress } from "../components/DevWorkStepProgress";
 import { GateActionPanel } from "../components/GateActionPanel";
 import { LoopSegmentRing } from "../components/LoopSegmentRing";
@@ -168,8 +175,11 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const detailPolling = useWorkspaceDetailPolling<DevWork>((latest) => Boolean(latest?.is_running));
   const [tab, setTab] = useState<TabId>("overview");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [actionPending, setActionPending] = useState<"cancel" | "continue" | "push" | null>(null);
+  const [actionPending, setActionPending] = useState<
+    "cancel" | "continue" | "push" | "resume" | null
+  >(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [continueRounds, setContinueRounds] = useState("3");
   const [continueThreshold, setContinueThreshold] = useState("");
 
@@ -285,6 +295,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
     setActionError(null);
     try {
       await cancelDevWork(dvId);
+      setCancelConfirmOpen(false);
       await dvQuery.mutate();
     } catch (err) {
       setActionError(extractError(err, "操作失败"));
@@ -342,6 +353,20 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
     }
   }
 
+  async function resumeStep() {
+    setActionPending("resume");
+    setActionError(null);
+    try {
+      const updated = await resumeDevWorkStep(dvId);
+      await dvQuery.mutate(updated, { revalidate: false });
+      await workspaceEventsQuery.mutate();
+    } catch (err) {
+      setActionError(extractError(err, "恢复 Step 失败"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
   function activateTab(id: TabId) {
     setTab(id);
     window.setTimeout(() => {
@@ -369,13 +394,44 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
 
   return (
     <div className="space-y-6">
+      <AppDialog
+        description="取消后当前 DevWork 会停止推进，已产生的迭代记录和工作目录信息会保留。"
+        onClose={() => setCancelConfirmOpen(false)}
+        open={cancelConfirmOpen && !terminal}
+        title="确认取消 DevWork"
+      >
+        <div className="space-y-5">
+          <p className="rounded-2xl border border-warning/25 bg-warning/10 p-4 text-sm leading-relaxed text-warning">
+            请确认这是一次有意操作，避免误触中断后台流程。
+          </p>
+          <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              className="inline-flex w-full items-center justify-center rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft transition hover:border-accent/50 hover:bg-panel hover:text-copy sm:w-auto"
+              disabled={actionPending === "cancel"}
+              onClick={() => setCancelConfirmOpen(false)}
+              type="button"
+            >
+              返回
+            </button>
+            <button
+              className="inline-flex w-full items-center justify-center rounded-2xl bg-danger px-5 py-3 text-sm font-semibold text-ink-invert disabled:opacity-50 sm:w-auto"
+              disabled={actionPending === "cancel"}
+              onClick={() => void cancelWork()}
+              type="button"
+            >
+              {actionPending === "cancel" ? "取消中..." : "确认取消"}
+            </button>
+          </div>
+        </div>
+      </AppDialog>
+
       <SectionPanel
         actions={
           <>
             <button
               className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
               disabled={actionPending !== null || terminal}
-              onClick={() => void cancelWork()}
+              onClick={() => setCancelConfirmOpen(true)}
               type="button"
             >
               {actionPending === "cancel" ? "取消中..." : "取消"}
@@ -460,6 +516,22 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
                     {actionPending === "continue" ? "继续中..." : "继续循环"}
                   </button>
                 </div>
+              </div>
+            </div>
+          ) : devWork.resume_available ? (
+            <div className="mt-4 rounded-2xl border border-warning/25 bg-warning/10 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-warning">
+                  DevWork 已升级，可从 {devWork.resume_step ?? "当前 Step"} 重新推进。
+                </p>
+                <button
+                  className="rounded-lg bg-warning px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-50"
+                  disabled={actionPending !== null}
+                  onClick={() => void resumeStep()}
+                  type="button"
+                >
+                  {actionPending === "resume" ? "恢复中..." : "从当前 Step 重跑"}
+                </button>
               </div>
             </div>
           ) : (

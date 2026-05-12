@@ -141,7 +141,12 @@ def _make_two_mount_step4_writer(mount_paths: dict[str, str]):
         out = Path(m.group(1))
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
-            json.dumps({"pass": True, "findings": []}), encoding="utf-8",
+            json.dumps({
+                "pass": True,
+                "plan_execution": [],
+                "findings": [],
+            }),
+            encoding="utf-8",
         )
         for mount_path in mount_paths.values():
             (Path(mount_path) / "HELLO.txt").write_text(
@@ -159,8 +164,8 @@ def _make_two_mount_step4_writer(mount_paths: dict[str, str]):
 async def test_round_invokes_three_acpx_calls(tmp_path):
     """PRD §SM #7: 单 round acpx 进程数 4 → 3.
 
-    Distinction: PRD's "process count" maps to **unique sessions opened**
-    (Step3 and Step4 share the build session = one process).
+    Distinction: PRD's "process count" maps to **unique session roles**
+    (Step3 and Step4 both use the build role name, but Step4 is cold).
     "Prompt call count" = number of step-handler dispatches = 4 per round
     (plan, step3-build, step4-build, review).
     """

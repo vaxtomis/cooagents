@@ -113,6 +113,7 @@ export interface DesignWork {
   is_running: boolean;
   // Phase 4 (repo-registry): persisted refs from design_work_repos.
   repo_refs: DesignRepoRefView[];
+  attachment_paths: string[];
 }
 
 export type DesignWorkPage = PaginatedResult<DesignWork>;
@@ -124,6 +125,7 @@ export interface DesignWorkRetrySource {
   needs_frontend_mockup: boolean;
   agent: AgentKind | null;
   repo_refs: RepoRef[];
+  attachment_paths: string[];
 }
 
 export interface DesignDoc {
@@ -165,6 +167,8 @@ export interface DevWork {
   updated_at: string;
   is_running: boolean;
   continue_available: boolean;
+  resume_available: boolean;
+  resume_step: DevWorkStep | null;
   progress: DevWorkProgressSnapshot | null;
   // Phase 4 (repo-registry): persisted refs from dev_work_repos.
   repo_refs: DevRepoRefView[];
@@ -230,6 +234,15 @@ export interface WorkspaceSyncReport {
   fs_only: string[];
   db_only: string[];
   in_sync: string[];
+}
+
+export interface WorkspaceAttachment {
+  filename: string;
+  markdown_path: string;
+  content_hash: string | null;
+  byte_size: number | null;
+  converted_from: "md" | "docx";
+  image_paths: string[];
 }
 
 // Phase 8 — four PRD Success Metrics served by GET /api/v1/metrics/workspaces.
@@ -322,6 +335,8 @@ export interface CreateDesignWorkPayload {
   // Phase 4 (repo-registry): optional repo binding. Empty list keeps
   // pure-doc DesignWorks creatable; omit (or send `[]`) when none.
   repo_refs?: RepoRef[];
+  // Workspace-relative markdown paths returned by the attachment upload API.
+  attachment_paths?: string[];
 }
 
 export interface RetryDesignWorkPayload {
@@ -331,6 +346,7 @@ export interface RetryDesignWorkPayload {
   needs_frontend_mockup?: boolean;
   agent?: AgentKind | null;
   repo_refs?: RepoRef[];
+  attachment_paths?: string[];
 }
 
 export interface CreateDevWorkPayload {

@@ -165,7 +165,12 @@ def step4_write_findings(step_tag, round_n, prompt, worktree):
     out = Path(m.group(1))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
-        json.dumps({"pass": True, "findings": []}), encoding="utf-8"
+        json.dumps({
+            "pass": True,
+            "plan_execution": [],
+            "findings": [],
+        }),
+        encoding="utf-8",
     )
     return ("ok", 0)
 

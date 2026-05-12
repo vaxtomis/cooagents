@@ -214,7 +214,7 @@ sequenceDiagram
 - `STEP2`、`STEP3`、`STEP4`、`STEP5` 的提示词和中间产物都写入 Workspace。
 - DevWork 现在优先使用 **session 模式**：
   - `plan`：Step2 独立 session
-  - `build`：Step3 与 Step4 共享 warm session
+  - `build`：Step3 与 Step4 使用同名但分离的 session；Step4 进入前会关闭 Step3 的探索上下文
   - `review`：Step5 独立 cold session
 - 心跳会把最新进度写进 `dev_works.current_progress_json`，前端 `GET /dev-works/{id}` 可以直接读到。
 

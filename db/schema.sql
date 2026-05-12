@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS workspace_files (
   kind              TEXT NOT NULL CHECK(kind IN (
                         'design_doc','design_input','iteration_note',
                         'prompt','image','workspace_md',
-                        'context','artifact','feedback','other')),
+                        'context','artifact','attachment','feedback','other')),
   content_hash      TEXT,                          -- sha256 of local bytes; NULL before first write
   byte_size         INTEGER,
   local_mtime_ns    INTEGER,

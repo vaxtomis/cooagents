@@ -4,6 +4,8 @@
 
 $user_input
 
+$supplemental_materials
+
 ## 产出要求
 
 输出一份 Markdown 设计文档，必须以 YAML front-matter 开头（`---` 包裹），包含以下字段：

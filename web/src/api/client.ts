@@ -109,8 +109,12 @@ export async function apiRequest<T>(
 
   let payload: BodyInit | undefined;
   if (body !== undefined) {
-    resolvedHeaders.set("Content-Type", "application/json");
-    payload = JSON.stringify(body);
+    if (typeof FormData !== "undefined" && body instanceof FormData) {
+      payload = body;
+    } else {
+      resolvedHeaders.set("Content-Type", "application/json");
+      payload = JSON.stringify(body);
+    }
   }
 
   const fetchInit: RequestInit = {

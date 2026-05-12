@@ -51,6 +51,12 @@ export async function continueDevWork(
   });
 }
 
+export async function resumeDevWorkStep(id: string): Promise<DevWork> {
+  return apiFetch<DevWork>(`/dev-works/${encodeURIComponent(id)}/resume-step`, {
+    method: "POST",
+  });
+}
+
 export async function cancelDevWork(id: string): Promise<void> {
   await apiFetch<void>(`/dev-works/${encodeURIComponent(id)}/cancel`, { method: "POST" });
 }

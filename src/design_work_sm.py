@@ -21,7 +21,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.design_prompt_composer import PromptInputs, compose_prompt
+from src.design_attachments import validate_attachment_paths
+from src.design_prompt_composer import PromptAttachment, PromptInputs, compose_prompt
 from src.design_validator import validate_design_markdown
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.mockup_renderer import MockupSpec, PathMockupRenderer
@@ -31,6 +32,9 @@ from src.storage.registry import WorkspaceFileRegistry
 from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
+
+_MAX_ATTACHMENT_PROMPT_CHARS = 20_000
+_MAX_ATTACHMENT_PROMPT_TOTAL_CHARS = 80_000
 
 
 class DesignWorkStateMachine:
@@ -231,6 +235,25 @@ class DesignWorkStateMachine:
         cap = self.config.design.max_loops
         if max_loops is not None and not 0 <= max_loops <= cap:
             raise BadRequestError(f"max_loops override {max_loops} exceeds configured cap {cap}")
+
+    async def _validate_existing_attachments(
+        self, ws: dict, paths: list[str] | None
+    ) -> list[str]:
+        normalized = validate_attachment_paths(paths)
+        for rel in normalized:
+            try:
+                await self.registry.read_text(
+                    workspace_slug=ws["slug"], relative_path=rel,
+                )
+            except UnicodeDecodeError as exc:
+                raise BadRequestError(
+                    f"attachment {rel!r} is not valid UTF-8 markdown"
+                ) from exc
+            except NotFoundError as exc:
+                raise BadRequestError(
+                    f"attachment {rel!r} was not found in the workspace"
+                ) from exc
+        return normalized
     # ---- public API ----
 
     async def create(
@@ -247,6 +270,7 @@ class DesignWorkStateMachine:
         rubric_threshold: int | None = None,
         max_loops: int | None = None,
         repo_refs: list[tuple[RepoRef, str | None]] | None = None,
+        attachment_paths: list[str] | None = None,
     ) -> dict:
         """Create a DesignWork plus its ``design_work_repos`` rows atomically.
 
@@ -263,6 +287,9 @@ class DesignWorkStateMachine:
                 f"workspace {workspace_id!r} is archived; cannot create DesignWork"
             )
         self._validate_max_loops_override(max_loops)
+        attachment_paths = await self._validate_existing_attachments(
+            ws, attachment_paths
+        )
 
         wid = self._new_id()
         now = self._now()
@@ -286,6 +313,7 @@ class DesignWorkStateMachine:
             for key, value in (
                 ("rubric_threshold_override", rubric_threshold),
                 ("max_loops_override", max_loops),
+                ("attachment_paths", attachment_paths or None),
             )
             if value is not None
         }
@@ -477,6 +505,9 @@ class DesignWorkStateMachine:
         user_input = await self.registry.read_text(
             workspace_slug=ws["slug"], relative_path=dw["user_input_path"],
         )
+        attachments = await self._load_prompt_attachments(
+            ws, _decode_attachment_paths(dw.get("gates_json")),
+        )
         # LLM receives an absolute output path so it can `Write` without
         # guessing a cwd; relative paths are workspace-internal only.
         output_abs = (
@@ -492,6 +523,7 @@ class DesignWorkStateMachine:
                 output_path=output_abs,
                 parent_version=dw["parent_version"],
                 missing_sections=missing,
+                attachments=attachments,
             )
         )
 
@@ -513,6 +545,35 @@ class DesignWorkStateMachine:
         """
         root = Path(self.workspaces.workspaces_root)
         return (root / ws["slug"] / relative_path).as_posix()
+
+    async def _load_prompt_attachments(
+        self, ws: dict, paths: list[str]
+    ) -> list[PromptAttachment]:
+        remaining = _MAX_ATTACHMENT_PROMPT_TOTAL_CHARS
+        attachments: list[PromptAttachment] = []
+        for rel in validate_attachment_paths(paths):
+            if remaining <= 0:
+                break
+            try:
+                content = await self.registry.read_text(
+                    workspace_slug=ws["slug"], relative_path=rel,
+                )
+            except Exception:
+                logger.exception("failed to read design attachment %s", rel)
+                content = f"[Attachment {rel!r} could not be read.]"
+            allowed = min(_MAX_ATTACHMENT_PROMPT_CHARS, remaining)
+            truncated = len(content) > allowed
+            clipped = content[:allowed]
+            attachments.append(
+                PromptAttachment(
+                    path=rel,
+                    content=clipped,
+                    truncated=truncated,
+                    original_chars=len(content),
+                )
+            )
+            remaining -= len(clipped)
+        return attachments
 
     async def _d4_llm_generate(self, dw: dict) -> None:
         ws = await self.workspaces.get(dw["workspace_id"])
@@ -863,3 +924,11 @@ def _decode_gates(blob: str | None) -> dict:
         return data if isinstance(data, dict) else {}
     except (ValueError, TypeError):
         return {}
+
+
+def _decode_attachment_paths(blob: str | None) -> list[str]:
+    gates = _decode_gates(blob)
+    paths = gates.get("attachment_paths")
+    if not isinstance(paths, list):
+        return []
+    return [p for p in paths if isinstance(p, str)]

@@ -62,3 +62,8 @@ $next_round_hints_guide
 - `problem_category`：枚举，**仅可取** `"req_gap"`、`"impl_gap"`、`"design_hollow"` 之一，或 `null`。按上面「打分聚合规则」选取；`null` 仅当 `score >= $rubric_threshold` 时使用。
 
 不要写入其它文件。
+
+
+## 退出前检查
+
+结束 Step5 前，必须重新读取 `$output_json_path` 并确认文件存在、非空、可被 JSON 解析，且顶层字段至少包含 `score`、`issues`、`problem_category`。只把 JSON 打印到 stdout 不算完成。

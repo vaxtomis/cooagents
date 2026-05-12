@@ -225,6 +225,34 @@ async def test_create_projects_max_loops_override(client):
     assert projected.json()["max_loops"] == 1
 
 
+async def test_create_accepts_uploaded_attachment_paths(client):
+    ws = await _create_workspace(client, slug="attach-route")
+    upload = await client.post(
+        f"/api/v1/workspaces/{ws['id']}/attachments",
+        files={"file": ("brief.md", b"# Brief\n\nDetails", "text/markdown")},
+    )
+    assert upload.status_code == 201, upload.text
+    attachment_path = upload.json()["markdown_path"]
+
+    r = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Attach",
+            "slug": "attach",
+            "user_input": "some substantial user input text",
+            "attachment_paths": [attachment_path],
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["attachment_paths"] == [attachment_path]
+
+    projected = await client.get(f"/api/v1/design-works/{body['id']}")
+    assert projected.status_code == 200
+    assert projected.json()["attachment_paths"] == [attachment_path]
+
+
 async def test_list_requires_workspace_id(client):
     r = await client.get("/api/v1/design-works")
     assert r.status_code == 422  # missing required query param

@@ -17,6 +17,7 @@ vi.mock("../api/devWorks", () => ({
   getDevWork: vi.fn(),
   cancelDevWork: vi.fn(),
   continueDevWork: vi.fn(),
+  resumeDevWorkStep: vi.fn(),
   pushDevWorkBranches: vi.fn(),
 }));
 vi.mock("../api/devIterationNotes", () => ({
@@ -33,7 +34,13 @@ vi.mock("../api/workspaceEvents", () => ({
   listWorkspaceEvents: vi.fn(),
 }));
 
-import { continueDevWork, getDevWork, pushDevWorkBranches } from "../api/devWorks";
+import {
+  cancelDevWork,
+  continueDevWork,
+  getDevWork,
+  pushDevWorkBranches,
+  resumeDevWorkStep,
+} from "../api/devWorks";
 import { listIterationNotes } from "../api/devIterationNotes";
 import { listReviews } from "../api/reviews";
 import { getGate } from "../api/gates";
@@ -65,6 +72,8 @@ const devWork: DevWork = {
   updated_at: "2026-04-23T00:00:00Z",
   is_running: false,
   continue_available: false,
+  resume_available: false,
+  resume_step: null,
   progress: null,
   repo_refs: [],
   repos: [],
@@ -152,6 +161,27 @@ describe("DevWorkPage", () => {
     expect(
       await screen.findByRole("img", { name: /DevWork 实际执行轮次 2\/5/ }),
     ).toBeInTheDocument();
+  });
+
+  it("requires confirmation before cancelling a DevWork", async () => {
+    vi.mocked(getDevWork).mockResolvedValue(devWork);
+    vi.mocked(cancelDevWork).mockResolvedValue(undefined);
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+    expect(cancelDevWork).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("确认取消 DevWork")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认取消" }));
+
+    await waitFor(() => {
+      expect(cancelDevWork).toHaveBeenCalledWith("dv-1");
+    });
   });
 
   it("renders the per-mount push status grid with err tooltip", async () => {
@@ -339,6 +369,34 @@ describe("DevWorkPage", () => {
 
     await waitFor(() => {
       expect(continueDevWork).toHaveBeenCalledWith("dv-1", 3, 90);
+    });
+  });
+
+  it("resumes an artifact-failure escalation from the recorded step", async () => {
+    vi.mocked(getDevWork).mockResolvedValue({
+      ...devWork,
+      current_step: "ESCALATED",
+      escalated_at: "2026-04-23T00:00:01Z",
+      resume_available: true,
+      resume_step: "STEP5_REVIEW",
+    });
+    vi.mocked(resumeDevWorkStep).mockResolvedValue({
+      ...devWork,
+      current_step: "STEP5_REVIEW",
+      resume_available: false,
+      resume_step: null,
+      is_running: true,
+    });
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Step/ }));
+
+    await waitFor(() => {
+      expect(resumeDevWorkStep).toHaveBeenCalledWith("dv-1");
     });
   });
 

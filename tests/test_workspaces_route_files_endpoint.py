@@ -113,6 +113,143 @@ async def test_get_files_404_for_unknown_workspace(client):
     assert r.status_code == 404
 
 
+async def test_upload_markdown_attachment_saves_workspace_file(client):
+    c, ws_root = client
+    ws = await _create_workspace(c, slug="att-md")
+    payload = b"# Brief\n\nMore details"
+    r = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/attachments",
+        files={"file": ("brief.md", payload, "text/markdown")},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["filename"] == "brief.md"
+    assert body["markdown_path"].startswith("attachments/brief-")
+    assert body["markdown_path"].endswith(".md")
+    assert body["converted_from"] == "md"
+
+    on_disk = ws_root / "att-md" / body["markdown_path"]
+    assert on_disk.read_bytes() == payload
+
+    idx = await c.get(f"/api/v1/workspaces/{ws['id']}/files")
+    rows = {
+        row["relative_path"]: row
+        for row in idx.json()["files"]
+    }
+    assert rows[body["markdown_path"]]["kind"] == "attachment"
+
+
+async def test_upload_docx_attachment_converts_to_markdown(client, monkeypatch):
+    from routes import workspaces as ws_route
+
+    async def fake_convert_docx_to_md(input_path, output_path, **_kwargs):
+        assert input_path.read_bytes() == b"docx bytes"
+        output_path.write_text("# Converted\n\nDoc text", encoding="utf-8")
+        images_dir = output_path.parent / f"{output_path.stem}_images"
+        images_dir.mkdir()
+        (images_dir / "image_001.png").write_bytes(b"png")
+
+    monkeypatch.setattr(ws_route, "convert_docx_to_md", fake_convert_docx_to_md)
+
+    c, ws_root = client
+    ws = await _create_workspace(c, slug="att-docx")
+    r = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/attachments",
+        files={
+            "file": (
+                "requirements.docx",
+                b"docx bytes",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["converted_from"] == "docx"
+    assert body["markdown_path"].startswith("attachments/requirements-")
+    assert body["image_paths"] and body["image_paths"][0].endswith("image_001.png")
+    assert (ws_root / "att-docx" / body["markdown_path"]).read_text(
+        encoding="utf-8"
+    ) == "# Converted\n\nDoc text"
+    assert (ws_root / "att-docx" / body["image_paths"][0]).read_bytes() == b"png"
+
+
+async def test_upload_docx_attachment_rejects_large_converted_markdown(
+    client, monkeypatch
+):
+    from routes import workspaces as ws_route
+
+    async def fake_convert_docx_to_md(input_path, output_path, **_kwargs):
+        output_path.write_text("12345", encoding="utf-8")
+
+    monkeypatch.setattr(ws_route, "convert_docx_to_md", fake_convert_docx_to_md)
+    monkeypatch.setattr(ws_route, "MAX_ATTACHMENT_CONVERTED_MARKDOWN_BYTES", 4)
+
+    c, _ = client
+    ws = await _create_workspace(c, slug="att-docx-large-md")
+    r = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/attachments",
+        files={
+            "file": (
+                "requirements.docx",
+                b"docx bytes",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert r.status_code == 400, r.text
+    assert "converted markdown attachment exceeds" in r.json()["message"]
+    idx = await c.get(f"/api/v1/workspaces/{ws['id']}/files")
+    paths = {row["relative_path"] for row in idx.json()["files"]}
+    assert not any(path.startswith("attachments/") for path in paths)
+
+
+async def test_upload_docx_attachment_rejects_large_converted_images(
+    client, monkeypatch
+):
+    from routes import workspaces as ws_route
+
+    async def fake_convert_docx_to_md(input_path, output_path, **_kwargs):
+        output_path.write_text("# Converted", encoding="utf-8")
+        images_dir = output_path.parent / f"{output_path.stem}_images"
+        images_dir.mkdir()
+        (images_dir / "image_001.png").write_bytes(b"12")
+        (images_dir / "image_002.png").write_bytes(b"34")
+
+    monkeypatch.setattr(ws_route, "convert_docx_to_md", fake_convert_docx_to_md)
+    monkeypatch.setattr(ws_route, "MAX_ATTACHMENT_TOTAL_IMAGE_BYTES", 3)
+
+    c, _ = client
+    ws = await _create_workspace(c, slug="att-docx-large-img")
+    r = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/attachments",
+        files={
+            "file": (
+                "requirements.docx",
+                b"docx bytes",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert r.status_code == 400, r.text
+    assert "converted attachment images exceed" in r.json()["message"]
+    idx = await c.get(f"/api/v1/workspaces/{ws['id']}/files")
+    paths = {row["relative_path"] for row in idx.json()["files"]}
+    assert not any(path.startswith("attachments/") for path in paths)
+
+
+async def test_upload_attachment_rejects_unsupported_extension(client):
+    c, _ = client
+    ws = await _create_workspace(c, slug="att-bad")
+    r = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/attachments",
+        files={"file": ("brief.txt", b"nope", "text/plain")},
+    )
+    assert r.status_code == 400, r.text
+
+
 async def test_post_first_write_creates_row_and_file(client):
     c, ws_root = client
     ws = await _create_workspace(c, slug="post-fw")

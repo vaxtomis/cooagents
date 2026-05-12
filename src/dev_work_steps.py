@@ -56,6 +56,78 @@ _PLAN_CHECKBOX_RE = re.compile(
 )
 
 
+_REPAIR_STDOUT_LIMIT = 6000
+
+
+def _tail_for_repair(text: str, limit: int = _REPAIR_STDOUT_LIMIT) -> str:
+    """Keep repair prompts small even when the failed attempt was chatty."""
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _compose_step4_artifact_repair_prompt(
+    *, output_path: str, parse_reason: str, stdout: str,
+) -> str:
+    return (
+        "# DevWork STEP4 artifact repair\n\n"
+        "## System retry feedback\n\n"
+        "The previous STEP4 attempt finished but the required findings "
+        f"artifact failed validation: {parse_reason}\n\n"
+        "Do not modify source code, iteration notes, or ctx files. Only write "
+        f"the missing/invalid self-review artifact to `{output_path}`.\n\n"
+        f"灏嗚嚜瀹＄粨鏋滃啓鍏?`{output_path}`.\n\n"
+        "Required JSON shape:\n"
+        "```json\n"
+        "{\"pass\": true, \"plan_execution\": [{\"id\": \"DW-01\", "
+        "\"status\": \"done\", \"evidence\": [\"path/to/file.ts:10\"]}], "
+        "\"findings\": []}\n"
+        "```\n\n"
+        "Before exiting, read the file back and confirm it is non-empty "
+        "valid JSON. stdout is not accepted as the artifact.\n\n"
+        "Previous stdout tail:\n"
+        "```text\n"
+        f"{_tail_for_repair(stdout)}\n"
+        "```\n"
+    )
+
+
+def _compose_step5_artifact_repair_prompt(
+    *, output_path: str, parse_reason: str, stdout: str,
+) -> str:
+    return (
+        "# DevWork STEP5 review artifact repair\n\n"
+        "## System retry feedback\n\n"
+        "The previous STEP5 review finished but the required review artifact "
+        f"failed validation: Step5 unparseable: {parse_reason}\n\n"
+        "Do not re-review the code and do not modify source code, Step4 "
+        "findings, iteration notes, or ctx files. Use the review conclusion "
+        "already present in this session/stdout and write only the final "
+        f"review JSON to `{output_path}`.\n\n"
+        f"灏嗙粨鏋滃啓鍏?`{output_path}`.\n\n"
+        "Required JSON shape:\n"
+        "```json\n"
+        "{\"score\": 90, \"issues\": [], \"plan_verification\": [], "
+        "\"next_round_hints\": [], \"problem_category\": null}\n"
+        "```\n\n"
+        "Before exiting, read the file back and confirm it is non-empty "
+        "valid JSON. stdout is not accepted as the artifact.\n\n"
+        "Previous stdout tail:\n"
+        "```text\n"
+        f"{_tail_for_repair(stdout)}\n"
+        "```\n"
+    )
+
+
+def _is_step4_findings_shape(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("pass"), bool)
+        and isinstance(value.get("plan_execution"), list)
+        and isinstance(value.get("findings"), list)
+    )
+
+
 def _apply_plan_verification_checkboxes(
     markdown: str, plan_verification: list[dict],
 ) -> str:
@@ -140,6 +212,191 @@ class DevWorkStepHandlersMixin:
                 if loop.time() >= deadline:
                     raise
                 await asyncio.sleep(min(interval_s, deadline - loop.time()))
+
+    async def _repair_step4_findings_artifact(
+        self,
+        dw: dict[str, Any],
+        *,
+        workspace_row: dict[str, Any],
+        round_n: int,
+        findings_rel: str,
+        parse_reason: str,
+        stdout: str,
+    ) -> dict[str, Any] | None:
+        """Ask the current Step4 session to write only its missing artifact."""
+        repair_prompt = _compose_step4_artifact_repair_prompt(
+            output_path=self._abs_for(workspace_row, findings_rel),
+            parse_reason=parse_reason,
+            stdout=stdout,
+        )
+        prompt_rel = (
+            f"devworks/{dw['id']}/prompts/"
+            f"step4-round{round_n}-artifact-repair.md"
+        )
+        await self.registry.put_markdown(
+            workspace_row=workspace_row,
+            relative_path=prompt_rel,
+            text=repair_prompt,
+            kind="prompt",
+        )
+        rc, repair_stdout = await self._run_llm(
+            dw,
+            agent=dw["agent"],
+            worktree=dw["worktree_path"],
+            timeout=min(120, self.config.devwork.step4_acpx_wall_ceiling_s),
+            task_file=self._abs_for(workspace_row, prompt_rel),
+            step_tag="STEP4_DEVELOP",
+            round_n=round_n,
+            session_role="build",
+        )
+        if rc != 0:
+            logger.warning(
+                "dev_work %s Step4 artifact repair failed rc=%s stdout=%r",
+                dw["id"],
+                rc,
+                repair_stdout[-512:],
+            )
+            return None
+        try:
+            await self._index_step4_findings_with_wait(
+                workspace_row=workspace_row,
+                relative_path=findings_rel,
+            )
+            findings_raw = await self.registry.read_text(
+                workspace_slug=workspace_row["slug"],
+                relative_path=findings_rel,
+            )
+            parsed = json.loads(findings_raw)
+            if _is_step4_findings_shape(parsed):
+                return parsed
+            await self.registry.delete(
+                workspace_row=workspace_row,
+                relative_path=findings_rel,
+            )
+            return None
+        except (NotFoundError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "dev_work %s Step4 artifact repair output invalid: %s",
+                dw["id"],
+                exc,
+            )
+            try:
+                await self.registry.delete(
+                    workspace_row=workspace_row,
+                    relative_path=findings_rel,
+                )
+            except Exception:
+                logger.warning(
+                    "delete invalid Step4 repair artifact failed for %s "
+                    "round=%s",
+                    dw["id"],
+                    round_n,
+                    exc_info=True,
+                )
+            return None
+
+    async def _read_step5_review_outcome(
+        self,
+        *,
+        workspace_row: dict[str, Any],
+        review_rel: str,
+        review_abs: str,
+    ) -> tuple[ReviewOutcome | None, str | None, bool, int]:
+        review_ref = await self.registry.stat(
+            workspace_slug=workspace_row["slug"],
+            relative_path=review_rel,
+        )
+        review_exists = review_ref is not None
+        review_size = review_ref.size if review_ref is not None else 0
+        if review_ref is None:
+            return (
+                None,
+                f"review artifact missing: {review_rel}",
+                review_exists,
+                review_size,
+            )
+        if review_ref.size <= 0:
+            return (
+                None,
+                f"review artifact empty: {review_rel}",
+                review_exists,
+                review_size,
+            )
+        try:
+            await self.registry.index_existing(
+                workspace_row=workspace_row,
+                relative_path=review_rel,
+                kind="artifact",
+            )
+        except NotFoundError:
+            pass
+        try:
+            return (
+                parse_review_output("", output_json_path=review_abs),
+                None,
+                review_exists,
+                review_size,
+            )
+        except BadRequestError as exc:
+            return None, str(exc), review_exists, review_size
+
+    async def _repair_step5_review_artifact(
+        self,
+        dw: dict[str, Any],
+        *,
+        workspace_row: dict[str, Any],
+        round_n: int,
+        review_rel: str,
+        review_abs: str,
+        parse_reason: str,
+        stdout: str,
+    ) -> ReviewOutcome | None:
+        """Ask the current Step5 session to persist only the review JSON."""
+        repair_prompt = _compose_step5_artifact_repair_prompt(
+            output_path=review_abs,
+            parse_reason=parse_reason,
+            stdout=stdout,
+        )
+        prompt_rel = (
+            f"devworks/{dw['id']}/prompts/"
+            f"step5-round{round_n}-artifact-repair.md"
+        )
+        await self.registry.put_markdown(
+            workspace_row=workspace_row,
+            relative_path=prompt_rel,
+            text=repair_prompt,
+            kind="prompt",
+        )
+        rc, repair_stdout = await self._run_llm(
+            dw,
+            agent=dw["agent"],
+            worktree=dw["worktree_path"],
+            timeout=min(120, self.config.devwork.step5_timeout),
+            task_file=self._abs_for(workspace_row, prompt_rel),
+            step_tag="STEP5_REVIEW",
+            round_n=round_n,
+            session_role="review",
+        )
+        if rc != 0:
+            logger.warning(
+                "dev_work %s Step5 artifact repair failed rc=%s stdout=%r",
+                dw["id"],
+                rc,
+                repair_stdout[-512:],
+            )
+            return None
+        outcome, reason, _exists, _size = await self._read_step5_review_outcome(
+            workspace_row=workspace_row,
+            review_rel=review_rel,
+            review_abs=review_abs,
+        )
+        if outcome is None:
+            logger.warning(
+                "dev_work %s Step5 artifact repair output invalid: %s",
+                dw["id"],
+                reason,
+            )
+        return outcome
 
     async def _s2_iteration(self, dw: dict[str, Any]) -> None:
         """Step2 (F2=B): SM writes header -> LLM appends three H2 sections."""
@@ -367,6 +624,10 @@ class DevWorkStepHandlersMixin:
     async def _s4_develop(self, dw: dict[str, Any]) -> None:
         """Implement + self-review once; parse findings JSON."""
         round_n = dw["iteration_rounds"] + 1
+        # Step3 and Step4 use the same build role name for lifecycle
+        # bookkeeping, but Step4 should not inherit Step3's exploratory
+        # conversation. Close the Step3 build session before opening Step4's.
+        await self._delete_role_session(dw["id"], round_n, "build")
         ws = await self.workspaces.get(dw["workspace_id"])
         note = await self.iteration_notes.latest_for(dw["id"])
         if note is None:
@@ -407,7 +668,7 @@ class DevWorkStepHandlersMixin:
             text=prompt, kind="prompt",
         )
 
-        rc, _stdout = await self._run_llm(
+        rc, stdout = await self._run_llm(
             dw,
             agent=dw["agent"],
             worktree=dw["worktree_path"],
@@ -432,24 +693,62 @@ class DevWorkStepHandlersMixin:
                 workspace_row=ws, relative_path=findings_rel,
             )
         except NotFoundError:
+            findings = await self._repair_step4_findings_artifact(
+                dw,
+                workspace_row=ws,
+                round_n=round_n,
+                findings_rel=findings_rel,
+                parse_reason="Step4 findings JSON missing",
+                stdout=stdout,
+            )
+            if findings is None:
+                await self._loop_or_escalate(
+                    dw,
+                    back_to=DevWorkStep.STEP4_DEVELOP,
+                    reason="Step4 findings JSON missing",
+                    problem_category=ProblemCategory.impl_gap,
+                )
+                return
+        else:
+            try:
+                findings_raw = await self.registry.read_text(
+                    workspace_slug=ws["slug"], relative_path=findings_rel,
+                )
+                findings = json.loads(findings_raw)
+            except (NotFoundError, json.JSONDecodeError) as exc:
+                findings = await self._repair_step4_findings_artifact(
+                    dw,
+                    workspace_row=ws,
+                    round_n=round_n,
+                    findings_rel=findings_rel,
+                    parse_reason=f"Step4 findings JSON invalid: {exc}",
+                    stdout=stdout,
+                )
+                if findings is None:
+                    await self._loop_or_escalate(
+                        dw,
+                        back_to=DevWorkStep.STEP4_DEVELOP,
+                        reason=f"Step4 findings JSON invalid: {exc}",
+                        problem_category=ProblemCategory.impl_gap,
+                    )
+                    return
+        if not _is_step4_findings_shape(findings):
+            try:
+                await self.registry.delete(
+                    workspace_row=ws,
+                    relative_path=findings_rel,
+                )
+            except Exception:
+                logger.warning(
+                    "delete invalid Step4 findings failed for %s round=%s",
+                    dw["id"],
+                    round_n,
+                    exc_info=True,
+                )
             await self._loop_or_escalate(
                 dw,
                 back_to=DevWorkStep.STEP4_DEVELOP,
-                reason="Step4 findings JSON missing",
-                problem_category=ProblemCategory.impl_gap,
-            )
-            return
-
-        try:
-            findings_raw = await self.registry.read_text(
-                workspace_slug=ws["slug"], relative_path=findings_rel,
-            )
-            findings = json.loads(findings_raw)
-        except (NotFoundError, json.JSONDecodeError) as exc:
-            await self._loop_or_escalate(
-                dw,
-                back_to=DevWorkStep.STEP4_DEVELOP,
-                reason=f"Step4 findings JSON invalid: {exc}",
+                reason="Step4 findings JSON invalid: shape mismatch",
                 problem_category=ProblemCategory.impl_gap,
             )
             return
@@ -689,31 +988,19 @@ class DevWorkStepHandlersMixin:
 
         outcome: ReviewOutcome | None = None
         parse_reason: str | None = None
-        review_ref = await self.registry.stat(
-            workspace_slug=ws["slug"], relative_path=review_rel,
-        )
-        review_exists = review_ref is not None
-        review_size = review_ref.size if review_ref is not None else 0
-        if rc == 0 and review_ref is None:
-            parse_reason = f"review artifact missing: {review_rel}"
-        elif rc == 0 and review_ref.size <= 0:
-            parse_reason = f"review artifact empty: {review_rel}"
-        elif rc == 0:
-            # Step5's DevWork contract requires a non-empty review file.
-            # stdout-only success remains a parser fallback outside this SM.
-            try:
-                await self.registry.index_existing(
-                    workspace_row=ws, relative_path=review_rel,
-                    kind="artifact",
-                )
-            except NotFoundError:
-                pass
-            try:
-                outcome = parse_review_output(
-                    "", output_json_path=review_abs
-                )
-            except BadRequestError as exc:
-                parse_reason = str(exc)
+        review_exists = False
+        review_size = 0
+        if rc == 0:
+            (
+                outcome,
+                parse_reason,
+                review_exists,
+                review_size,
+            ) = await self._read_step5_review_outcome(
+                workspace_row=ws,
+                review_rel=review_rel,
+                review_abs=review_abs,
+            )
         else:
             parse_reason = f"rc={rc}"
 
@@ -746,13 +1033,26 @@ class DevWorkStepHandlersMixin:
                     problem_category=None,
                 )
                 return
-            await self._loop_or_escalate(
-                dw,
-                back_to=DevWorkStep.STEP5_REVIEW,
-                reason=f"Step5 unparseable: {parse_reason}",
-                problem_category=None,
-            )
-            return
+            if rc == 0:
+                outcome = await self._repair_step5_review_artifact(
+                    dw,
+                    workspace_row=ws,
+                    round_n=round_n,
+                    review_rel=review_rel,
+                    review_abs=review_abs,
+                    parse_reason=parse_reason,
+                    stdout=stdout,
+                )
+                if outcome is not None:
+                    parse_reason = None
+            if outcome is None:
+                await self._loop_or_escalate(
+                    dw,
+                    back_to=DevWorkStep.STEP5_REVIEW,
+                    reason=f"Step5 unparseable: {parse_reason}",
+                    problem_category=None,
+                )
+                return
 
         await self._record_review(
             dw,
