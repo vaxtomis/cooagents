@@ -123,6 +123,45 @@ async def test_ensure_worktree_reuses_existing(
     assert Path(wt1).is_dir()
 
 
+async def test_ensure_worktree_repairs_existing_unborn_head(
+    repo: Path, tmp_path: Path
+) -> None:
+    main_sha = await _git("rev-parse", "main", cwd=repo)
+    wt_path_in = _wt(tmp_path, "devwork-unborn")
+    await _git("worktree", "add", "--detach", wt_path_in, "main", cwd=repo)
+    await _git("checkout", "--orphan", "devwork/unborn", cwd=wt_path_in)
+    (Path(wt_path_in) / "feature.txt").write_text("feature\n", encoding="utf-8")
+
+    branch, wt = await ensure_worktree(
+        str(repo),
+        "devwork/unborn",
+        wt_path_in,
+        start_point=main_sha,
+    )
+
+    assert branch == "devwork/unborn"
+    assert wt == wt_path_in
+    assert await _git("rev-parse", "HEAD", cwd=wt) == main_sha
+    assert (
+        await _git(
+            "rev-parse", "--verify", "refs/heads/devwork/unborn", cwd=repo,
+        )
+        == main_sha
+    )
+    assert "?? feature.txt" in await _git("status", "--short", cwd=wt)
+
+
+async def test_ensure_worktree_rejects_unborn_head_without_start_point(
+    repo: Path, tmp_path: Path
+) -> None:
+    wt_path_in = _wt(tmp_path, "devwork-unborn-no-start")
+    await _git("worktree", "add", "--detach", wt_path_in, "main", cwd=repo)
+    await _git("checkout", "--orphan", "devwork/unborn-no-start", cwd=wt_path_in)
+
+    with pytest.raises(RuntimeError, match="unborn HEAD"):
+        await ensure_worktree(str(repo), "devwork/unborn-no-start", wt_path_in)
+
+
 async def test_ensure_worktree_custom_branch_name(
     repo: Path, tmp_path: Path
 ) -> None:

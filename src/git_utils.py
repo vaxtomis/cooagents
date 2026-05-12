@@ -104,6 +104,50 @@ async def _ensure_branch_descends_from(
         )
 
 
+async def _repair_unborn_worktree_head(
+    worktree_path: str,
+    branch_name: str,
+    start_point: str | None,
+) -> None:
+    """Ensure an existing worktree has a real HEAD commit.
+
+    A prior interrupted ``git worktree add`` or an accidental
+    ``git checkout --orphan`` can leave a registered worktree on the expected
+    branch while ``HEAD`` has no commit. In that state ``git diff HEAD`` and
+    ``git log`` fail later in DevWork Step5. ``git reset --mixed`` creates the
+    branch ref at ``start_point`` without deleting worktree edits.
+    """
+    _, _, rc = await run_git(
+        "rev-parse", "--verify", "HEAD^{commit}",
+        cwd=worktree_path, check=False,
+    )
+    if rc == 0:
+        return
+    if start_point is None:
+        raise RuntimeError(
+            f"worktree {worktree_path!r} for branch {branch_name!r} "
+            "has an unborn HEAD and no start_point was provided"
+        )
+    await run_git("reset", "--mixed", start_point, cwd=worktree_path)
+
+
+async def _current_worktree_branch(worktree_path: str) -> str:
+    head, _, rc = await run_git(
+        "symbolic-ref", "--quiet", "--short", "HEAD",
+        cwd=worktree_path, check=False,
+    )
+    if rc == 0 and head:
+        return head
+
+    head, err, rc = await run_git(
+        "rev-parse", "--abbrev-ref", "HEAD",
+        cwd=worktree_path, check=False,
+    )
+    if rc == 0:
+        return head
+    raise RuntimeError(f"cannot determine worktree HEAD: {err}")
+
+
 async def ensure_worktree(
     repo_path: str,
     branch_name: str,
@@ -150,14 +194,13 @@ async def ensure_worktree(
     out, _, _ = await run_git("worktree", "list", "--porcelain", cwd=repo_path)
     wt_path_forward = wt_path.replace("\\", "/")
     if wt_path_forward in out or wt_path in out:
-        head, _, _ = await run_git(
-            "rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path,
-        )
+        head = await _current_worktree_branch(wt_path)
         if head != branch_name:
             raise RuntimeError(
                 f"worktree {wt_path!r} is checked out at {head!r}, "
                 f"expected {branch_name!r}"
             )
+        await _repair_unborn_worktree_head(wt_path, branch_name, start_point)
         await _ensure_branch_descends_from(
             repo_path, branch_name, start_point,
         )
@@ -180,6 +223,8 @@ async def ensure_worktree(
 
     Path(wt_path).parent.mkdir(parents=True, exist_ok=True)
     await run_git("worktree", "add", wt_path, branch_name, cwd=repo_path)
+    await _repair_unborn_worktree_head(wt_path, branch_name, start_point)
+    await _ensure_branch_descends_from(repo_path, branch_name, start_point)
     return branch_name, wt_path
 
 
