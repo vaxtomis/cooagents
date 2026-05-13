@@ -22,7 +22,7 @@ $mount_table
 ## 产出要求
 
 1. 按迭代设计的「开发计划」在相应 worktree 内实现代码变更，保证已执行计划项有对应测试覆盖。
-2. 如果本轮任务过大，完成一个可验证、可测试通过的连续子集；不要为了勾满计划牺牲代码质量，未完成项在 `plan_execution` 中标为 `deferred` 或 `blocked`。
+2. 如果本轮任务过大，可以不要求完成所有开发计划，未完成项在 `plan_execution` 中标为 `deferred` 或 `blocked`。
 3. 运行项目既有的 lint / typecheck / 单元测试命令（自行探测 `Makefile`、`pyproject.toml`、`package.json` 等）。
 4. 第一轮 lint/typecheck/测试若失败，**最多就地修复一次**再跑一次；之后失败必须如实记录。
 5. **不要 `git commit` / `git push`** —— 保留 worktree 未提交变更供 Step5 审 diff。
