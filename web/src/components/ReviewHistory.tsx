@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Review } from "../types";
 import { StatusBadge } from "./StatusBadge";
 
@@ -23,6 +24,27 @@ const REVIEW_PROMOTED_KEYS = new Set<string>([
   ...REVIEW_SECONDARY_BADGE_KEYS,
   ...REVIEW_LOCATION_KEYS,
 ]);
+
+function readScoreNumber(review: Review, key: string) {
+  const value = review.score_breakdown?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getReviewScoreParts(review: Review) {
+  const planScoreA = readScoreNumber(review, "plan_score_a");
+  const actualScoreB = readScoreNumber(review, "actual_score_b");
+  const formulaScore =
+    planScoreA !== null && actualScoreB !== null
+      ? Math.round((planScoreA * actualScoreB) / 100)
+      : null;
+  const finalScore = readScoreNumber(review, "final_score") ?? formulaScore ?? review.score;
+
+  return { planScoreA, actualScoreB, finalScore };
+}
+
+function formatScore(value: number | null) {
+  return value === null ? "-" : String(value);
+}
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -356,12 +378,123 @@ function ReviewInsightSection({
   );
 }
 
+function ReviewScoreMetric({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: number | null;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-border/70 bg-panel-deep/65 px-3 py-2">
+      <dt className="text-[11px] text-muted-soft">{label}</dt>
+      <dd className="mt-1 font-mono text-lg font-semibold text-copy">{formatScore(value)}</dd>
+      {hint ? <p className="mt-1 font-mono text-[10px] text-muted-soft">{hint}</p> : null}
+    </div>
+  );
+}
+
+function ReviewScoreBreakdown({ review }: { review: Review }) {
+  const { planScoreA, actualScoreB, finalScore } = getReviewScoreParts(review);
+
+  return (
+    <dl className="mt-4 grid gap-2 sm:grid-cols-3">
+      <ReviewScoreMetric label="开发计划分 a" value={planScoreA} />
+      <ReviewScoreMetric label="实施分 b" value={actualScoreB} />
+      <ReviewScoreMetric
+        hint="round(a*b / 100)"
+        label="最终评分"
+        value={finalScore}
+      />
+    </dl>
+  );
+}
+
+function ReviewRoundList({
+  reviews,
+  selectedId,
+  onSelect,
+}: {
+  reviews: Review[];
+  selectedId: string | null;
+  onSelect: (review: Review) => void;
+}) {
+  return (
+    <ol aria-label="审核轮次列表" className="space-y-2">
+      {reviews.map((review) => {
+        const selected = selectedId === review.id;
+        const { planScoreA, actualScoreB, finalScore } = getReviewScoreParts(review);
+        return (
+          <li key={review.id}>
+            <button
+              aria-pressed={selected}
+              className={[
+                "w-full rounded-2xl border px-3 py-2 text-left text-xs transition",
+                selected
+                  ? "border-accent/40 bg-accent/10 text-copy"
+                  : "border-border bg-panel-strong/60 text-muted hover:border-copy/20 hover:text-copy",
+              ].join(" ")}
+              onClick={() => onSelect(review)}
+              type="button"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-medium text-copy">第 {review.round} 轮</p>
+                <span className="font-mono text-[11px] text-copy">
+                  {formatScore(finalScore)}
+                </span>
+              </div>
+              <p className="mt-1 font-mono text-[11px] text-muted">
+                a {formatScore(planScoreA)} / b {formatScore(actualScoreB)}
+              </p>
+              <p className="mt-1 truncate text-[11px] text-muted-soft">
+                {formatDateTime(review.created_at)}
+              </p>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export function ReviewHistory({ reviews }: { reviews: Review[] }) {
+  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
+  const selectedReview =
+    reviews.find((review) => review.id === selectedReviewId) ?? reviews[0] ?? null;
+  const effectiveReviewId = selectedReview?.id ?? null;
+
+  if (!selectedReview) {
+    return (
+      <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+        选择一个审核轮次查看内容。
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="max-h-[calc(100vh-18rem)] overflow-y-auto pr-1">
+        <ReviewRoundList
+          onSelect={(review) => setSelectedReviewId(review.id)}
+          reviews={reviews}
+          selectedId={effectiveReviewId}
+        />
+      </div>
+      <ReviewRow review={selectedReview} />
+    </div>
+  );
+}
+
 export function ReviewRow({ review }: { review: Review }) {
+  const { finalScore } = getReviewScoreParts(review);
+
   return (
     <article className="rounded-2xl border border-border bg-panel-strong/80 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-medium text-copy">
-          第 {review.round} 轮 · 评分 {review.score ?? "-"}
+          第 {review.round} 轮 · 最终评分 {formatScore(finalScore)}
         </p>
         {review.problem_category ? <StatusBadge status={review.problem_category} /> : null}
       </div>
@@ -369,6 +502,7 @@ export function ReviewRow({ review }: { review: Review }) {
         {review.reviewer ? <span>审核者 {review.reviewer}</span> : null}
         <span>创建时间 {formatDateTime(review.created_at)}</span>
       </div>
+      <ReviewScoreBreakdown review={review} />
       <ReviewInsightSection items={review.issues} title="问题" />
       <ReviewInsightSection items={review.findings} title="发现项" variant="table" />
       <ReviewInsightSection items={review.next_round_hints} title="下一轮提示" />

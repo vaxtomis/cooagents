@@ -20,7 +20,7 @@ import { LoopSegmentRing } from "../components/LoopSegmentRing";
 import { MarkdownPanel } from "../components/MarkdownPanel";
 import { PlanChecklistPanel } from "../components/PlanChecklistPanel";
 import { RepoPushStatusGrid } from "../components/RepoPushStatusGrid";
-import { ReviewRow } from "../components/ReviewHistory";
+import { ReviewHistory } from "../components/ReviewHistory";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
 import { ScoreBadge } from "../components/ScoreBadge";
 import { StatusBadge } from "../components/StatusBadge";
@@ -711,11 +711,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
                 暂无审核记录。
               </p>
             ) : (
-              <div className="space-y-3">
-                {reviewsDesc.map((review) => (
-                  <ReviewRow key={review.id} review={review} />
-                ))}
-              </div>
+              <ReviewHistory reviews={reviewsDesc} />
             )}
           </div>
         ) : null}

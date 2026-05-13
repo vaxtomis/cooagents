@@ -529,6 +529,11 @@ describe("DevWorkPage", () => {
         dev_iteration_note_id: "note-1",
         round: 2,
         score: 72,
+        score_breakdown: {
+          plan_score_a: 80,
+          actual_score_b: 90,
+          final_score: 72,
+        },
         issues: [
           {
             message: "Login button does not submit",
@@ -590,6 +595,71 @@ describe("DevWorkPage", () => {
     expect(screen.getByText("submit request")).toBeInTheDocument();
     expect(screen.queryByText(/"message"/)).not.toBeInTheDocument();
     expect(screen.queryByText(/"nested"/)).not.toBeInTheDocument();
+  });
+
+  it("switches review history by selected round and shows a/b/final scores", async () => {
+    const reviews: Review[] = [
+      {
+        id: "rev-1",
+        dev_work_id: "dv-1",
+        design_work_id: null,
+        dev_iteration_note_id: "note-1",
+        round: 1,
+        score: 56,
+        score_breakdown: {
+          plan_score_a: 80,
+          actual_score_b: 70,
+          final_score: 56,
+        },
+        issues: [{ message: "Round one issue" }],
+        findings: null,
+        next_round_hints: null,
+        problem_category: "impl_gap",
+        reviewer: "codex",
+        created_at: "2026-04-23T00:00:01Z",
+      },
+      {
+        id: "rev-2",
+        dev_work_id: "dv-1",
+        design_work_id: null,
+        dev_iteration_note_id: "note-2",
+        round: 2,
+        score: 81,
+        score_breakdown: {
+          plan_score_a: 90,
+          actual_score_b: 90,
+          final_score: 81,
+        },
+        issues: [{ message: "Round two issue" }],
+        findings: null,
+        next_round_hints: null,
+        problem_category: null,
+        reviewer: "codex",
+        created_at: "2026-04-23T00:00:02Z",
+      },
+    ];
+    vi.mocked(getDevWork).mockResolvedValue(devWork);
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue(reviews);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "审核历史" }));
+
+    expect(await screen.findByText("Round two issue")).toBeInTheDocument();
+    expect(screen.queryByText("Round one issue")).not.toBeInTheDocument();
+    expect(screen.getByText("开发计划分 a")).toBeInTheDocument();
+    expect(screen.getByText("实施分 b")).toBeInTheDocument();
+    expect(screen.getAllByText("最终评分").length).toBeGreaterThan(0);
+    expect(screen.getByText("round(a*b / 100)")).toBeInTheDocument();
+    expect(screen.getAllByText("81").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /第 1 轮/ }));
+
+    expect(await screen.findByText("Round one issue")).toBeInTheDocument();
+    expect(screen.queryByText("Round two issue")).not.toBeInTheDocument();
+    expect(screen.getAllByText("56").length).toBeGreaterThan(0);
   });
 
   it("supports keyboard navigation across detail tabs", async () => {

@@ -226,10 +226,10 @@ def test_create_dev_work_request_accepts_policy_overrides():
         workspace_id="ws-1", design_doc_id="des-1", prompt="p",
         repo_refs=[_ref("frontend")],
         max_rounds=2,
-        rubric_threshold=92,
+        rubric_threshold=90,
     )
     assert req.max_rounds == 2
-    assert req.rubric_threshold == 92
+    assert req.rubric_threshold == 90
 
 
 def test_create_dev_work_request_accepts_recommended_tech_stack():
@@ -276,6 +276,12 @@ def test_create_dev_work_request_rejects_invalid_policy_overrides():
             workspace_id="ws-1", design_doc_id="des-1", prompt="p",
             repo_refs=[_ref("frontend")],
             rubric_threshold=101,
+        )
+    with pytest.raises(ValidationError):
+        CreateDevWorkRequest(
+            workspace_id="ws-1", design_doc_id="des-1", prompt="p",
+            repo_refs=[_ref("frontend")],
+            rubric_threshold=69,
         )
 
 

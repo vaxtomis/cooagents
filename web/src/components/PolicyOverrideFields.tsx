@@ -3,6 +3,8 @@ interface ParsePolicyOverridesInput {
   maxRaw: string;
   thresholdLabel: string;
   thresholdRaw: string;
+  thresholdMin?: number;
+  thresholdMax?: number;
 }
 
 interface ParsedPolicyOverrides {
@@ -19,6 +21,8 @@ interface PolicyOverrideFieldsProps {
   thresholdAriaLabel: string;
   thresholdValue: string;
   onThresholdChange: (value: string) => void;
+  thresholdMin?: number;
+  thresholdMax?: number;
 }
 
 function parseOptionalBoundedInt(
@@ -44,12 +48,19 @@ export function parsePolicyOverrides({
   maxRaw,
   thresholdLabel,
   thresholdRaw,
+  thresholdMin = 1,
+  thresholdMax = 100,
 }: ParsePolicyOverridesInput): ParsedPolicyOverrides {
   const parsedMax = parseOptionalBoundedInt(maxRaw, maxLabel, 0, 50);
   if (parsedMax.error) {
     return { error: parsedMax.error, maxValue: undefined, thresholdValue: undefined };
   }
-  const parsedThreshold = parseOptionalBoundedInt(thresholdRaw, thresholdLabel, 1, 100);
+  const parsedThreshold = parseOptionalBoundedInt(
+    thresholdRaw,
+    thresholdLabel,
+    thresholdMin,
+    thresholdMax,
+  );
   if (parsedThreshold.error) {
     return { error: parsedThreshold.error, maxValue: undefined, thresholdValue: undefined };
   }
@@ -68,6 +79,8 @@ export function PolicyOverrideFields({
   thresholdAriaLabel,
   thresholdValue,
   onThresholdChange,
+  thresholdMin = 1,
+  thresholdMax = 100,
 }: PolicyOverrideFieldsProps) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -91,8 +104,8 @@ export function PolicyOverrideFields({
           aria-label={thresholdAriaLabel}
           className={fieldClassName}
           inputMode="numeric"
-          min={1}
-          max={100}
+          min={thresholdMin}
+          max={thresholdMax}
           placeholder="global default"
           type="number"
           value={thresholdValue}

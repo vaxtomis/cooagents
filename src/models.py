@@ -457,7 +457,7 @@ class CreateDevWorkRequest(BaseModel):
     recommended_tech_stack: str | None = Field(default=None, max_length=4000)
     # Optional per-DevWork overrides. None means use the design_doc/global
     # threshold and config.devwork.max_rounds defaults.
-    rubric_threshold: int | None = Field(default=None, ge=1, le=100)
+    rubric_threshold: int | None = Field(default=None, ge=70, le=90)
     max_rounds: int | None = Field(default=None, ge=0, le=50)
     # Phase 4 (repo-registry): replaces the free-form ``repo_path`` field.
     # At least one ref required; ``mount_name`` must be unique within the

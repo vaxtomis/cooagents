@@ -438,7 +438,14 @@ function DevWorkCreateForm({
       return setError("已选择推荐技术栈时，推荐内容不能为空");
     }
 
-    const policyOverrides = parsePolicyOverrides({ maxLabel: "DevWork max rounds", maxRaw: maxRounds, thresholdLabel: "DevWork rubric threshold", thresholdRaw: rubricThreshold });
+    const policyOverrides = parsePolicyOverrides({
+      maxLabel: "DevWork max rounds",
+      maxRaw: maxRounds,
+      thresholdLabel: "DevWork rubric threshold",
+      thresholdRaw: rubricThreshold,
+      thresholdMin: 70,
+      thresholdMax: 90,
+    });
     if (policyOverrides.error) return setError(policyOverrides.error);
 
     const payloadRefs: DevRepoRef[] = repoRefs.map((row) => ({
@@ -555,7 +562,17 @@ function DevWorkCreateForm({
           </select>
       </label>
 
-      <PolicyOverrideFields fieldClassName={FORM_FIELD_CLASSNAME} maxAriaLabel="DevWork max rounds" maxValue={maxRounds} onMaxChange={setMaxRounds} thresholdAriaLabel="DevWork rubric threshold" thresholdValue={rubricThreshold} onThresholdChange={setRubricThreshold} />
+      <PolicyOverrideFields
+        fieldClassName={FORM_FIELD_CLASSNAME}
+        maxAriaLabel="DevWork max rounds"
+        maxValue={maxRounds}
+        onMaxChange={setMaxRounds}
+        thresholdAriaLabel="DevWork rubric threshold"
+        thresholdMax={90}
+        thresholdMin={70}
+        thresholdValue={rubricThreshold}
+        onThresholdChange={setRubricThreshold}
+      />
 
       {error ? <p className="text-xs text-danger">{error}</p> : null}
 

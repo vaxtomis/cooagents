@@ -201,6 +201,16 @@ export interface DevIterationNote {
   created_at: string;
 }
 
+export interface ReviewScoreBreakdown {
+  plan_score_a?: number;
+  actual_score_b?: number;
+  final_score?: number;
+  plan_coverage?: number;
+  execution_coverage?: number;
+  previous_actual_score_b?: number | null;
+  [key: string]: unknown;
+}
+
 export interface Review {
   id: string;
   dev_work_id: string | null;
@@ -208,6 +218,7 @@ export interface Review {
   dev_iteration_note_id: string | null;
   round: number;
   score: number | null;
+  score_breakdown: ReviewScoreBreakdown | null;
   issues: Record<string, unknown>[] | null;
   findings: Record<string, unknown>[] | null;
   next_round_hints: Record<string, unknown>[] | null;
