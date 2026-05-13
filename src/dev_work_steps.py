@@ -146,6 +146,7 @@ def _review_outcome_to_payload(outcome: ReviewOutcome) -> dict[str, Any]:
     )
     return {
         "score": outcome.score,
+        "score_breakdown": outcome.score_breakdown,
         "issues": outcome.issues,
         "plan_verification": outcome.plan_verification,
         "next_round_hints": outcome.next_round_hints,
@@ -239,7 +240,9 @@ def _compose_step5_artifact_repair_prompt(
         f"灏嗙粨鏋滃啓鍏?`{output_path}`.\n\n"
         "Required JSON shape:\n"
         "```json\n"
-        "{\"score\": 90, \"issues\": [], \"plan_verification\": [], "
+        "{\"score\": 90, \"score_breakdown\": "
+        "{\"plan_score_a\": 90, \"actual_score_b\": 90}, "
+        "\"issues\": [], \"plan_verification\": [], "
         "\"next_round_hints\": [], \"problem_category\": null}\n"
         "```\n\n"
         "Before exiting, read the file back and confirm it is non-empty "
@@ -1345,6 +1348,17 @@ class DevWorkStepHandlersMixin:
         retry_feedback = await self._loop_feedback_for_round(
             dw["id"], round_n, DevWorkStep.STEP5_REVIEW
         )
+        previous_review = await self.db.fetchone(
+            "SELECT score FROM reviews WHERE dev_work_id=? AND round < ? "
+            "ORDER BY round DESC, created_at DESC LIMIT 1",
+            (dw["id"], round_n),
+        )
+        previous_score = None
+        if previous_review is not None and previous_review["score"] is not None:
+            try:
+                previous_score = int(previous_review["score"])
+            except (TypeError, ValueError):
+                previous_score = None
 
         # Step3 ctx file path — Step5 reviewer reads it to verify Step4
         # addressed the疑点/risks Step3 raised. Phase 4 always passes a
@@ -1366,6 +1380,7 @@ class DevWorkStepHandlersMixin:
                 primary_worktree_path=dw.get("worktree_path"),
                 rubric_threshold=rubric_threshold,
                 output_json_path=review_abs,
+                previous_score=previous_score,
                 retry_feedback=retry_feedback,
             )
         )
@@ -1511,7 +1526,7 @@ class DevWorkStepHandlersMixin:
             },
         )
 
-        if outcome.score >= rubric_threshold:
+        if outcome.score >= rubric_threshold and outcome.problem_category is None:
             # Phase 9: by the time we reach the COMPLETED branch, the plan
             # session was deleted in Step2's finally, the build session in
             # Step5's entry, and the review session will be deleted by

@@ -229,6 +229,7 @@ CREATE TABLE IF NOT EXISTS reviews (
   dev_iteration_note_id   TEXT REFERENCES dev_iteration_notes(id),
   round                   INTEGER NOT NULL,
   score                   INTEGER,
+  score_breakdown_json    TEXT,
   issues_json             TEXT,
   findings_json           TEXT,
   next_round_hints_json   TEXT,

@@ -403,6 +403,50 @@ _AGGREGATION_RULE = """\
 """
 
 
+_SCORING_RULE = """\
+## 最终分数制定规则（score）
+
+把设计文档完全满足定义为 100 分，最终分数同时反映**当前版本迭代设计文件的完成度**
+和**对设计文档与用户诉求的满足程度**。先算**预期可实现分值 `a`**：
+若当前迭代设计 `## 开发计划` 完美实现，相对设计文档最多能拿多少分；
+`a / 100` 表示计划对设计的满足程度。再算**实际实现分值 `b`**：
+由 git diff、测试、Step4 findings 和 `plan_verification` 证明完成的功能，
+相对设计文档实际能拿多少分；`b / a` 表示执行对计划的满足程度。
+`score` 必须等于 `b`。
+
+$previous_score_note
+
+规则：
+1. 按设计文档 rubric 权重给维度分；总权重非 100 时用
+   `score = round(100 * 已得权重分 / 总权重)` 归一化。
+2. 先给 `a`：核验迭代设计是否覆盖用户故事、场景、流程、验收标准和用户诉求。
+3. 再给 `b`：只有 `plan_verification.status="done"`、`verified=true` 且有
+   diff/测试证据的开发计划项才算完成；不能只信 Step4 自述。
+4. 存在重大不满足点时必须扣分并写入 `issues`：计划未覆盖关键需求为
+   `req_gap`；计划覆盖但实现/测试/diff 未完成为 `impl_gap`。
+5. 关键需求或必需计划项未满足、lint/typecheck/unit 失败、自审与 diff 不一致：
+   总分不得高于 79；仅非关键优化未完成不得高于 89；安全/数据/授权高风险不得高于 60。
+6. 无重大缺口且证据充分才允许 `problem_category=null`；`score >= $rubric_threshold`
+   但 category 非 null 是不一致输出。
+7. 通常每轮 `b` 应增长；若未增长，必须在 `issues` 或 `next_round_hints` 说明原因。
+
+同时输出 `score_breakdown`：
+
+```json
+{"plan_score_a": 85, "actual_score_b": 70, "plan_coverage": 0.85, "execution_coverage": 0.82, "previous_actual_score_b": 60}
+```
+"""
+
+
+def _render_previous_score_note(previous_score: int | None) -> str:
+    if previous_score is None:
+        return "上一轮实际实现分值 `b`：无（首轮或无历史评分）。"
+    return (
+        f"上一轮实际实现分值 `b`：{previous_score}；"
+        "本轮 `b` 通常应高于上一轮，除非有明确的范围收缩、回滚或重大遗漏说明。"
+    )
+
+
 @dataclass(frozen=True)
 class Step5Inputs:
     design_doc_path: str
@@ -416,6 +460,7 @@ class Step5Inputs:
     primary_worktree_path: str | None
     rubric_threshold: int
     output_json_path: str
+    previous_score: int | None = None
     retry_feedback: str | None = None
 
 
@@ -429,7 +474,15 @@ def compose_step5(inputs: Step5Inputs) -> str:
         primary_worktree_path=(
             inputs.primary_worktree_path or "_(no primary worktree)_"
         ),
-        aggregation_rule=_AGGREGATION_RULE,
+        aggregation_rule=Template(_AGGREGATION_RULE).safe_substitute(
+            rubric_threshold=str(inputs.rubric_threshold)
+        ),
+        scoring_rule=Template(_SCORING_RULE).safe_substitute(
+            rubric_threshold=str(inputs.rubric_threshold),
+            previous_score_note=_render_previous_score_note(
+                inputs.previous_score
+            ),
+        ),
         rubric_threshold=str(inputs.rubric_threshold),
         output_json_path=inputs.output_json_path,
         step_wall=_STEP_WALL_STEP5,

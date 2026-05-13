@@ -711,6 +711,74 @@ async def test_rubric_threshold_override_wins_over_design_doc(env):
     assert gates["rubric_threshold_override"] == 95
 
 
+async def test_step5_non_null_category_cannot_complete_even_with_high_score(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        _step5_writer({
+            "score": 95,
+            "issues": [{"message": "AC-02 is still missing"}],
+            "problem_category": "req_gap",
+        }),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor, cfg=_build_config(max_rounds=1))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "ESCALATED"
+    assert final["last_score"] == 95
+    assert final["last_problem_category"] == ProblemCategory.req_gap.value
+
+
+async def test_step5_round2_prompt_includes_previous_actual_b(env):
+    def _round2_writer(step_tag, round_n, prompt, worktree):
+        assert round_n == 2
+        assert "DevWork Step5" in prompt
+        assert "上一轮实际实现分值 `b`：50" in prompt
+        return _step5_writer({
+            "score": 90,
+            "score_breakdown": {
+                "plan_score_a": 90,
+                "actual_score_b": 90,
+                "previous_actual_score_b": 50,
+            },
+            "issues": [],
+            "problem_category": None,
+        })(step_tag, round_n, prompt, worktree)
+
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        _step5_writer({
+            "score": 50,
+            "score_breakdown": {"plan_score_a": 80, "actual_score_b": 50},
+            "issues": [{"message": "AC-02 is still missing"}],
+            "problem_category": "req_gap",
+        }),
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        _round2_writer,
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "COMPLETED"
+    assert final["last_score"] == 90
+
+
 async def test_max_rounds_override_wins_over_config(env):
     script = [
         step2_append_h2,
@@ -1487,6 +1555,12 @@ async def test_step5_plan_verification_checks_iteration_plan_items(env):
     payload = {
         "score": 90,
         "issues": [],
+        "score_breakdown": {
+            "plan_score_a": 95,
+            "actual_score_b": 90,
+            "plan_coverage": 0.95,
+            "execution_coverage": 0.947,
+        },
         "plan_verification": [
             {"id": "DW-01", "status": "done", "verified": True},
             {"id": "DW-02", "status": "deferred", "verified": True},
@@ -1520,10 +1594,11 @@ async def test_step5_plan_verification_checks_iteration_plan_items(env):
     assert "- [ ] DW-03: 补充失败态" in note_body
 
     review = await env["db"].fetchone(
-        "SELECT findings_json FROM reviews WHERE dev_work_id=?",
+        "SELECT findings_json, score_breakdown_json FROM reviews WHERE dev_work_id=?",
         (dw["id"],),
     )
     assert json.loads(review["findings_json"]) == payload["plan_verification"]
+    assert json.loads(review["score_breakdown_json"]) == payload["score_breakdown"]
 
 
 async def test_step2_front_matter_not_tampered(env):

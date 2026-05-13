@@ -191,6 +191,7 @@ class Review(BaseModel):
     dev_iteration_note_id: str | None = None
     round: int
     score: int | None = None
+    score_breakdown: dict | None = None
     issues: list[dict] | None = None
     findings: list[dict] | None = None
     next_round_hints: list[dict] | None = None

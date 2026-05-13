@@ -40,22 +40,68 @@ _PLAN_VERIFICATION_STATUSES = (
 )
 
 
+def _coerce_int_0_100(value: object, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise BadRequestError(f"review output '{field}' must be an int")
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        result = int(value)
+    else:
+        raise BadRequestError(f"review output '{field}' must be an int")
+    if not 0 <= result <= 100:
+        raise BadRequestError(f"review output '{field}' must be in [0,100]")
+    return result
+
+
 @dataclass(frozen=True)
 class ReviewOutcome:
     score: int
     issues: list[dict]
     problem_category: ProblemCategory | None
+    score_breakdown: dict = field(default_factory=dict)
     next_round_hints: list[dict] = field(default_factory=list)
     plan_verification: list[dict] = field(default_factory=list)
+
+
+def _coerce_score_breakdown(payload: dict, *, score: int) -> dict:
+    raw = payload.get("score_breakdown")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise BadRequestError("review output 'score_breakdown' must be an object")
+
+    required = ("plan_score_a", "actual_score_b")
+    missing = [key for key in required if key not in raw]
+    if missing:
+        raise BadRequestError(
+            f"review output 'score_breakdown' missing required fields: {missing}"
+        )
+
+    out = dict(raw)
+    for key in required + ("previous_actual_score_b",):
+        if key not in out or out[key] is None:
+            continue
+        out[key] = _coerce_int_0_100(
+            out[key], field=f"score_breakdown.{key}"
+        )
+
+    if out["actual_score_b"] != score:
+        raise BadRequestError(
+            "review output 'score_breakdown.actual_score_b' must equal 'score'"
+        )
+    return out
 
 
 def _coerce(payload: dict) -> ReviewOutcome:
     if "score" not in payload:
         raise BadRequestError("review output missing 'score'")
     try:
-        score = int(payload["score"])
-    except (TypeError, ValueError) as exc:
-        raise BadRequestError("review output 'score' not an int") from exc
+        score = _coerce_int_0_100(payload["score"], field="score")
+    except BadRequestError as exc:
+        if "must be an int" in str(exc):
+            raise BadRequestError("review output 'score' not an int") from exc
+        raise
 
     raw_issues = payload.get("issues")
     if raw_issues is None:
@@ -66,6 +112,8 @@ def _coerce(payload: dict) -> ReviewOutcome:
         issues = [i if isinstance(i, dict) else {"message": str(i)} for i in raw_issues]
     else:
         raise BadRequestError("review output 'issues' must be a list")
+
+    score_breakdown = _coerce_score_breakdown(payload, score=score)
 
     raw_cat = payload.get("problem_category")
     category: ProblemCategory | None
@@ -142,6 +190,7 @@ def _coerce(payload: dict) -> ReviewOutcome:
         score=score,
         issues=issues,
         problem_category=category,
+        score_breakdown=score_breakdown,
         next_round_hints=hints,
         plan_verification=plan_verification,
     )

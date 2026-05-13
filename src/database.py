@@ -174,6 +174,13 @@ class Database:
                 "ALTER TABLE dev_work_repos ADD COLUMN worktree_path TEXT"
             )
 
+        async with conn.execute("PRAGMA table_info(reviews)") as cur:
+            review_cols = {row[1] for row in await cur.fetchall()}
+        if "score_breakdown_json" not in review_cols:
+            await conn.execute(
+                "ALTER TABLE reviews ADD COLUMN score_breakdown_json TEXT"
+            )
+
         # devwork-acpx phase 4+DesignWork attachments: extend
         # workspace_files.kind CHECK. SQLite cannot ALTER a CHECK constraint in place, so we
         # rebuild the table when the existing definition pre-dates Phase 4.

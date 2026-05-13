@@ -30,6 +30,16 @@ def _decode_json_list(raw: str | None) -> list[dict] | None:
     return [item for item in decoded if isinstance(item, dict)]
 
 
+def _decode_json_object(raw: str | None) -> dict | None:
+    if not raw:
+        return None
+    try:
+        decoded = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
 def _row_to_review(row: dict) -> Review:
     return Review(
         id=row["id"],
@@ -38,6 +48,7 @@ def _row_to_review(row: dict) -> Review:
         dev_iteration_note_id=row.get("dev_iteration_note_id"),
         round=row["round"],
         score=row.get("score"),
+        score_breakdown=_decode_json_object(row.get("score_breakdown_json")),
         issues=_decode_json_list(row.get("issues_json")),
         findings=_decode_json_list(row.get("findings_json")),
         next_round_hints=_decode_json_list(row.get("next_round_hints_json")),

@@ -98,6 +98,12 @@ async def test_reviews_table_has_next_round_hints_column(db):
     assert "next_round_hints_json" in names
 
 
+async def test_reviews_table_has_score_breakdown_column(db):
+    rows = await db.fetchall("PRAGMA table_info(reviews)")
+    names = [r["name"] for r in rows]
+    assert "score_breakdown_json" in names
+
+
 async def test_reviews_xor_constraint(db):
     with pytest.raises(Exception):
         await db.execute(

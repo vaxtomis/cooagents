@@ -434,6 +434,36 @@ def test_step5_prompt_carries_boundary_check_rubric():
     assert "擅自勾选开发计划 checkbox" in out
 
 
+def test_step5_prompt_carries_score_formula():
+    out = compose_step5(_step5_minimal())
+    assert "当前版本迭代设计文件的完成度" in out
+    assert "对设计文档与用户诉求的满足程度" in out
+    assert "预期可实现分值 `a`" in out
+    assert "实际实现分值 `b`" in out
+    assert "`score` 必须等于 `b`" in out
+    assert "`a / 100`" in out
+    assert "`b / a`" in out
+    assert "score = round(100 * 已得权重分 / 总权重)" in out
+    assert "存在重大不满足点时必须扣分" in out
+    assert "problem_category=null" in out
+    assert "score >= 85" in out
+    assert "$rubric_threshold" not in out
+    assert out.index("## 最终分数制定规则") > out.index("## 打分聚合规则")
+    assert out.index("## 最终分数制定规则") < out.index("## 越界检查")
+
+
+def test_step5_prompt_carries_previous_b_when_available():
+    out = compose_step5(Step5Inputs(
+        design_doc_path="/d", iteration_note_path="/n",
+        step4_findings_path="/f", context_path="/c.md",
+        mount_table_entries=(),
+        primary_worktree_path=None, rubric_threshold=85,
+        output_json_path="/s", previous_score=72,
+    ))
+    assert "上一轮实际实现分值 `b`：72" in out
+    assert "通常应高于上一轮" in out
+
+
 def test_step5_prompt_carries_plan_verification_guide():
     out = compose_step5(_step5_minimal())
     assert _PLAN_VERIFICATION_GUIDE in out
@@ -498,8 +528,8 @@ def test_step4_rendered_size_budget():
 def test_step5_rendered_size_budget():
     out = compose_step5(_step5_minimal())
     # Budget covers wall + boundary check + next-round-hints guide +
-    # aggregation rule + tail JSON schema + field rules.
-    assert len(out.encode("utf-8")) <= 7000
+    # aggregation/scoring rules + tail JSON schema + field rules.
+    assert len(out.encode("utf-8")) <= 9500
 
 
 def test_step3_dropped_reference_paths_heading():

@@ -202,6 +202,33 @@ def test_parse_review_extracts_plan_verification():
     ]
 
 
+def test_parse_review_extracts_score_breakdown():
+    breakdown = {
+        "plan_score_a": 85,
+        "actual_score_b": 70,
+        "plan_coverage": 0.85,
+        "execution_coverage": 0.82,
+        "previous_actual_score_b": 60,
+    }
+    out = parse_review_output(json.dumps({
+        "score": 70,
+        "issues": [],
+        "score_breakdown": breakdown,
+        "problem_category": "impl_gap",
+    }))
+    assert out.score_breakdown == breakdown
+
+
+def test_parse_review_rejects_score_breakdown_score_mismatch():
+    with pytest.raises(BadRequestError, match="score_breakdown"):
+        parse_review_output(json.dumps({
+            "score": 70,
+            "issues": [],
+            "score_breakdown": {"plan_score_a": 85, "actual_score_b": 71},
+            "problem_category": "impl_gap",
+        }))
+
+
 def test_parse_review_missing_plan_verification_defaults_empty():
     out = parse_review_output(json.dumps({
         "score": 90, "issues": [], "problem_category": None,

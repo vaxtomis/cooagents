@@ -3,7 +3,7 @@
 Steps (PRD L184-189):
     INIT -> STEP1_VALIDATE -> STEP2_ITERATION -> STEP3_CONTEXT
          -> STEP4_DEVELOP -> STEP5_REVIEW
-    STEP5 score >= threshold -> COMPLETED
+    STEP5 score >= threshold and problem_category=null -> COMPLETED
     STEP5 problem_category=req_gap   -> back to STEP2_ITERATION
     STEP5 problem_category=impl_gap  -> back to STEP2_ITERATION
         (impl gaps are part of the iteration: re-plan with the failure
@@ -1735,10 +1735,10 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         await self.db.execute(
             """INSERT INTO reviews
                (id, dev_work_id, design_work_id, dev_iteration_note_id,
-                round, score, issues_json, findings_json,
+                round, score, score_breakdown_json, issues_json, findings_json,
                 next_round_hints_json, problem_category,
                 reviewer, created_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 self._review_id(),
                 dw["id"],
@@ -1746,6 +1746,11 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 note_id,
                 round_n,
                 outcome.score,
+                (
+                    json.dumps(outcome.score_breakdown, ensure_ascii=False)
+                    if outcome.score_breakdown
+                    else None
+                ),
                 json.dumps(outcome.issues, ensure_ascii=False),
                 (
                     json.dumps(
