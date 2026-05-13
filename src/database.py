@@ -4,6 +4,7 @@ Async SQLite database wrapper using aiosqlite.
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -133,6 +134,33 @@ class Database:
             await conn.execute(
                 "ALTER TABLE dev_works ADD COLUMN session_anchor_path TEXT"
             )
+
+        # DevWork planning preferences: move human-recommended tech stack out
+        # of gates_json into an explicit nullable column.
+        if "recommended_tech_stack" not in dw_cols:
+            await conn.execute(
+                "ALTER TABLE dev_works ADD COLUMN recommended_tech_stack TEXT"
+            )
+        if "gates_json" in dw_cols:
+            async with conn.execute(
+                "SELECT id, gates_json FROM dev_works "
+                "WHERE gates_json IS NOT NULL"
+            ) as cur:
+                rows = await cur.fetchall()
+            for row in rows:
+                try:
+                    gates = json.loads(row["gates_json"])
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(gates, dict):
+                    continue
+                stack = gates.get("recommended_tech_stack")
+                if isinstance(stack, str) and stack.strip():
+                    await conn.execute(
+                        "UPDATE dev_works SET recommended_tech_stack=? "
+                        "WHERE id=? AND recommended_tech_stack IS NULL",
+                        (stack.strip(), row["id"]),
+                    )
 
         # devwork-acpx phase 6: add per-mount ``worktree_path`` to
         # dev_work_repos. Idempotent: PRAGMA gate before ALTER. Existing

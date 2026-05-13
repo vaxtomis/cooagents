@@ -357,6 +357,24 @@ async def test_create_projects_max_rounds_override(client):
     assert projected.json()["max_rounds"] == 2
 
 
+async def test_create_persists_recommended_tech_stack(client):
+    app = client._app
+    r = await client.post("/api/v1/dev-works", json=_payload(
+        app,
+        recommend_tech_stack=True,
+        recommended_tech_stack="React 18 + FastAPI",
+    ))
+    assert r.status_code == 201, r.text
+    assert r.json()["recommended_tech_stack"] == "React 18 + FastAPI"
+    row = await app.state.db.fetchone(
+        "SELECT recommended_tech_stack, gates_json FROM dev_works WHERE id=?",
+        (r.json()["id"],),
+    )
+    gates = json.loads(row["gates_json"]) if row["gates_json"] else {}
+    assert row["recommended_tech_stack"] == "React 18 + FastAPI"
+    assert "recommended_tech_stack" not in gates
+
+
 async def test_list_requires_workspace_id(client):
     r = await client.get("/api/v1/dev-works")
     assert r.status_code == 422

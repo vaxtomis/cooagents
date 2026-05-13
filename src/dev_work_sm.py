@@ -450,6 +450,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         agent: str | None = None,
         rubric_threshold: int | None = None,
         max_rounds: int | None = None,
+        recommended_tech_stack: str | None = None,
     ) -> dict[str, Any]:
         """Create a DevWork plus its ``dev_work_repos`` rows atomically.
 
@@ -497,6 +498,12 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         devwork_branch = DEVWORK_BRANCH_FMT.format(
             slug=ws["slug"], dw_short=dw_short
         )
+        recommended_tech_stack = (
+            recommended_tech_stack.strip()
+            if isinstance(recommended_tech_stack, str)
+            and recommended_tech_stack.strip()
+            else None
+        )
         gates_payload = {
             key: value
             for key, value in (
@@ -510,16 +517,18 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             await self.db.execute(
                 """INSERT INTO dev_works
                    (id, workspace_id, design_doc_id, prompt,
-                    worktree_path, worktree_branch, current_step,
+                    recommended_tech_stack, worktree_path,
+                    worktree_branch, current_step,
                     iteration_rounds, first_pass_success, last_score,
                     last_problem_category, agent, agent_host_id, gates_json,
                     escalated_at, completed_at, created_at, updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     dev_id,
                     workspace_id,
                     design_doc_id,
                     prompt,
+                    recommended_tech_stack,
                     None,
                     None,
                     DevWorkStep.INIT.value,

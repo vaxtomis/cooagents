@@ -98,6 +98,7 @@ const devWork: DevWork = {
   id: "dv-1",
   workspace_id: "ws-1",
   design_doc_id: "doc-1",
+  recommended_tech_stack: null,
   current_step: "STEP2_ITERATION",
   iteration_rounds: 1,
   max_rounds: 5,
@@ -333,6 +334,69 @@ describe("WorkspaceDetailPage", () => {
       const args = vi.mocked(createDevWork).mock.calls[0][0];
       expect(args.agent).toBeUndefined();
     });
+  });
+
+  it("DevWork form sends recommended tech stack when selected", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
+    vi.mocked(repoBranches).mockResolvedValue(branchesMain);
+    vi.mocked(createDevWork).mockResolvedValue(devWork);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建开发工作" }));
+
+    fireEvent.change(await screen.findByDisplayValue("请选择"), { target: { value: "doc-1" } });
+    const selects = await screen.findAllByRole("combobox");
+    fireEvent.change(selects[1], { target: { value: "repo-aaa111" } });
+    await waitFor(() => expect(repoBranches).toHaveBeenCalled());
+    fireEvent.change((await screen.findAllByRole("combobox"))[2], { target: { value: "main" } });
+
+    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
+    fireEvent.click(screen.getByLabelText("推荐技术栈"));
+    fireEvent.change(screen.getByLabelText("人工推荐技术栈"), {
+      target: { value: " React 18 + FastAPI " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => {
+      const args = vi.mocked(createDevWork).mock.calls[0][0];
+      expect(args.recommend_tech_stack).toBe(true);
+      expect(args.recommended_tech_stack).toBe("React 18 + FastAPI");
+    });
+  });
+
+  it("DevWork form blocks empty recommended tech stack when selected", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
+    vi.mocked(repoBranches).mockResolvedValue(branchesMain);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "开发工作" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建开发工作" }));
+
+    fireEvent.change(await screen.findByDisplayValue("请选择"), { target: { value: "doc-1" } });
+    const selects = await screen.findAllByRole("combobox");
+    fireEvent.change(selects[1], { target: { value: "repo-aaa111" } });
+    await waitFor(() => expect(repoBranches).toHaveBeenCalled());
+    fireEvent.change((await screen.findAllByRole("combobox"))[2], { target: { value: "main" } });
+
+    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
+    fireEvent.click(screen.getByLabelText("推荐技术栈"));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    expect(await screen.findByText("已选择推荐技术栈时，推荐内容不能为空")).toBeInTheDocument();
+    expect(createDevWork).not.toHaveBeenCalled();
   });
 
   it("DevWork form sends explicitly selected agent", async () => {

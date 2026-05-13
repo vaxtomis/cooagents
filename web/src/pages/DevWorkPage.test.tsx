@@ -59,6 +59,7 @@ const devWork: DevWork = {
   id: "dv-1",
   workspace_id: "ws-1",
   design_doc_id: "doc-1",
+  recommended_tech_stack: null,
   current_step: "STEP5_REVIEW",
   iteration_rounds: 2,
   max_rounds: 5,

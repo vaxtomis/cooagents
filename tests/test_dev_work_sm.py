@@ -159,6 +159,30 @@ def step2_append_h2(step_tag, round_n, prompt, worktree):
     return ("ok", 0)
 
 
+def step2_append_h2_with_tech_stack(step_tag, round_n, prompt, worktree):
+    """Append the base H2 sections plus the optional recommended stack block."""
+    m = re.search(r"在 `([^`]+\.md)` 现有文件末尾", prompt)
+    if not m:
+        return ("", 1)
+    path = Path(m.group(1))
+    addition = (
+        "\n## 本轮目标\n"
+        "\n实现登录闭环。\n"
+        "\n## 推荐技术栈\n"
+        "\n- React 18\n- FastAPI\n"
+        "\n## 开发计划\n"
+        "\n- [ ] DW-01: 加表单\n- [ ] DW-02: 加校验\n"
+        "- [ ] DW-03: 补充失败态\n"
+        "\n## 用例清单\n"
+        "\n| 用例 | 输入 | 预期 | 对应设计章节 |\n"
+        "|---|---|---|---|\n"
+        "| 登录成功 | 正确邮箱密码 | 跳首页 | 用户故事 |\n"
+    )
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(addition)
+    return ("ok", 0)
+
+
 def step2_missing_h2(step_tag, round_n, prompt, worktree):
     """Append only one H2 — validation should catch missing H2s."""
     m = re.search(r"在 `([^`]+\.md)` 现有文件末尾", prompt)
@@ -889,6 +913,39 @@ async def test_step2_prompt_artifact_under_3kib(env):
     assert len(prompt_bytes) <= 3 * 1024, (
         f"step2 prompt grew past 3 KiB: {len(prompt_bytes)} bytes"
     )
+
+
+async def test_step2_recommended_tech_stack_requires_iteration_section(env):
+    script = [
+        step2_append_h2_with_tech_stack,
+        step3_write_ctx,
+        step4_write_findings,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor)
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+        recommended_tech_stack="React 18 + FastAPI",
+    )
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "COMPLETED"
+
+    prompt_text = await env["registry"].read_text(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"devworks/{dw['id']}/prompts/step2-round1.md",
+    )
+    assert "React 18 + FastAPI" in prompt_text
+    assert "`## 推荐技术栈`" in prompt_text
+
+    note_text = await env["registry"].read_text(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"devworks/{dw['id']}/iteration-round-1.md",
+    )
+    assert "## 推荐技术栈" in note_text
 
 
 async def test_impl_gap_routes_to_step2(env):

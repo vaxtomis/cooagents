@@ -153,6 +153,7 @@ export interface DevWork {
   id: string;
   workspace_id: string;
   design_doc_id: string;
+  recommended_tech_stack: string | null;
   current_step: DevWorkStep;
   iteration_rounds: number;
   max_rounds: number;
@@ -357,6 +358,8 @@ export interface CreateDevWorkPayload {
   repo_refs: DevRepoRef[];
   prompt: string;
   agent?: AgentKind;
+  recommend_tech_stack?: boolean;
+  recommended_tech_stack?: string;
   rubric_threshold?: number;
   max_rounds?: number;
 }

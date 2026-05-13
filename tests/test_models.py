@@ -232,6 +232,38 @@ def test_create_dev_work_request_accepts_policy_overrides():
     assert req.rubric_threshold == 92
 
 
+def test_create_dev_work_request_accepts_recommended_tech_stack():
+    req = CreateDevWorkRequest(
+        workspace_id="ws-1", design_doc_id="des-1", prompt="p",
+        repo_refs=[_ref("frontend")],
+        recommend_tech_stack=True,
+        recommended_tech_stack=" React 18 + FastAPI ",
+    )
+    assert req.recommend_tech_stack is True
+    assert req.recommended_tech_stack == "React 18 + FastAPI"
+
+
+def test_create_dev_work_request_rejects_empty_recommended_tech_stack():
+    with pytest.raises(ValidationError) as exc:
+        CreateDevWorkRequest(
+            workspace_id="ws-1", design_doc_id="des-1", prompt="p",
+            repo_refs=[_ref("frontend")],
+            recommend_tech_stack=True,
+            recommended_tech_stack="   ",
+        )
+    assert "recommended_tech_stack" in str(exc.value)
+
+
+def test_create_dev_work_request_ignores_stack_when_not_recommended():
+    req = CreateDevWorkRequest(
+        workspace_id="ws-1", design_doc_id="des-1", prompt="p",
+        repo_refs=[_ref("frontend")],
+        recommended_tech_stack="React 18",
+    )
+    assert req.recommend_tech_stack is False
+    assert req.recommended_tech_stack is None
+
+
 def test_create_dev_work_request_rejects_invalid_policy_overrides():
     with pytest.raises(ValidationError):
         CreateDevWorkRequest(

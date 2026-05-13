@@ -190,6 +190,7 @@ def _row_to_progress(
         id=row["id"],
         workspace_id=row["workspace_id"],
         design_doc_id=row["design_doc_id"],
+        recommended_tech_stack=row.get("recommended_tech_stack"),
         current_step=row["current_step"],
         iteration_rounds=row["iteration_rounds"],
         max_rounds=max_rounds if max_rounds is not None else 0,
@@ -250,6 +251,7 @@ async def create_dev_work(
             agent=req.agent.value if req.agent is not None else None,
             rubric_threshold=req.rubric_threshold,
             max_rounds=req.max_rounds,
+            recommended_tech_stack=req.recommended_tech_stack,
         )
     except sqlite3.IntegrityError as exc:
         # Partial UNIQUE index on dev_works(design_doc_id) WHERE step not in

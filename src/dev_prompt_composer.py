@@ -66,8 +66,8 @@ _STEP_WALL_STEP2 = (
     "## 本步职责墙\n"
     "\n"
     "**单一职责**：基于设计文档 + 上轮反馈，决定「做什么、怎么验」。\n"
-    "**唯一输出**：在 iteration-round-N.md 末尾追加三段 H2"
-    "（本轮目标 / 开发计划 / 用例清单），其中开发计划必须是带稳定 "
+    "**唯一输出**：在 iteration-round-N.md 末尾追加 H2"
+    "（本轮目标 / 推荐技术栈 / 开发计划 / 用例清单），其中开发计划必须是带稳定 "
     "DW-xx ID 的 checkbox checklist。\n"
     "**明确禁止**：不扫代码、不写代码、不决定文件级实现路径、"
     "不修改 front-matter、不写入其它文件。\n"
@@ -128,7 +128,8 @@ _BOUNDARY_CHECK_RUBRIC = (
     "除了基于设计文档 rubric 的内容质量评分外，**额外**检查本轮各 step "
     "是否守住了职责墙：\n"
     "\n"
-    "1. **Step2 是否越界**：iteration-round-N.md 是否只追加了三段 H2、"
+    "1. **Step2 是否越界**：iteration-round-N.md 是否只追加了三段必需 H2"
+    "（有人工推荐时可额外追加 `## 推荐技术栈`）、"
     "front-matter 与 H1 未被改动？是否包含了不该有的代码块或文件级"
     "实现路径？\n"
     "2. **Step3 是否越界**：ctx-round-N.md 是否只有两段 H2"
@@ -212,8 +213,24 @@ def compose_iteration_header(inputs: IterationHeaderInputs) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step2 — Iteration design prompt (LLM appends three H2 sections)
+# Step2 — Iteration design prompt (LLM appends required H2 sections)
 # ---------------------------------------------------------------------------
+
+
+def _render_recommended_tech_stack_read_item(stack: str | None) -> str:
+    if not stack or not stack.strip():
+        return ""
+    return f"5. **人工推荐技术栈**：\n\n   {stack.strip()}\n"
+
+
+def _render_recommended_tech_stack_output_requirement(stack: str | None) -> str:
+    if not stack or not stack.strip():
+        return ""
+    return (
+        "2. `## 推荐技术栈` —— 列出人工推荐的技术组件，并说明本轮实现应"
+        "尽量包含这些组件；这不是排他约束，确有必要时可以补充其它技术组件，"
+        "但需简述原因。\n"
+    )
 
 @dataclass(frozen=True)
 class Step2Inputs:
@@ -231,6 +248,7 @@ class Step2Inputs:
     # Absolute POSIX path to the previous round's iteration design. None on
     # round 1. Round N uses this to carry forward cumulative plan items.
     previous_iteration_note_path: str | None = None
+    recommended_tech_stack: str | None = None
 
 
 def compose_step2(inputs: Step2Inputs) -> str:
@@ -239,6 +257,10 @@ def compose_step2(inputs: Step2Inputs) -> str:
         inputs.previous_iteration_note_path
         or _PREV_ITERATION_NOTE_PLACEHOLDER
     )
+    has_tech_stack = bool(
+        inputs.recommended_tech_stack
+        and inputs.recommended_tech_stack.strip()
+    )
     return _STEP2_TEMPLATE.safe_substitute(
         dev_work_id=inputs.dev_work_id,
         round=str(inputs.round),
@@ -246,6 +268,21 @@ def compose_step2(inputs: Step2Inputs) -> str:
         user_prompt=inputs.user_prompt,
         previous_review_path=prev,
         previous_iteration_note_path=prev_note,
+        recommended_tech_stack_read_item=_render_recommended_tech_stack_read_item(
+            inputs.recommended_tech_stack
+        ),
+        recommended_tech_stack_output_requirement=(
+            _render_recommended_tech_stack_output_requirement(
+                inputs.recommended_tech_stack
+            )
+        ),
+        h2_count="四" if has_tech_stack else "三",
+        development_plan_requirement_number=(
+            "3" if has_tech_stack else "2"
+        ),
+        use_case_requirement_number=(
+            "4" if has_tech_stack else "3"
+        ),
         output_path=inputs.output_path,
         step_wall=_STEP_WALL_STEP2,
     )

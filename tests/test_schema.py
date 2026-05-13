@@ -62,6 +62,7 @@ async def test_dev_works_indicator_columns(db):
     cols = {r["name"] for r in rows}
     assert {
         "iteration_rounds",
+        "recommended_tech_stack",
         "first_pass_success",
         "last_score",
         "last_problem_category",

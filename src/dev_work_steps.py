@@ -53,6 +53,7 @@ from src.workspace_events import emit_and_deliver
 logger = logging.getLogger(__name__)
 
 _REQUIRED_H2 = ("本轮目标", "开发计划", "用例清单")
+_RECOMMENDED_TECH_STACK_H2 = "推荐技术栈"
 _PLAN_CHECKBOX_RE = re.compile(
     r"^(\s*[-*]\s+\[)([ xX])(\]\s+)"
     r"([A-Za-z][A-Za-z0-9_-]*-\d+)(\s*[:：].*)$"
@@ -753,7 +754,7 @@ class DevWorkStepHandlersMixin:
         return outcome
 
     async def _s2_iteration(self, dw: dict[str, Any]) -> None:
-        """Step2 (F2=B): SM writes header -> LLM appends three H2 sections."""
+        """Step2 (F2=B): SM writes header -> LLM appends required H2 sections."""
         round_n = dw["iteration_rounds"] + 1
         try:
             await self._s2_iteration_body(dw, round_n)
@@ -815,6 +816,12 @@ class DevWorkStepHandlersMixin:
             else None
         )
 
+        recommended_tech_stack = dw.get("recommended_tech_stack")
+        if not isinstance(recommended_tech_stack, str):
+            recommended_tech_stack = None
+        elif not recommended_tech_stack.strip():
+            recommended_tech_stack = None
+
         # 3) Compose Step2 prompt and run the LLM.
         prompt_text = compose_step2(
             Step2Inputs(
@@ -824,6 +831,7 @@ class DevWorkStepHandlersMixin:
                 user_prompt=dw["prompt"],
                 previous_review_path=prev_review_abs,
                 previous_iteration_note_path=prev_note_abs,
+                recommended_tech_stack=recommended_tech_stack,
                 output_path=note_abs,
             )
         )
@@ -853,7 +861,9 @@ class DevWorkStepHandlersMixin:
             )
             return
 
-        # 3) Validate the produced markdown: three H2s required.
+        # 3) Validate the produced markdown: base H2s are always required;
+        #    the recommended stack section is required only when a human
+        #    recommendation was provided at DevWork creation.
         try:
             body = await self.registry.read_text(
                 workspace_slug=ws["slug"], relative_path=note_rel,
@@ -867,7 +877,12 @@ class DevWorkStepHandlersMixin:
             )
             return
         found = set(re.findall(r"^##\s+(.+?)\s*$", body, flags=re.MULTILINE))
-        missing = [h for h in _REQUIRED_H2 if h not in found]
+        required_h2 = (
+            (*_REQUIRED_H2, _RECOMMENDED_TECH_STACK_H2)
+            if recommended_tech_stack
+            else _REQUIRED_H2
+        )
+        missing = [h for h in required_h2 if h not in found]
         if missing:
             await self._loop_or_escalate(
                 dw,

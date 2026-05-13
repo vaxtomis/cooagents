@@ -157,6 +157,7 @@ class DevWork(BaseModel):
     workspace_id: str
     design_doc_id: str
     prompt: str
+    recommended_tech_stack: str | None = None
     worktree_path: str | None = None
     worktree_branch: str | None = None
     current_step: DevWorkStep = DevWorkStep.INIT
@@ -448,6 +449,11 @@ class CreateDevWorkRequest(BaseModel):
     design_doc_id: str
     prompt: str = Field(..., min_length=1, max_length=20000)
     agent: AgentKind | None = None
+    # Optional human guidance for the planning round. When disabled, Step2
+    # should reuse historical choices or let the agent infer a stack from the
+    # design doc and repos.
+    recommend_tech_stack: bool = False
+    recommended_tech_stack: str | None = Field(default=None, max_length=4000)
     # Optional per-DevWork overrides. None means use the design_doc/global
     # threshold and config.devwork.max_rounds defaults.
     rubric_threshold: int | None = Field(default=None, ge=1, le=100)
@@ -472,6 +478,16 @@ class CreateDevWorkRequest(BaseModel):
                 "at most one repo_ref may have is_primary=True; "
                 f"got {primaries}"
             )
+        if not self.recommend_tech_stack:
+            self.recommended_tech_stack = None
+            return self
+        stack = (self.recommended_tech_stack or "").strip()
+        if not stack:
+            raise ValueError(
+                "recommended_tech_stack is required when "
+                "recommend_tech_stack=True"
+            )
+        self.recommended_tech_stack = stack
         return self
 
 
@@ -501,6 +517,7 @@ class DevWorkProgress(BaseModel):
     id: str
     workspace_id: str
     design_doc_id: str
+    recommended_tech_stack: str | None = None
     current_step: DevWorkStep
     iteration_rounds: int
     max_rounds: int = 0

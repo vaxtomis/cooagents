@@ -411,6 +411,8 @@ function DevWorkCreateForm({
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
   const [prompt, setPrompt] = useState("");
   const [agent, setAgent] = useState<AgentKind | "">("");
+  const [recommendTechStack, setRecommendTechStack] = useState(false);
+  const [recommendedTechStack, setRecommendedTechStack] = useState("");
   const [maxRounds, setMaxRounds] = useState("");
   const [rubricThreshold, setRubricThreshold] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -432,6 +434,9 @@ function DevWorkCreateForm({
       mountSeen.add(mount);
     }
     if (!prompt.trim()) return setError("执行提示不能为空");
+    if (recommendTechStack && !recommendedTechStack.trim()) {
+      return setError("已选择推荐技术栈时，推荐内容不能为空");
+    }
 
     const policyOverrides = parsePolicyOverrides({ maxLabel: "DevWork max rounds", maxRaw: maxRounds, thresholdLabel: "DevWork rubric threshold", thresholdRaw: rubricThreshold });
     if (policyOverrides.error) return setError(policyOverrides.error);
@@ -453,12 +458,18 @@ function DevWorkCreateForm({
           repo_refs: payloadRefs,
           prompt: prompt.trim(),
           agent: agent || undefined,
+          recommend_tech_stack: recommendTechStack || undefined,
+          ...(recommendTechStack
+            ? { recommended_tech_stack: recommendedTechStack.trim() }
+            : {}),
           ...(policyOverrides.maxValue !== undefined ? { max_rounds: policyOverrides.maxValue } : {}),
           ...(policyOverrides.thresholdValue !== undefined ? { rubric_threshold: policyOverrides.thresholdValue } : {}),
       });
       setDesignDocId("");
       setRepoRefs([]);
       setPrompt("");
+      setRecommendTechStack(false);
+      setRecommendedTechStack("");
       setMaxRounds("");
       setRubricThreshold("");
       onCreated(created);
@@ -502,6 +513,34 @@ function DevWorkCreateForm({
           onChange={(event) => setPrompt(event.target.value)}
         />
       </label>
+
+      <div className="space-y-3 rounded-2xl border border-border bg-panel-strong/55 p-4">
+        <label className="flex items-center gap-3 text-sm text-muted">
+          <input
+            type="checkbox"
+            checked={recommendTechStack}
+            onChange={(event) => setRecommendTechStack(event.target.checked)}
+          />
+          <span>推荐技术栈</span>
+        </label>
+        {recommendTechStack ? (
+          <label className="block space-y-1.5 text-sm text-muted">
+            <span>人工推荐的技术组件</span>
+            <textarea
+              aria-label="人工推荐技术栈"
+              className={`${FORM_FIELD_CLASSNAME} min-h-[7rem] resize-y`}
+              rows={3}
+              value={recommendedTechStack}
+              placeholder="例如：React 18、Vite、FastAPI、PostgreSQL。可补充偏好的库、框架或约束。"
+              onChange={(event) => setRecommendedTechStack(event.target.value)}
+            />
+          </label>
+        ) : (
+          <p className="text-xs leading-relaxed text-muted-soft">
+            不推荐时默认沿用历史技术栈，或由 AI 根据设计文档与仓库现状自行判断。
+          </p>
+        )}
+      </div>
 
       <label className="block space-y-1.5 text-sm text-muted">
         <span>执行 Agent</span>

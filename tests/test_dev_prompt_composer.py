@@ -95,6 +95,35 @@ def test_step2_round_n_requires_cumulative_plan_append_only():
     assert "- [ ] ~~DW-02:" in out
 
 
+def test_step2_includes_recommended_tech_stack_when_provided():
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-1", round=1,
+        design_doc_path="/ws/foo/designs/d.md",
+        user_prompt="P",
+        previous_review_path=None,
+        output_path="/tmp/x.md",
+        recommended_tech_stack="React 18, Vite, FastAPI",
+    ))
+    assert "React 18, Vite, FastAPI" in out
+    assert "`## 推荐技术栈`" in out
+    assert "尽量包含这些组件" in out
+    assert "不是排他约束" in out
+    assert "以下 四 个 H2" in out
+
+
+def test_step2_omits_recommended_tech_stack_section_by_default():
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-1", round=1,
+        design_doc_path="/ws/foo/designs/d.md",
+        user_prompt="P",
+        previous_review_path=None,
+        output_path="/tmp/x.md",
+    ))
+    assert "`## 推荐技术栈`" not in out
+    assert "人工推荐技术栈" not in out
+    assert "以下 三 个 H2" in out
+
+
 def test_step2_prompt_does_not_embed_design_body():
     # Realistic-ish path lengths; rendered size must stay small AND the
     # design-doc body must not be inlined. Sentinel string check guards

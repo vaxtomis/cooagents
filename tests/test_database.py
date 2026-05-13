@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 from unittest.mock import AsyncMock
 
@@ -188,6 +189,54 @@ async def test_migrate_adds_repos_local_path_unique_index(tmp_path):
             r["name"] == "uniq_repos_local_path" and r["unique"]
             for r in indexes
         )
+    finally:
+        await d.close()
+
+
+async def test_migrate_adds_dev_work_recommended_tech_stack(tmp_path):
+    db_path = tmp_path / "legacy-devwork-stack.db"
+    legacy = sqlite3.connect(db_path)
+    legacy.execute(
+        "CREATE TABLE dev_works ("
+        "id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, "
+        "design_doc_id TEXT NOT NULL, prompt TEXT NOT NULL, "
+        "current_step TEXT NOT NULL DEFAULT 'INIT', "
+        "iteration_rounds INTEGER NOT NULL DEFAULT 0, "
+        "agent TEXT NOT NULL DEFAULT 'claude', gates_json TEXT, "
+        "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    legacy.execute(
+        "INSERT INTO dev_works(id,workspace_id,design_doc_id,prompt,"
+        "current_step,iteration_rounds,agent,gates_json,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            "dev-old",
+            "ws-old",
+            "des-old",
+            "p",
+            "INIT",
+            0,
+            "claude",
+            json.dumps({"recommended_tech_stack": " React 18 + FastAPI "}),
+            "2026-04-26",
+            "2026-04-26",
+        ),
+    )
+    legacy.commit()
+    legacy.close()
+
+    d = Database(db_path=db_path, schema_path="db/schema.sql")
+    await d.connect()
+    try:
+        cols = {
+            r["name"] for r in await d.fetchall("PRAGMA table_info(dev_works)")
+        }
+        assert "recommended_tech_stack" in cols
+        row = await d.fetchone(
+            "SELECT recommended_tech_stack FROM dev_works WHERE id=?",
+            ("dev-old",),
+        )
+        assert row["recommended_tech_stack"] == "React 18 + FastAPI"
     finally:
         await d.close()
 

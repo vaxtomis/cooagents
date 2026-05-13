@@ -180,6 +180,9 @@ CREATE TABLE IF NOT EXISTS dev_works (
   workspace_id                TEXT NOT NULL REFERENCES workspaces(id),
   design_doc_id               TEXT NOT NULL REFERENCES design_docs(id),
   prompt                      TEXT NOT NULL,
+  -- Human-provided planning preference for Step2. NULL means no explicit
+  -- stack recommendation; the agent should reuse history or infer from repo.
+  recommended_tech_stack      TEXT,
   worktree_path               TEXT,
   worktree_branch             TEXT,
   current_step                TEXT NOT NULL DEFAULT 'INIT' CHECK(current_step IN ('INIT','STEP1_VALIDATE','STEP2_ITERATION','STEP3_CONTEXT','STEP4_DEVELOP','STEP5_REVIEW','COMPLETED','ESCALATED','CANCELLED')),
