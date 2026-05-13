@@ -41,13 +41,14 @@ import {
   pushDevWorkBranches,
   resumeDevWorkStep,
 } from "../api/devWorks";
-import { listIterationNotes } from "../api/devIterationNotes";
+import { getIterationNoteContent, listIterationNotes } from "../api/devIterationNotes";
 import { listReviews } from "../api/reviews";
 import { getGate } from "../api/gates";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
 
 beforeEach(() => {
   vi.mocked(listWorkspaceEvents).mockResolvedValue(emptyEvents);
+  vi.mocked(getIterationNoteContent).mockResolvedValue("");
 });
 
 afterEach(() => {
@@ -161,6 +162,46 @@ describe("DevWorkPage", () => {
     expect(
       await screen.findByRole("img", { name: /DevWork 实际执行轮次 2\/5/ }),
     ).toBeInTheDocument();
+  });
+
+  it("renders iteration plans as a structured checklist", async () => {
+    vi.mocked(getDevWork).mockResolvedValue(devWork);
+    vi.mocked(listIterationNotes).mockResolvedValue([
+      {
+        id: "note-1",
+        dev_work_id: "dv-1",
+        round: 1,
+        markdown_path: "devworks/dv-1/iteration-round-1.md",
+        score_history: [85],
+        created_at: "2026-04-23T00:00:01Z",
+      },
+    ]);
+    vi.mocked(getIterationNoteContent).mockResolvedValue(
+      [
+        "# 迭代设计",
+        "",
+        "## 开发计划",
+        "",
+        "- [x] DW-01: 登录表单",
+        "- [ ] DW-02: 错误提示",
+        "  - [ ] DW-02.1: 空邮箱提示",
+        "- [ ] ~~DW-03: 已取消入口~~",
+        "",
+        "## 用例清单",
+      ].join("\n"),
+    );
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "迭代设计文件" }));
+
+    const panel = await screen.findByRole("region", { name: "开发计划结构化视图" });
+    expect(within(panel).getByText("1/3 完成")).toBeInTheDocument();
+    expect(within(panel).getByText("DW-02.1")).toBeInTheDocument();
+    expect(within(panel).getByText("空邮箱提示")).toBeInTheDocument();
+    expect(within(panel).getByText("已取消入口")).toHaveClass("line-through");
   });
 
   it("requires confirmation before cancelling a DevWork", async () => {

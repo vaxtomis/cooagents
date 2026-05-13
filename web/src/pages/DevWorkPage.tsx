@@ -18,6 +18,7 @@ import { DevWorkStepProgress } from "../components/DevWorkStepProgress";
 import { GateActionPanel } from "../components/GateActionPanel";
 import { LoopSegmentRing } from "../components/LoopSegmentRing";
 import { MarkdownPanel } from "../components/MarkdownPanel";
+import { PlanChecklistPanel } from "../components/PlanChecklistPanel";
 import { RepoPushStatusGrid } from "../components/RepoPushStatusGrid";
 import { ReviewRow } from "../components/ReviewHistory";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
@@ -688,7 +689,10 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
                   {noteContent.message}
                 </p>
               ) : (
-                <MarkdownPanel content={noteContent.content} reader />
+                <div className="space-y-4">
+                  <PlanChecklistPanel content={noteContent.content} />
+                  <MarkdownPanel content={noteContent.content} reader />
+                </div>
               )}
             </div>
           </div>

@@ -39,6 +39,7 @@ _NOTE_HEADER_TEMPLATE = Template(_NOTE_HEADER_TPL.read_text(encoding="utf-8"))
 # input path is missing. Grouped here so all "what-the-LLM-sees-when-empty"
 # strings live in one place.
 _PREV_REVIEW_PLACEHOLDER = "_(首轮，无上轮反馈 — 跳过此步)_"
+_PREV_ITERATION_NOTE_PLACEHOLDER = "_(首轮，无上一轮迭代设计 — 跳过此项)_"
 _CONTEXT_PATH_PLACEHOLDER = "_(无 ctx 文件 — 本轮 Step3 未产出)_"
 
 
@@ -227,16 +228,24 @@ class Step2Inputs:
     previous_review_path: str | None
     # Absolute path the LLM should append to.
     output_path: str
+    # Absolute POSIX path to the previous round's iteration design. None on
+    # round 1. Round N uses this to carry forward cumulative plan items.
+    previous_iteration_note_path: str | None = None
 
 
 def compose_step2(inputs: Step2Inputs) -> str:
     prev = inputs.previous_review_path or _PREV_REVIEW_PLACEHOLDER
+    prev_note = (
+        inputs.previous_iteration_note_path
+        or _PREV_ITERATION_NOTE_PLACEHOLDER
+    )
     return _STEP2_TEMPLATE.safe_substitute(
         dev_work_id=inputs.dev_work_id,
         round=str(inputs.round),
         design_doc_path=inputs.design_doc_path,
         user_prompt=inputs.user_prompt,
         previous_review_path=prev,
+        previous_iteration_note_path=prev_note,
         output_path=inputs.output_path,
         step_wall=_STEP_WALL_STEP2,
     )

@@ -56,21 +56,43 @@ def test_step2_round1_substitutes_prev_review_placeholder():
     assert "/ws/foo/designs/d.md" in out
     assert "PROMPT" in out
     assert "首轮，无上轮反馈" in out
+    assert "首轮，无上一轮迭代设计" in out
     # Path-based: the design body is NOT inlined.
     assert "DESIGN" not in out
 
 
 def test_step2_round_n_uses_previous_review_path():
     prev = "/ws/foo/devworks/dev-x/feedback/feedback-for-round2.md"
+    prev_note = "/ws/foo/devworks/dev-x/iteration-round-1.md"
     out = compose_step2(Step2Inputs(
         dev_work_id="dev-x", round=2,
         design_doc_path="/ws/foo/designs/d.md",
         user_prompt="P",
         previous_review_path=prev,
+        previous_iteration_note_path=prev_note,
         output_path="/o.md",
     ))
     assert prev in out
+    assert prev_note in out
     assert "首轮，无上轮反馈" not in out
+    assert "首轮，无上一轮迭代设计" not in out
+
+
+def test_step2_round_n_requires_cumulative_plan_append_only():
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-x", round=3,
+        design_doc_path="/ws/foo/designs/d.md",
+        user_prompt="P",
+        previous_review_path="/ws/foo/devworks/dev-x/feedback/feedback-for-round3.md",
+        previous_iteration_note_path="/ws/foo/devworks/dev-x/iteration-round-2.md",
+        output_path="/ws/foo/devworks/dev-x/iteration-round-3.md",
+    ))
+    assert "必须 Read 此文件并继承其中 `## 开发计划`" in out
+    assert "所有历史 PLAN 都必须保留" in out
+    assert "只能追加新的主 PLAN" in out
+    assert "追加缩进子 PLAN" in out
+    assert "DW-02.1" in out
+    assert "- [ ] ~~DW-02:" in out
 
 
 def test_step2_prompt_does_not_embed_design_body():
@@ -422,8 +444,8 @@ def test_step2_rendered_size_budget():
         previous_review_path=None,
         output_path="/ws/foo/devworks/dev-x/iterations/iteration-round-1.md",
     ))
-    # Wall + path-based skeleton + "## 产出要求" — round-1 minimal input.
-    assert len(out.encode("utf-8")) <= 1700
+    # Wall + path-based skeleton + cumulative-plan instructions.
+    assert len(out.encode("utf-8")) <= 2200
 
 
 def test_step3_rendered_size_budget():

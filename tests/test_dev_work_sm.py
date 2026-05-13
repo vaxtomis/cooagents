@@ -756,6 +756,19 @@ async def test_req_gap_routes_to_step2(env):
     assert final["first_pass_success"] == 0  # round2 passed
     assert final["iteration_rounds"] == 1
 
+    round2_prompt = await env["registry"].read_text(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"devworks/{dw['id']}/prompts/step2-round2.md",
+    )
+    previous_note_abs = (
+        env["ws_root"] / env["ws"]["slug"] / "devworks" / dw["id"]
+        / "iteration-round-1.md"
+    ).as_posix()
+    assert previous_note_abs in round2_prompt
+    assert "首轮，无上一轮迭代设计" not in round2_prompt
+    assert "所有历史 PLAN 都必须保留" in round2_prompt
+    assert "追加缩进子 PLAN" in round2_prompt
+
 
 async def test_step2_writes_feedback_file_on_round_2(env):
     """Round 2's Step2 must persist feedback-for-round2.md via the registry.

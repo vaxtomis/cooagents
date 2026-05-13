@@ -807,6 +807,13 @@ class DevWorkStepHandlersMixin:
         prev_review_abs = (
             self._abs_for(ws, prev_review_rel) if prev_review_rel else None
         )
+        prev_note_abs = (
+            self._abs_for(
+                ws, self.iteration_notes.relative_for(dw["id"], round_n - 1)
+            )
+            if round_n > 1
+            else None
+        )
 
         # 3) Compose Step2 prompt and run the LLM.
         prompt_text = compose_step2(
@@ -816,6 +823,7 @@ class DevWorkStepHandlersMixin:
                 design_doc_path=design_doc_abs,
                 user_prompt=dw["prompt"],
                 previous_review_path=prev_review_abs,
+                previous_iteration_note_path=prev_note_abs,
                 output_path=note_abs,
             )
         )
