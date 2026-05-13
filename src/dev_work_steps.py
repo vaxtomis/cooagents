@@ -27,6 +27,8 @@ import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from src.dev_prompt_composer import (
@@ -43,6 +45,7 @@ from src.dev_prompt_composer import (
     extract_rubric_section,
 )
 from src.exceptions import BadRequestError, NotFoundError
+from src.git_utils import run_git
 from src.models import DevWorkStep, ProblemCategory
 from src.reviewer import ReviewOutcome, parse_review_output
 from src.workspace_events import emit_and_deliver
@@ -57,6 +60,28 @@ _PLAN_CHECKBOX_RE = re.compile(
 
 
 _REPAIR_STDOUT_LIMIT = 6000
+_STEP5_DIFF_MAX_FILES = 300
+_STEP5_DIFF_MAX_CHANGED_LINES = 50_000
+_STEP5_DIFF_FORBIDDEN_SEGMENTS = {
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".turbo",
+    ".vite",
+    "__pycache__",
+    "coverage",
+    "node_modules",
+}
+_STEP5_DIFF_FORBIDDEN_SUFFIXES = {
+    ".tsbuildinfo",
+}
+
+
+@dataclass(frozen=True)
+class _Step5PreflightFailure:
+    reason: str
+    generated_paths: tuple[str, ...] = ()
 
 
 def _tail_for_repair(text: str, limit: int = _REPAIR_STDOUT_LIMIT) -> str:
@@ -64,6 +89,112 @@ def _tail_for_repair(text: str, limit: int = _REPAIR_STDOUT_LIMIT) -> str:
     if len(text) <= limit:
         return text
     return text[-limit:]
+
+
+def _normalise_git_path(path: str) -> str:
+    return path.replace("\\", "/").strip()
+
+
+def _paths_from_git_status_porcelain(output: str) -> list[str]:
+    paths: list[str] = []
+    for line in (output or "").splitlines():
+        if len(line) < 4:
+            continue
+        path = _normalise_git_path(line[3:])
+        if " -> " in path:
+            old_path, new_path = path.split(" -> ", 1)
+            paths.extend([old_path, new_path])
+        elif path:
+            paths.append(path)
+    return paths
+
+
+def _is_forbidden_step5_diff_path(path: str) -> bool:
+    normalised = _normalise_git_path(path)
+    parts = {part for part in normalised.split("/") if part}
+    if parts & _STEP5_DIFF_FORBIDDEN_SEGMENTS:
+        return True
+    return any(
+        normalised.endswith(suffix)
+        for suffix in _STEP5_DIFF_FORBIDDEN_SUFFIXES
+    )
+
+
+def _parse_git_numstat_changed_lines(output: str) -> int:
+    changed = 0
+    for line in (output or "").splitlines():
+        cols = line.split("\t")
+        if len(cols) < 3:
+            continue
+        for value in cols[:2]:
+            if value == "-":
+                changed += 1
+                continue
+            try:
+                changed += int(value)
+            except ValueError:
+                continue
+    return changed
+
+
+def _review_outcome_to_payload(outcome: ReviewOutcome) -> dict[str, Any]:
+    category = (
+        outcome.problem_category.value
+        if outcome.problem_category is not None
+        else None
+    )
+    return {
+        "score": outcome.score,
+        "issues": outcome.issues,
+        "plan_verification": outcome.plan_verification,
+        "next_round_hints": outcome.next_round_hints,
+        "problem_category": category,
+    }
+
+
+def _format_path_sample(paths: list[str], *, limit: int = 5) -> str:
+    sample = ", ".join(paths[:limit])
+    extra = len(paths) - limit
+    if extra > 0:
+        sample = f"{sample} (+{extra} more)"
+    return sample
+
+
+def _compose_step5_generated_diff_repair_prompt(
+    *,
+    mount_rows: list[dict[str, Any]],
+    generated_paths: tuple[str, ...],
+) -> str:
+    mounts = "\n".join(
+        f"- mount `{row['mount_name']}`: `{row['worktree_path']}`"
+        for row in mount_rows
+        if row.get("worktree_path")
+    ) or "- _(no worktree paths available)_"
+    paths = "\n".join(f"- `{path}`" for path in generated_paths)
+    return (
+        "# DevWork STEP5 generated/dependency diff repair\n\n"
+        "## Goal\n\n"
+        "Step5 preflight found generated, dependency, or cache paths in "
+        "git status/diff. Do one narrow cleanup pass so the reviewer sees "
+        "only source changes.\n\n"
+        "## Worktrees\n\n"
+        f"{mounts}\n\n"
+        "## Affected paths\n\n"
+        f"{paths}\n\n"
+        "## Allowed actions\n\n"
+        "- Update `.gitignore` files in the affected worktree(s).\n"
+        "- Remove generated/cache/dependency artifacts from the git index "
+        "and working tree when needed.\n"
+        "- Run `git status --porcelain` and `git diff HEAD --name-only` "
+        "to verify the affected paths no longer appear.\n\n"
+        "## Forbidden actions\n\n"
+        "- Do not edit source code, tests, package manifests, lockfiles, "
+        "Step4 findings, iteration notes, or design/context artifacts.\n"
+        "- Do not implement feature work or rerun the broader Step4 task.\n"
+        "- Do not stage unrelated files.\n\n"
+        "Before exiting, verify the affected generated/dependency paths are "
+        "absent from `git status --porcelain` and `git diff HEAD --name-only`."
+    )
 
 
 def _compose_step4_artifact_repair_prompt(
@@ -213,6 +344,199 @@ class DevWorkStepHandlersMixin:
                     raise
                 await asyncio.sleep(min(interval_s, deadline - loop.time()))
 
+    async def _preflight_step5_worktrees(
+        self, dw: dict[str, Any],
+    ) -> _Step5PreflightFailure | None:
+        rows = await self.db.fetchall(
+            "SELECT mount_name, base_branch, base_rev, devwork_branch, "
+            "is_primary, worktree_path FROM dev_work_repos "
+            "WHERE dev_work_id=? ORDER BY is_primary DESC, mount_name",
+            (dw["id"],),
+        )
+        if not rows:
+            return None
+
+        for row in rows:
+            mount = row["mount_name"]
+            worktree_path = row["worktree_path"]
+            if not worktree_path and row["is_primary"]:
+                worktree_path = dw.get("worktree_path")
+            if not worktree_path:
+                return _Step5PreflightFailure(
+                    f"mount {mount!r} has no worktree_path"
+                )
+            if not Path(worktree_path).exists():
+                return _Step5PreflightFailure(
+                    f"mount {mount!r} worktree does not exist: "
+                    f"{worktree_path}"
+                )
+
+            expected_branch = row["devwork_branch"]
+            try:
+                branch, branch_err, branch_rc = await run_git(
+                    "symbolic-ref", "--quiet", "--short", "HEAD",
+                    cwd=worktree_path, check=False,
+                )
+            except Exception as exc:
+                return _Step5PreflightFailure(
+                    f"mount {mount!r} cannot inspect current branch: {exc}"
+                )
+            if branch_rc != 0 or branch != expected_branch:
+                current = branch or branch_err or "detached HEAD"
+                return _Step5PreflightFailure(
+                    f"mount {mount!r} worktree is on {current!r}, "
+                    f"expected {expected_branch!r}"
+                )
+
+            try:
+                _head, _head_err, head_rc = await run_git(
+                    "rev-parse", "--verify", "HEAD^{commit}",
+                    cwd=worktree_path, check=False,
+                )
+                if head_rc != 0:
+                    start_point = row.get("base_rev") or row["base_branch"]
+                    if not start_point:
+                        return _Step5PreflightFailure(
+                            f"mount {mount!r} has unborn HEAD and no "
+                            "base_rev/base_branch repair point"
+                        )
+                    await run_git(
+                        "reset", "--mixed", start_point, cwd=worktree_path,
+                    )
+            except Exception as exc:
+                return _Step5PreflightFailure(
+                    f"mount {mount!r} HEAD preflight/repair failed: {exc}"
+                )
+
+            try:
+                diff_names, _err, _rc = await run_git(
+                    "diff", "HEAD", "--name-only", cwd=worktree_path,
+                )
+                status_out, _err, _rc = await run_git(
+                    "status", "--porcelain=v1", cwd=worktree_path,
+                )
+                numstat, _err, _rc = await run_git(
+                    "diff", "HEAD", "--numstat", cwd=worktree_path,
+                )
+            except Exception as exc:
+                return _Step5PreflightFailure(
+                    f"mount {mount!r} diff preflight failed: {exc}"
+                )
+
+            changed_paths = sorted({
+                _normalise_git_path(path)
+                for path in (
+                    diff_names.splitlines()
+                    + _paths_from_git_status_porcelain(status_out)
+                )
+                if _normalise_git_path(path)
+            })
+            forbidden = [
+                path for path in changed_paths
+                if _is_forbidden_step5_diff_path(path)
+            ]
+            if forbidden:
+                return _Step5PreflightFailure(
+                    reason=(
+                        f"mount {mount!r} diff contains "
+                        "generated/dependency paths: "
+                        f"{_format_path_sample(forbidden)}"
+                    ),
+                    generated_paths=tuple(forbidden),
+                )
+            if len(changed_paths) > _STEP5_DIFF_MAX_FILES:
+                return _Step5PreflightFailure(
+                    f"mount {mount!r} diff touches {len(changed_paths)} "
+                    f"files, limit is {_STEP5_DIFF_MAX_FILES}"
+                )
+
+            changed_lines = _parse_git_numstat_changed_lines(numstat)
+            if changed_lines > _STEP5_DIFF_MAX_CHANGED_LINES:
+                return _Step5PreflightFailure(
+                    f"mount {mount!r} diff changes {changed_lines} lines, "
+                    f"limit is {_STEP5_DIFF_MAX_CHANGED_LINES}"
+                )
+
+        return None
+
+    async def _repair_step5_generated_diff(
+        self,
+        dw: dict[str, Any],
+        *,
+        workspace_row: dict[str, Any],
+        round_n: int,
+        generated_paths: tuple[str, ...],
+    ) -> bool:
+        rows = await self.db.fetchall(
+            "SELECT mount_name, is_primary, worktree_path FROM dev_work_repos "
+            "WHERE dev_work_id=? ORDER BY is_primary DESC, mount_name",
+            (dw["id"],),
+        )
+        mount_rows: list[dict[str, Any]] = []
+        for row in rows:
+            mount_rows.append({
+                "mount_name": row["mount_name"],
+                "worktree_path": (
+                    row["worktree_path"]
+                    or (
+                        dw.get("worktree_path")
+                        if row["is_primary"]
+                        else None
+                    )
+                ),
+            })
+        prompt = _compose_step5_generated_diff_repair_prompt(
+            mount_rows=mount_rows,
+            generated_paths=generated_paths,
+        )
+        prompt_rel = (
+            f"devworks/{dw['id']}/prompts/"
+            f"step5-round{round_n}-generated-diff-repair.md"
+        )
+        await self.registry.put_markdown(
+            workspace_row=workspace_row,
+            relative_path=prompt_rel,
+            text=prompt,
+            kind="prompt",
+        )
+        try:
+            rc, stdout = await self._run_llm(
+                dw,
+                agent=dw["agent"],
+                worktree=dw["worktree_path"],
+                timeout=min(
+                    180,
+                    self.config.devwork.step4_acpx_wall_ceiling_s,
+                ),
+                task_file=self._abs_for(workspace_row, prompt_rel),
+                step_tag="STEP5_PREFLIGHT_REPAIR",
+                round_n=round_n,
+                session_role="build",
+            )
+        finally:
+            await self._delete_role_session(dw["id"], round_n, "build")
+
+        stdout_rel = (
+            f"devworks/{dw['id']}/artifacts/"
+            f"step5-round{round_n}-generated-diff-repair-stdout.md"
+        )
+        await self.registry.put_markdown(
+            workspace_row=workspace_row,
+            relative_path=stdout_rel,
+            text=stdout or "",
+            kind="artifact",
+        )
+        if rc != 0:
+            logger.warning(
+                "dev_work %s Step5 generated diff repair failed rc=%s "
+                "stdout=%r",
+                dw["id"],
+                rc,
+                (stdout or "")[-512:],
+            )
+            return False
+        return True
+
     async def _repair_step4_findings_artifact(
         self,
         dw: dict[str, Any],
@@ -301,7 +625,23 @@ class DevWorkStepHandlersMixin:
         workspace_row: dict[str, Any],
         review_rel: str,
         review_abs: str,
+        stdout: str = "",
     ) -> tuple[ReviewOutcome | None, str | None, bool, int]:
+        async def persist_stdout_outcome() -> tuple[
+            ReviewOutcome | None, str | None, bool, int
+        ]:
+            try:
+                outcome = parse_review_output(stdout)
+            except BadRequestError as exc:
+                return None, str(exc), review_exists, review_size
+            ref = await self.registry.put_json(
+                workspace_row=workspace_row,
+                relative_path=review_rel,
+                payload=_review_outcome_to_payload(outcome),
+                kind="artifact",
+            )
+            return outcome, None, True, ref["byte_size"]
+
         review_ref = await self.registry.stat(
             workspace_slug=workspace_row["slug"],
             relative_path=review_rel,
@@ -309,6 +649,10 @@ class DevWorkStepHandlersMixin:
         review_exists = review_ref is not None
         review_size = review_ref.size if review_ref is not None else 0
         if review_ref is None:
+            if stdout:
+                outcome, reason, exists, size = await persist_stdout_outcome()
+                if outcome is not None:
+                    return outcome, reason, exists, size
             return (
                 None,
                 f"review artifact missing: {review_rel}",
@@ -316,6 +660,10 @@ class DevWorkStepHandlersMixin:
                 review_size,
             )
         if review_ref.size <= 0:
+            if stdout:
+                outcome, reason, exists, size = await persist_stdout_outcome()
+                if outcome is not None:
+                    return outcome, reason, exists, size
             return (
                 None,
                 f"review artifact empty: {review_rel}",
@@ -338,7 +686,12 @@ class DevWorkStepHandlersMixin:
                 review_size,
             )
         except BadRequestError as exc:
-            return None, str(exc), review_exists, review_size
+            file_reason = str(exc)
+            if stdout:
+                outcome, reason, exists, size = await persist_stdout_outcome()
+                if outcome is not None:
+                    return outcome, reason, exists, size
+            return None, file_reason, review_exists, review_size
 
     async def _repair_step5_review_artifact(
         self,
@@ -389,6 +742,7 @@ class DevWorkStepHandlersMixin:
             workspace_row=workspace_row,
             review_rel=review_rel,
             review_abs=review_abs,
+            stdout=repair_stdout,
         )
         if outcome is None:
             logger.warning(
@@ -935,6 +1289,35 @@ class DevWorkStepHandlersMixin:
         )
         review_abs = self._abs_for(ws, review_rel)
 
+        preflight_reason = await self._preflight_step5_worktrees(dw)
+        if preflight_reason is not None and preflight_reason.generated_paths:
+            repaired = await self._repair_step5_generated_diff(
+                dw,
+                workspace_row=ws,
+                round_n=round_n,
+                generated_paths=preflight_reason.generated_paths,
+            )
+            if repaired:
+                preflight_reason = await self._preflight_step5_worktrees(dw)
+            if preflight_reason is not None and preflight_reason.generated_paths:
+                await self._escalate(
+                    dw,
+                    reason=(
+                        "Step5 generated/dependency diff repair failed: "
+                        f"{preflight_reason.reason}"
+                    ),
+                    problem_category=ProblemCategory.impl_gap,
+                )
+                return
+        if preflight_reason is not None:
+            await self._loop_or_escalate(
+                dw,
+                back_to=DevWorkStep.STEP4_DEVELOP,
+                reason=f"Step5 preflight failed: {preflight_reason.reason}",
+                problem_category=ProblemCategory.impl_gap,
+            )
+            return
+
         mount_entries = await self._load_mount_table_entries(dw)
         retry_feedback = await self._loop_feedback_for_round(
             dw["id"], round_n, DevWorkStep.STEP5_REVIEW
@@ -1000,6 +1383,7 @@ class DevWorkStepHandlersMixin:
                 workspace_row=ws,
                 review_rel=review_rel,
                 review_abs=review_abs,
+                stdout=stdout,
             )
         else:
             parse_reason = f"rc={rc}"

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -117,6 +118,8 @@ def _detect_step(prompt: str) -> str:
         return "STEP3"
     if "按迭代设计的" in prompt or "自审结果" in prompt:
         return "STEP4"
+    if "STEP5 generated/dependency diff repair" in prompt:
+        return "STEP5_PREFLIGHT_REPAIR"
     if "打分 rubric" in prompt and "problem_category" in prompt:
         return "STEP5"
     return "UNKNOWN"
@@ -213,6 +216,20 @@ def _last_json_output_path(prompt: str) -> Path | None:
     return Path(matches[-1]) if matches else None
 
 
+def _first_mount_worktree_path(prompt: str, fallback: str) -> str:
+    for line in prompt.splitlines():
+        mount_line = re.search(r"- mount `[^`]+`: `([^`]+)`", line)
+        if mount_line:
+            return mount_line.group(1)
+        if not line.startswith("| `"):
+            continue
+        cols = [col.strip() for col in line.strip().strip("|").split("|")]
+        if len(cols) < 7 or cols[-1].startswith("_("):
+            continue
+        return cols[-1].strip("`")
+    return fallback
+
+
 def step4_invalid_findings_json(step_tag, round_n, prompt, worktree):
     out = _last_json_output_path(prompt)
     if out is None:
@@ -237,6 +254,64 @@ def step4_write_findings_expect_retry_feedback(step_tag, round_n, prompt, worktr
     assert "System retry feedback" in prompt
     assert "Step4 findings JSON invalid" in prompt
     return step4_write_findings(step_tag, round_n, prompt, worktree)
+
+
+def step4_write_findings_and_stage_node_modules(
+    step_tag, round_n, prompt, worktree,
+):
+    result = step4_write_findings(step_tag, round_n, prompt, worktree)
+    repo_worktree = _first_mount_worktree_path(prompt, worktree)
+    noise = Path(repo_worktree) / "node_modules" / "noise.js"
+    noise.parent.mkdir(parents=True, exist_ok=True)
+    noise.write_text("module.exports = 1;\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "node_modules/noise.js"],
+        cwd=repo_worktree,
+        check=True,
+    )
+    return result
+
+
+def step4_write_findings_and_make_unborn_head(
+    step_tag, round_n, prompt, worktree,
+):
+    result = step4_write_findings(step_tag, round_n, prompt, worktree)
+    repo_worktree = _first_mount_worktree_path(prompt, worktree)
+    branch = subprocess.check_output(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        cwd=repo_worktree,
+        text=True,
+    ).strip()
+    subprocess.run(
+        ["git", "update-ref", "-d", f"refs/heads/{branch}"],
+        cwd=repo_worktree,
+        check=True,
+    )
+    return result
+
+
+def step5_preflight_repair_node_modules(step_tag, round_n, prompt, worktree):
+    assert step_tag == "STEP5_PREFLIGHT_REPAIR"
+    repo_worktree = _first_mount_worktree_path(prompt, worktree)
+    ignore = Path(repo_worktree) / ".gitignore"
+    existing = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
+    if "node_modules/" not in existing:
+        ignore.write_text(f"{existing}node_modules/\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "reset", "HEAD", "--", "node_modules/noise.js"],
+        cwd=repo_worktree,
+        check=True,
+    )
+    noise = Path(repo_worktree) / "node_modules" / "noise.js"
+    if noise.exists():
+        noise.unlink()
+    subprocess.run(["git", "add", ".gitignore"], cwd=repo_worktree, check=True)
+    return ("repaired generated diff", 0)
+
+
+def step5_preflight_repair_noop(step_tag, round_n, prompt, worktree):
+    assert step_tag == "STEP5_PREFLIGHT_REPAIR"
+    return ("did not repair", 0)
 
 
 def step5_invalid_review_json(step_tag, round_n, prompt, worktree):
@@ -264,7 +339,7 @@ def step5_write_review_but_fail(step_tag, round_n, prompt, worktree):
 def step5_success_without_rewriting_review(step_tag, round_n, prompt, worktree):
     assert "System retry feedback" in prompt
     assert "Step5 unparseable" in prompt
-    payload = {"score": 90, "issues": [], "problem_category": None}
+    payload = {"score": 91, "issues": [], "problem_category": None}
     return (f"```json\n{json.dumps(payload)}\n```", 0)
 
 
@@ -1142,15 +1217,12 @@ async def test_step5_parse_error_is_visible_in_retry_prompt(env):
     assert [(r["review_round"], r["note_round"]) for r in reviews] == [(1, 1)]
 
 
-async def test_step5_missing_review_file_records_failed_attempt(env):
+async def test_step5_missing_review_file_uses_stdout_and_persists_artifact(env):
     script = [
         step2_append_h2,
         step3_write_ctx,
         step4_write_findings,
         step5_missing_review_file_with_stdout,
-        _step5_writer_expect_retry_feedback(
-            {"score": 90, "issues": [], "problem_category": None}
-        ),
     ]
     sm = _make_sm(env, ScriptedExecutor(script))
     dw = await sm.create(
@@ -1167,14 +1239,11 @@ async def test_step5_missing_review_file_records_failed_attempt(env):
     artifacts = env["ws_root"] / env["ws"]["slug"] / "devworks" / dw["id"] / "artifacts"
     failure_meta = artifacts / "step5-review-round1-attempt1-failure.json"
     failure_stdout = artifacts / "step5-review-round1-attempt1-stdout.md"
-    assert failure_meta.exists()
-    assert failure_stdout.exists()
-    payload = json.loads(failure_meta.read_text(encoding="utf-8"))
-    assert payload["parse_reason"].startswith("review artifact missing")
-    assert payload["stdout_artifact_path"].endswith(
-        "step5-review-round1-attempt1-stdout.md"
-    )
-    assert "review chatter" in failure_stdout.read_text(encoding="utf-8")
+    review = artifacts / "step5-review-round1.json"
+    assert not failure_meta.exists()
+    assert not failure_stdout.exists()
+    payload = json.loads(review.read_text(encoding="utf-8"))
+    assert payload["score"] == 90
     reviews = await env["db"].fetchall(
         "SELECT round FROM reviews WHERE dev_work_id=? ORDER BY created_at",
         (dw["id"],),
@@ -1182,7 +1251,7 @@ async def test_step5_missing_review_file_records_failed_attempt(env):
     assert [r["round"] for r in reviews] == [1]
 
 
-async def test_step5_retry_does_not_accept_stale_review_file(env):
+async def test_step5_retry_uses_fresh_stdout_not_stale_review_file(env):
     script = [
         step2_append_h2,
         step3_write_ctx,
@@ -1200,14 +1269,116 @@ async def test_step5_retry_does_not_accept_stale_review_file(env):
 
     final = await sm.run_to_completion(dw["id"])
 
-    assert final["current_step"] == "ESCALATED"
+    assert final["current_step"] == "COMPLETED"
     assert final["iteration_rounds"] == 0
     artifacts = env["ws_root"] / env["ws"]["slug"] / "devworks" / dw["id"] / "artifacts"
-    assert not (artifacts / "step5-review-round1.json").exists()
+    review = artifacts / "step5-review-round1.json"
+    assert json.loads(review.read_text(encoding="utf-8"))["score"] == 91
     reviews = await env["db"].fetchall(
-        "SELECT id FROM reviews WHERE dev_work_id=?", (dw["id"],),
+        "SELECT round, score FROM reviews WHERE dev_work_id=?", (dw["id"],),
     )
-    assert reviews == []
+    assert [(r["round"], r["score"]) for r in reviews] == [(1, 91)]
+
+
+async def test_step5_preflight_repairs_generated_dependency_paths(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings_and_stage_node_modules,
+        step5_preflight_repair_node_modules,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor)
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "COMPLETED"
+    assert final["iteration_rounds"] == 0
+    assert len(executor.calls) == 5
+    assert any(
+        call["step"] == "STEP5_PREFLIGHT_REPAIR" for call in executor.calls
+    )
+    repo_row = await env["db"].fetchone(
+        "SELECT worktree_path FROM dev_work_repos WHERE dev_work_id=?",
+        (dw["id"],),
+    )
+    diff_names, _err, _rc = await run_git(
+        "diff", "HEAD", "--name-only",
+        cwd=repo_row["worktree_path"],
+    )
+    assert "node_modules/noise.js" not in diff_names
+    assert ".gitignore" in diff_names
+
+
+async def test_step5_preflight_repair_failure_does_not_rerun_step4(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings_and_stage_node_modules,
+        step5_preflight_repair_noop,
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor)
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "ESCALATED"
+    assert final["iteration_rounds"] == 0
+    assert final["last_problem_category"] == ProblemCategory.impl_gap.value
+    assert len(executor.calls) == 4
+    assert any(
+        call["step"] == "STEP5_PREFLIGHT_REPAIR" for call in executor.calls
+    )
+    event = await env["db"].fetchone(
+        "SELECT payload_json FROM workspace_events "
+        "WHERE event_name='dev_work.escalated' AND correlation_id=?",
+        (dw["id"],),
+    )
+    assert "generated/dependency diff repair failed" in json.loads(
+        event["payload_json"]
+    )["reason"]
+
+
+async def test_step5_preflight_repairs_unborn_head_before_review(env):
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings_and_make_unborn_head,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "COMPLETED"
+    repo_row = await env["db"].fetchone(
+        "SELECT worktree_path FROM dev_work_repos WHERE dev_work_id=?",
+        (dw["id"],),
+    )
+    _head, _err, rc = await run_git(
+        "rev-parse", "--verify", "HEAD^{commit}",
+        cwd=repo_row["worktree_path"], check=False,
+    )
+    assert rc == 0
 
 
 async def test_step5_repeated_parse_failure_escalates_without_round_inflation(env):
