@@ -65,10 +65,10 @@ def _render_retry_feedback(feedback: str | None) -> str:
 _STEP_WALL_STEP2 = (
     "## 本步职责墙\n"
     "\n"
-    "**单一职责**：基于设计文档 + 上轮反馈，决定「做什么、怎么验」。\n"
+    "**单一职责**：基于设计文档 + 上轮反馈，决定计划层级与验收。\n"
     "**唯一输出**：在 iteration-round-N.md 末尾追加 H2"
-    "（本轮目标 / 推荐技术栈 / 开发计划 / 用例清单），其中开发计划必须是带稳定 "
-    "DW-xx ID 的 checkbox checklist。\n"
+    "（本轮目标 / 推荐技术栈 / 开发计划 / 用例清单）；"
+    "开发计划用稳定 DW-xx checkbox checklist。\n"
     "**明确禁止**：不扫代码、不写代码、不决定文件级实现路径、"
     "不修改 front-matter、不写入其它文件。\n"
     "**越界即失败**：违反任何上述禁止，本轮 Step5 将以 "
@@ -399,26 +399,31 @@ _AGGREGATION_RULE = """\
 1. **设计文档本身缺乏可评估内容**支撑本次多仓任务 → `problem_category="design_hollow"`
 2. 否则**任一仓**的迭代设计/开发计划/用例清单与设计文档或用户诉求有缺口 → `problem_category="req_gap"`
 3. 否则**任一仓**存在实现/测试/代码回归（lint 失败、测试失败、代码与计划不符） → `problem_category="impl_gap"`
-4. 否则全部通过阈值 → `problem_category=null` 且 `score >= $rubric_threshold`
+4. 否则最终准出分通过阈值 → `problem_category=null` 且 `score >= $rubric_threshold`
+
+若 `plan_score_a >= 90`，说明主 PLAN 对设计文档已有足够覆盖；后续不得为了追求
+更高 `a` 继续新增主 PLAN，只允许在既有主 PLAN 下补充缩进子 PLAN 或补充验证细节。
 """
 
 
 _SCORING_RULE = """\
 ## 最终分数制定规则（score）
 
-把设计文档完全满足定义为 100 分，最终分数同时反映**当前版本迭代设计文件的完成度**
-和**对设计文档与用户诉求的满足程度**。先算**预期可实现分值 `a`**：
+把设计文档完全满足定义为 100 分。先算**预期可实现分值 `a`**：
 若当前迭代设计 `## 开发计划` 完美实现，相对设计文档最多能拿多少分；
 `a / 100` 表示计划对设计的满足程度。再算**实际实现分值 `b`**：
-由 git diff、测试、Step4 findings 和 `plan_verification` 证明完成的功能，
-相对设计文档实际能拿多少分；`b / a` 表示执行对计划的满足程度。
-`score` 必须等于 `b`。
+把当前开发计划完美实现定义为 100 分，已由 git diff、测试、Step4 findings 和
+`plan_verification` 证明完成的部分相对开发计划能拿多少分；`b / 100`
+表示执行对计划的满足程度。
+
+最终用于准出的 `score = round(plan_score_a * actual_score_b / 100)`，
+即 `100 * (a / 100) * (b / 100)`。`actual_score_b` 不再等于顶层 `score`，
+而是计划执行完成分。
 
 $previous_score_note
 
 规则：
-1. 按设计文档 rubric 权重给维度分；总权重非 100 时用
-   `score = round(100 * 已得权重分 / 总权重)` 归一化。
+1. 按设计文档 rubric 权重给 `a`；总权重非 100 时先归一化到 0-100。
 2. 先给 `a`：核验迭代设计是否覆盖用户故事、场景、流程、验收标准和用户诉求。
 3. 再给 `b`：只有 `plan_verification.status="done"`、`verified=true` 且有
    diff/测试证据的开发计划项才算完成；不能只信 Step4 自述。
@@ -426,23 +431,25 @@ $previous_score_note
    `req_gap`；计划覆盖但实现/测试/diff 未完成为 `impl_gap`。
 5. 关键需求或必需计划项未满足、lint/typecheck/unit 失败、自审与 diff 不一致：
    总分不得高于 79；仅非关键优化未完成不得高于 89；安全/数据/授权高风险不得高于 60。
-6. 无重大缺口且证据充分才允许 `problem_category=null`；`score >= $rubric_threshold`
+6. 无重大缺口且证据充分才允许 `problem_category=null`；最终 `score >= $rubric_threshold`
    但 category 非 null 是不一致输出。
 7. 通常每轮 `b` 应增长；若未增长，必须在 `issues` 或 `next_round_hints` 说明原因。
+8. 当 `a >= 90` 时，不得继续建议新增主 PLAN；如需要细化，只能建议在已有主 PLAN
+   下追加缩进子 PLAN，例如 `DW-02.1`。
 
 同时输出 `score_breakdown`：
 
 ```json
-{"plan_score_a": 85, "actual_score_b": 70, "plan_coverage": 0.85, "execution_coverage": 0.82, "previous_actual_score_b": 60}
+{"plan_score_a": 85, "actual_score_b": 70, "final_score": 60, "plan_coverage": 0.85, "execution_coverage": 0.70, "previous_actual_score_b": 60}
 ```
 """
 
 
-def _render_previous_score_note(previous_score: int | None) -> str:
-    if previous_score is None:
+def _render_previous_score_note(previous_actual_score_b: int | None) -> str:
+    if previous_actual_score_b is None:
         return "上一轮实际实现分值 `b`：无（首轮或无历史评分）。"
     return (
-        f"上一轮实际实现分值 `b`：{previous_score}；"
+        f"上一轮实际实现分值 `b`：{previous_actual_score_b}；"
         "本轮 `b` 通常应高于上一轮，除非有明确的范围收缩、回滚或重大遗漏说明。"
     )
 
@@ -460,7 +467,7 @@ class Step5Inputs:
     primary_worktree_path: str | None
     rubric_threshold: int
     output_json_path: str
-    previous_score: int | None = None
+    previous_actual_score_b: int | None = None
     retry_feedback: str | None = None
 
 
@@ -480,7 +487,7 @@ def compose_step5(inputs: Step5Inputs) -> str:
         scoring_rule=Template(_SCORING_RULE).safe_substitute(
             rubric_threshold=str(inputs.rubric_threshold),
             previous_score_note=_render_previous_score_note(
-                inputs.previous_score
+                inputs.previous_actual_score_b
             ),
         ),
         rubric_threshold=str(inputs.rubric_threshold),

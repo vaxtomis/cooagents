@@ -154,6 +154,25 @@ def _review_outcome_to_payload(outcome: ReviewOutcome) -> dict[str, Any]:
     }
 
 
+def _extract_actual_score_b(score_breakdown: str | None) -> int | None:
+    if not score_breakdown:
+        return None
+    try:
+        payload = json.loads(score_breakdown)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("actual_score_b")
+    if isinstance(raw, bool):
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if 0 <= value <= 100 else None
+
+
 def _format_path_sample(paths: list[str], *, limit: int = 5) -> str:
     sample = ", ".join(paths[:limit])
     extra = len(paths) - limit
@@ -241,7 +260,8 @@ def _compose_step5_artifact_repair_prompt(
         "Required JSON shape:\n"
         "```json\n"
         "{\"score\": 90, \"score_breakdown\": "
-        "{\"plan_score_a\": 90, \"actual_score_b\": 90}, "
+        "{\"plan_score_a\": 100, \"actual_score_b\": 90, "
+        "\"final_score\": 90}, "
         "\"issues\": [], \"plan_verification\": [], "
         "\"next_round_hints\": [], \"problem_category\": null}\n"
         "```\n\n"
@@ -1349,16 +1369,25 @@ class DevWorkStepHandlersMixin:
             dw["id"], round_n, DevWorkStep.STEP5_REVIEW
         )
         previous_review = await self.db.fetchone(
-            "SELECT score FROM reviews WHERE dev_work_id=? AND round < ? "
+            "SELECT score, score_breakdown_json FROM reviews "
+            "WHERE dev_work_id=? AND round < ? "
             "ORDER BY round DESC, created_at DESC LIMIT 1",
             (dw["id"], round_n),
         )
-        previous_score = None
-        if previous_review is not None and previous_review["score"] is not None:
+        previous_actual_score_b = None
+        if previous_review is not None:
+            previous_actual_score_b = _extract_actual_score_b(
+                previous_review["score_breakdown_json"]
+            )
+        if (
+            previous_actual_score_b is None
+            and previous_review is not None
+            and previous_review["score"] is not None
+        ):
             try:
-                previous_score = int(previous_review["score"])
+                previous_actual_score_b = int(previous_review["score"])
             except (TypeError, ValueError):
-                previous_score = None
+                previous_actual_score_b = None
 
         # Step3 ctx file path — Step5 reviewer reads it to verify Step4
         # addressed the疑点/risks Step3 raised. Phase 4 always passes a
@@ -1380,7 +1409,7 @@ class DevWorkStepHandlersMixin:
                 primary_worktree_path=dw.get("worktree_path"),
                 rubric_threshold=rubric_threshold,
                 output_json_path=review_abs,
-                previous_score=previous_score,
+                previous_actual_score_b=previous_actual_score_b,
                 retry_feedback=retry_feedback,
             )
         )

@@ -40,6 +40,11 @@ _PLAN_VERIFICATION_STATUSES = (
 )
 
 
+def _expected_final_score(plan_score_a: int, actual_score_b: int) -> int:
+    """Return round(plan_score_a * actual_score_b / 100), half-up."""
+    return (plan_score_a * actual_score_b + 50) // 100
+
+
 def _coerce_int_0_100(value: object, *, field: str) -> int:
     if isinstance(value, bool):
         raise BadRequestError(f"review output '{field}' must be an int")
@@ -86,10 +91,24 @@ def _coerce_score_breakdown(payload: dict, *, score: int) -> dict:
             out[key], field=f"score_breakdown.{key}"
         )
 
-    if out["actual_score_b"] != score:
+    expected_score = _expected_final_score(
+        out["plan_score_a"], out["actual_score_b"]
+    )
+    if expected_score != score:
         raise BadRequestError(
-            "review output 'score_breakdown.actual_score_b' must equal 'score'"
+            "review output 'score' must equal "
+            "round(score_breakdown.plan_score_a * "
+            "score_breakdown.actual_score_b / 100)"
         )
+    if "final_score" in out and out["final_score"] is not None:
+        final_score = _coerce_int_0_100(
+            out["final_score"], field="score_breakdown.final_score"
+        )
+        if final_score != score:
+            raise BadRequestError(
+                "review output 'score_breakdown.final_score' must equal 'score'"
+            )
+    out["final_score"] = score
     return out
 
 

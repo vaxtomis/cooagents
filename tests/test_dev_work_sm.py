@@ -744,8 +744,9 @@ async def test_step5_round2_prompt_includes_previous_actual_b(env):
         return _step5_writer({
             "score": 90,
             "score_breakdown": {
-                "plan_score_a": 90,
+                "plan_score_a": 100,
                 "actual_score_b": 90,
+                "final_score": 90,
                 "previous_actual_score_b": 50,
             },
             "issues": [],
@@ -757,8 +758,8 @@ async def test_step5_round2_prompt_includes_previous_actual_b(env):
         step3_write_ctx,
         step4_write_findings,
         _step5_writer({
-            "score": 50,
-            "score_breakdown": {"plan_score_a": 80, "actual_score_b": 50},
+            "score": 40,
+            "score_breakdown": {"plan_score_a": 80, "actual_score_b": 50, "final_score": 40},
             "issues": [{"message": "AC-02 is still missing"}],
             "problem_category": "req_gap",
         }),
@@ -858,7 +859,7 @@ async def test_req_gap_routes_to_step2(env):
     ).as_posix()
     assert previous_note_abs in round2_prompt
     assert "首轮，无上一轮迭代设计" not in round2_prompt
-    assert "所有历史 PLAN 都必须保留" in round2_prompt
+    assert "必须保留所有历史 PLAN" in round2_prompt
     assert "追加缩进子 PLAN" in round2_prompt
 
 
@@ -914,6 +915,11 @@ async def test_step2_feedback_includes_next_round_hints(env):
     """
     round1_payload = {
         "score": 30,
+        "score_breakdown": {
+            "plan_score_a": 90,
+            "actual_score_b": 33,
+            "final_score": 30,
+        },
         "issues": [{"m": "do better"}],
         "problem_category": "req_gap",
         "next_round_hints": [
@@ -952,13 +958,15 @@ async def test_step2_feedback_includes_next_round_hints(env):
     assert "auth.py:42-58" in body
     # Mount hint should surface as a parenthesised prefix.
     assert "(backend)" in body
+    assert "PLAN 扩展限制" in body
+    assert "plan_score_a >= 90" in body
     # Render guard: hint without kind/mount has no double-space artefact.
     assert "- bare hint, no kind no mount" in body
     assert "-  " not in body  # no "- <space><space>" anywhere
 
 
-async def test_step2_prompt_artifact_under_3kib(env):
-    """Phase 4 size guard: persisted Step2 prompt must stay ≤ 3 KiB."""
+async def test_step2_prompt_artifact_under_4kib(env):
+    """Phase 4 size guard: persisted Step2 prompt must stay ≤ 4 KiB."""
     script = [
         step2_append_h2, step3_write_ctx, step4_write_findings,
         _step5_writer({"score": 95, "issues": [], "problem_category": None}),
@@ -978,8 +986,8 @@ async def test_step2_prompt_artifact_under_3kib(env):
         workspace_slug=env["ws"]["slug"],
         relative_path=f"devworks/{dw['id']}/prompts/step2-round1.md",
     )
-    assert len(prompt_bytes) <= 3 * 1024, (
-        f"step2 prompt grew past 3 KiB: {len(prompt_bytes)} bytes"
+    assert len(prompt_bytes) <= 4 * 1024, (
+        f"step2 prompt grew past 4 KiB: {len(prompt_bytes)} bytes"
     )
 
 
@@ -1557,9 +1565,10 @@ async def test_step5_plan_verification_checks_iteration_plan_items(env):
         "issues": [],
         "score_breakdown": {
             "plan_score_a": 95,
-            "actual_score_b": 90,
+            "actual_score_b": 95,
+            "final_score": 90,
             "plan_coverage": 0.95,
-            "execution_coverage": 0.947,
+            "execution_coverage": 0.95,
         },
         "plan_verification": [
             {"id": "DW-01", "status": "done", "verified": True},

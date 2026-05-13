@@ -42,7 +42,7 @@ $next_round_hints_guide
 ```json
 {
   "score": 0,
-  "score_breakdown": {"plan_score_a": 0, "actual_score_b": 0, "plan_coverage": 0.0, "execution_coverage": 0.0, "previous_actual_score_b": null},
+  "score_breakdown": {"plan_score_a": 0, "actual_score_b": 0, "final_score": 0, "plan_coverage": 0.0, "execution_coverage": 0.0, "previous_actual_score_b": null},
   "issues": [
     {"mount": "<mount_name>", "dimension": "<rubric维度>", "severity": "<info|warn|error>", "message": "<具体问题>"},
     {"kind": "boundary_violation", "step": "step4", "severity": "<info|warn|error>", "message": "<越界事实>"}
@@ -58,8 +58,8 @@ $next_round_hints_guide
 
 字段规则（**严格遵守**）：
 
-- `score`：整数 0-100；多仓时为整体打分（不是各仓加权平均）。
-- `score_breakdown`：对象；解释 `score` 如何由 a/b 模型得到，必须包含 `plan_score_a`（预期可实现分值 a）与 `actual_score_b`（实际实现分值 b），且 `actual_score_b` 必须等于顶层 `score`。
+- `score`：整数 0-100；多仓时为整体准出分（不是各仓加权平均），必须等于 `round(plan_score_a * actual_score_b / 100)`。
+- `score_breakdown`：对象；解释 `score` 如何由 a/b 模型得到，必须包含 `plan_score_a`（计划若完美实现对设计文档的满足分 a）与 `actual_score_b`（当前实现相对开发计划的完成分 b）。
 - `issues`：数组；常规 rubric 问题带 `mount` / `dimension`（`mount` 可选）；越界类问题带 `kind="boundary_violation"` 与 `step` 字段；`score >= $rubric_threshold` 且未发现越界时可以为空数组 `[]`。
 - `plan_verification`：数组；核验 Step4 `plan_execution` 与 checklist、git diff、测试是否一致。每项必须带 `id/status/verified`；`status` 仅可为 `"done"`、`"deferred"`、`"blocked"`、`"failed"`、`"unverified"`。只有证据充分的项才能写 `{"status":"done","verified":true}`；不要改迭代设计文件。
 - `next_round_hints`：数组；面向**下一轮**的提示，每条带 `kind` 与 `message`；详见上方「下一轮提示」段；本轮无缺失功能且无优化项时为空数组 `[]`。**不要**与 `issues` 重复内容。

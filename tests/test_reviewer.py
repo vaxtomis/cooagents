@@ -206,12 +206,13 @@ def test_parse_review_extracts_score_breakdown():
     breakdown = {
         "plan_score_a": 85,
         "actual_score_b": 70,
+        "final_score": 60,
         "plan_coverage": 0.85,
-        "execution_coverage": 0.82,
+        "execution_coverage": 0.70,
         "previous_actual_score_b": 60,
     }
     out = parse_review_output(json.dumps({
-        "score": 70,
+        "score": 60,
         "issues": [],
         "score_breakdown": breakdown,
         "problem_category": "impl_gap",
@@ -224,7 +225,21 @@ def test_parse_review_rejects_score_breakdown_score_mismatch():
         parse_review_output(json.dumps({
             "score": 70,
             "issues": [],
-            "score_breakdown": {"plan_score_a": 85, "actual_score_b": 71},
+            "score_breakdown": {"plan_score_a": 85, "actual_score_b": 70},
+            "problem_category": "impl_gap",
+        }))
+
+
+def test_parse_review_rejects_score_breakdown_final_score_mismatch():
+    with pytest.raises(BadRequestError, match="final_score"):
+        parse_review_output(json.dumps({
+            "score": 60,
+            "issues": [],
+            "score_breakdown": {
+                "plan_score_a": 85,
+                "actual_score_b": 70,
+                "final_score": 61,
+            },
             "problem_category": "impl_gap",
         }))
 

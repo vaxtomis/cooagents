@@ -321,9 +321,9 @@ stateDiagram-v2
 
 - `INIT` 会把 `dev_work_repos` 转成每 mount 一个 worktree，并设置主 worktree 与 session anchor。
 - `STEP1_VALIDATE` 每次重新校验 `design_doc` 是否仍然是 `published`，并复跑 Markdown 结构校验。
-- `STEP2` 先由系统写 iteration note 头部，再让 LLM 追加三段 H2 内容。
+- `STEP2` 先由系统写 iteration note 头部，再让 LLM 追加三段 H2 内容；Round 1 优先产出粗粒度主 PLAN 框架，Round ≥ 2 继承历史 PLAN 后可追加遗漏主 PLAN 或展开子 PLAN。
 - `STEP3` 负责上下文检索，`STEP4` 负责开发与自检，`STEP5` 负责 rubric 审查与分类。
-- `STEP5` 的 `score` 使用 a/b 模型：`a` 是当前迭代设计若完美实现可达到的设计满足分，`b` 是已由 diff/测试/plan_verification 证明的实际实现分；最终 `score=b`，完成条件是 `b >= rubric_threshold` 且 `problem_category == null`。
+- `STEP5` 的 `score` 使用 a/b 模型：`a` 是当前迭代设计若完美实现可达到的设计满足分，`b` 是当前实现相对开发计划的完成分；最终准出分 `score=round(a*b/100)`，完成条件是 `score >= rubric_threshold` 且 `problem_category == null`。当 `a >= 90` 后，后续迭代不再新增主 PLAN，只允许在既有 PLAN 下补充子 PLAN 或验证细节。
 - `STEP5_REVIEW` 入口包含内部 preflight：修复 unborn HEAD、限制 diff 体量、拦截生成/依赖路径。生成/依赖路径会先走单一职责 `STEP5_PREFLIGHT_REPAIR`，不直接重跑完整 Step4。
 - `STEP5_PREFLIGHT_REPAIR` 不是持久化状态机枚举，而是 Step5 内部的一次 LLM 调用；其目标只限 `.gitignore` 补全和生成物清理，失败则升级人工介入。
 - Step5 review JSON 文件缺失或损坏时，状态机会优先尝试从同次 stdout 中解析合法 JSON 并自行写回 artifact；失败后才进入 review artifact repair / Step5 retry。

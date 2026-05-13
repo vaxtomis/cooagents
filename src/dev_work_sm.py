@@ -1633,7 +1633,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             else ""
         )
         row = await self.db.fetchone(
-            "SELECT score, problem_category, issues_json, "
+            "SELECT score, score_breakdown_json, problem_category, issues_json, "
             "next_round_hints_json FROM reviews "
             "WHERE dev_work_id=? ORDER BY round DESC LIMIT 1",
             (dev_id,),
@@ -1657,6 +1657,16 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             )
         except (ValueError, TypeError):
             hints = []
+        try:
+            score_breakdown = (
+                json.loads(row["score_breakdown_json"])
+                if row["score_breakdown_json"]
+                else {}
+            )
+            if not isinstance(score_breakdown, dict):
+                score_breakdown = {}
+        except (ValueError, TypeError):
+            score_breakdown = {}
         header = (
             f"上一轮评分 {row['score']}，problem_category="
             f"{row['problem_category']}"
@@ -1672,6 +1682,20 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                     lines.append(f"- [{dim}] {msg}" if dim else f"- {msg}")
                 else:
                     lines.append(f"- {it}")
+        if score_breakdown:
+            a = score_breakdown.get("plan_score_a")
+            b = score_breakdown.get("actual_score_b")
+            lines.append(f"上一轮 score_breakdown：plan_score_a={a}, actual_score_b={b}")
+            try:
+                plan_score_a = int(a)
+            except (TypeError, ValueError):
+                plan_score_a = None
+            if plan_score_a is not None and plan_score_a >= 90:
+                lines.append(
+                    "PLAN 扩展限制：上一轮 plan_score_a >= 90，"
+                    "本轮不得新增主 PLAN，只能在已有 PLAN 下追加缩进子 PLAN "
+                    "或补充验证细节。"
+                )
         # Forward-looking hints get their own H2 so Step2 can scan for them
         # explicitly and treat them as "next round must address X" inputs.
         if hints:

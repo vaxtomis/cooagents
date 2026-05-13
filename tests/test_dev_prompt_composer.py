@@ -78,7 +78,21 @@ def test_step2_round_n_uses_previous_review_path():
     assert "首轮，无上一轮迭代设计" not in out
 
 
-def test_step2_round_n_requires_cumulative_plan_append_only():
+def test_step2_round1_prefers_coarse_main_plan_framework():
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-x", round=1,
+        design_doc_path="/ws/foo/designs/d.md",
+        user_prompt="P",
+        previous_review_path=None,
+        output_path="/ws/foo/devworks/dev-x/iteration-round-1.md",
+    ))
+    assert "Round 1 优先按设计文档拆粗粒度主 PLAN" in out
+    assert "只写顶层 DW-xx" in out
+    assert "覆盖需求/流程/验收面" in out
+    assert "默认不展开大量子 PLAN" in out
+
+
+def test_step2_round_n_requires_cumulative_plan_append_or_refine():
     out = compose_step2(Step2Inputs(
         dev_work_id="dev-x", round=3,
         design_doc_path="/ws/foo/designs/d.md",
@@ -88,8 +102,11 @@ def test_step2_round_n_requires_cumulative_plan_append_only():
         output_path="/ws/foo/devworks/dev-x/iteration-round-3.md",
     ))
     assert "必须 Read 此文件并继承其中 `## 开发计划`" in out
-    assert "所有历史 PLAN 都必须保留" in out
-    assert "只能追加新的主 PLAN" in out
+    assert "必须保留所有历史 PLAN" in out
+    assert "追加遗漏主 PLAN" in out
+    assert "细粒度子 PLAN" in out
+    assert "plan_score_a >= 90" in out
+    assert "不得新增主 PLAN" in out
     assert "追加缩进子 PLAN" in out
     assert "DW-02.1" in out
     assert "- [ ] ~~DW-02:" in out
@@ -436,14 +453,15 @@ def test_step5_prompt_carries_boundary_check_rubric():
 
 def test_step5_prompt_carries_score_formula():
     out = compose_step5(_step5_minimal())
-    assert "当前版本迭代设计文件的完成度" in out
-    assert "对设计文档与用户诉求的满足程度" in out
+    assert "把设计文档完全满足定义为 100 分" in out
+    assert "相对设计文档最多能拿多少分" in out
     assert "预期可实现分值 `a`" in out
     assert "实际实现分值 `b`" in out
-    assert "`score` 必须等于 `b`" in out
+    assert "当前实现相对开发计划的完成分" in out
+    assert "actual_score_b` 不再等于顶层 `score`" in out
     assert "`a / 100`" in out
-    assert "`b / a`" in out
-    assert "score = round(100 * 已得权重分 / 总权重)" in out
+    assert "`b / 100`" in out
+    assert "score = round(plan_score_a * actual_score_b / 100)" in out
     assert "存在重大不满足点时必须扣分" in out
     assert "problem_category=null" in out
     assert "score >= 85" in out
@@ -458,7 +476,7 @@ def test_step5_prompt_carries_previous_b_when_available():
         step4_findings_path="/f", context_path="/c.md",
         mount_table_entries=(),
         primary_worktree_path=None, rubric_threshold=85,
-        output_json_path="/s", previous_score=72,
+        output_json_path="/s", previous_actual_score_b=72,
     ))
     assert "上一轮实际实现分值 `b`：72" in out
     assert "通常应高于上一轮" in out
@@ -504,7 +522,7 @@ def test_step2_rendered_size_budget():
         output_path="/ws/foo/devworks/dev-x/iterations/iteration-round-1.md",
     ))
     # Wall + path-based skeleton + cumulative-plan instructions.
-    assert len(out.encode("utf-8")) <= 2200
+    assert len(out.encode("utf-8")) <= 4 * 1024
 
 
 def test_step3_rendered_size_budget():
@@ -529,7 +547,7 @@ def test_step5_rendered_size_budget():
     out = compose_step5(_step5_minimal())
     # Budget covers wall + boundary check + next-round-hints guide +
     # aggregation/scoring rules + tail JSON schema + field rules.
-    assert len(out.encode("utf-8")) <= 9500
+    assert len(out.encode("utf-8")) <= 10000
 
 
 def test_step3_dropped_reference_paths_heading():

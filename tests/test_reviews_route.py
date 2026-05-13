@@ -79,8 +79,12 @@ async def _seed(db: Database):
         "problem_category,reviewer,created_at) "
         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
-            "rev-d1", "dev-aaa", None, None, 1, 70,
-            json.dumps({"plan_score_a": 80, "actual_score_b": 70}),
+            "rev-d1", "dev-aaa", None, None, 1, 56,
+            json.dumps({
+                "plan_score_a": 80,
+                "actual_score_b": 70,
+                "final_score": 56,
+            }),
             json.dumps([{"k": "v"}]), None,
             json.dumps([{"kind": "missing_feature", "message": "no /logout"}]),
             None, "claude", _now("00:00:01"),
@@ -157,6 +161,7 @@ async def test_issues_findings_decoded(client):
     assert body[0]["score_breakdown"] == {
         "plan_score_a": 80,
         "actual_score_b": 70,
+        "final_score": 56,
     }
     assert body[0]["findings"] is None
     assert body[1]["findings"] == [{"f": 1}]
