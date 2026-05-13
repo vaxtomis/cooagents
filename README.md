@@ -216,6 +216,11 @@ sequenceDiagram
   - `plan`：Step2 独立 session
   - `build`：Step3 与 Step4 使用同名但分离的 session；Step4 进入前会关闭 Step3 的探索上下文
   - `review`：Step5 独立 cold session
+- Step5 在启动 reviewer 前会先做 worktree preflight：逐个 mount 校验当前分支、`HEAD` 是否有 commit，并只读取 `git diff HEAD --name-only`、`git status --porcelain` 与 `git diff HEAD --numstat` 做轻量检查，避免把完整 diff 直接灌入控制面上下文。
+- 如果 preflight 发现 worktree 是 unborn HEAD，会用 `base_rev` 或 `base_branch` 执行 `git reset --mixed` 修复分支引用；该操作不删除工作区代码改动。
+- 如果 preflight 发现 `node_modules`、`.vite`、`coverage`、缓存目录或 `.tsbuildinfo` 等生成/依赖路径进入 diff/status，会启动一次窄职责 `STEP5_PREFLIGHT_REPAIR` prompt。该 prompt 只允许补 `.gitignore`、从 index/status 清掉生成物并验证，不允许重做业务开发或修改源码/测试/lockfile。
+- 如果生成物窄修复后仍未清理干净，会直接升级人工介入；如果是非生成物类 preflight 失败（例如分支错误、worktree 缺失、diff 超过 300 文件或 50,000 changed lines），才按实现工作区问题退回 Step4 的同轮重试/升级路径。
+- Step5 review artifact 仍以 `$output_json_path` 文件为准；若 LLM `rc=0` 但文件缺失、为空或 JSON 损坏，状态机会尝试从 stdout 中解析合法 review JSON 并自行落盘为 artifact，再继续记录 review。stdout 也不可解析时才进入 artifact repair / Step5 retry。
 - 心跳会把最新进度写进 `dev_works.current_progress_json`，前端 `GET /dev-works/{id}` 可以直接读到。
 
 ### 2. Workspace 文件单写链路
@@ -298,9 +303,14 @@ stateDiagram-v2
   STEP2_ITERATION --> STEP3_CONTEXT
   STEP3_CONTEXT --> STEP4_DEVELOP
   STEP4_DEVELOP --> STEP5_REVIEW
+  note right of STEP5_REVIEW
+    internal preflight validates worktrees and diff size
+    generated/dependency paths use STEP5_PREFLIGHT_REPAIR
+  end note
   STEP5_REVIEW --> COMPLETED: score >= rubric_threshold
   STEP5_REVIEW --> STEP2_ITERATION: req_gap / impl_gap
-  STEP5_REVIEW --> ESCALATED: design_hollow / rounds >= max_rounds
+  STEP5_REVIEW --> STEP4_DEVELOP: non-generated preflight failure
+  STEP5_REVIEW --> ESCALATED: design_hollow / rounds >= max_rounds / repair failed
   ESCALATED --> STEP2_ITERATION: manual continue after max_rounds
   COMPLETED --> [*]
   ESCALATED --> [*]
@@ -313,6 +323,9 @@ stateDiagram-v2
 - `STEP1_VALIDATE` 每次重新校验 `design_doc` 是否仍然是 `published`，并复跑 Markdown 结构校验。
 - `STEP2` 先由系统写 iteration note 头部，再让 LLM 追加三段 H2 内容。
 - `STEP3` 负责上下文检索，`STEP4` 负责开发与自检，`STEP5` 负责 rubric 审查与分类。
+- `STEP5_REVIEW` 入口包含内部 preflight：修复 unborn HEAD、限制 diff 体量、拦截生成/依赖路径。生成/依赖路径会先走单一职责 `STEP5_PREFLIGHT_REPAIR`，不直接重跑完整 Step4。
+- `STEP5_PREFLIGHT_REPAIR` 不是持久化状态机枚举，而是 Step5 内部的一次 LLM 调用；其目标只限 `.gitignore` 补全和生成物清理，失败则升级人工介入。
+- Step5 review JSON 文件缺失或损坏时，状态机会优先尝试从同次 stdout 中解析合法 JSON 并自行写回 artifact；失败后才进入 review artifact repair / Step5 retry。
 - `req_gap`、`impl_gap` 会回到 `STEP2_ITERATION` 继续下一轮；`design_hollow` 直接升级人工介入。
 
 ---
