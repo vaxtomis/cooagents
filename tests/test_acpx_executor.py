@@ -86,12 +86,13 @@ def test_build_exec_cmd_with_prompt(executor):
 
 def test_build_codex_exec_cmd_uses_full_access_noninteractive_mode(executor):
     cmd = executor._build_codex_exec_cmd("/tmp/worktree")
-    assert cmd[:2] == ["codex", "exec"]
+    assert cmd[:1] == ["codex"]
     assert "--json" in cmd
     assert "--skip-git-repo-check" in cmd
     assert cmd[cmd.index("--sandbox") + 1] == "danger-full-access"
     assert cmd[cmd.index("--ask-for-approval") + 1] == "never"
     assert cmd[cmd.index("--cd") + 1] == "/tmp/worktree"
+    assert cmd.index("--ask-for-approval") < cmd.index("exec")
     assert cmd[-1] == "-"
 
 
@@ -205,11 +206,12 @@ async def test_run_once_codex_direct_exec_feeds_prompt_on_stdin(
     )
 
     assert (stdout, rc) == ("done", 0)
-    assert captured["args"][:2] == ["codex", "exec"]
+    assert captured["args"][0] == "codex"
     sandbox_idx = captured["args"].index("--sandbox")
     approval_idx = captured["args"].index("--ask-for-approval")
     assert captured["args"][sandbox_idx + 1] == "danger-full-access"
     assert captured["args"][approval_idx + 1] == "never"
+    assert approval_idx < captured["args"].index("exec")
     assert captured["kwargs"]["stdin"] == asyncio.subprocess.PIPE
     assert captured["stdin"] == b"write the file"
 

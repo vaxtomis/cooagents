@@ -104,15 +104,15 @@ class AcpxExecutor:
         cfg = self._acpx_cfg()
         cmd = [
             "codex",
-            "exec",
-            "--json",
-            "--skip-git-repo-check",
             "--sandbox",
             "danger-full-access",
             "--ask-for-approval",
             "never",
             "--cd",
             worktree,
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
         ]
         if cfg and getattr(cfg, "model", None):
             cmd += ["--model", cfg.model]
