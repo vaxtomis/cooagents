@@ -72,6 +72,41 @@ CREATE TABLE IF NOT EXISTS agent_dispatches (
   updated_at       TEXT NOT NULL
 );
 
+-- 2c.1. agent_executions — per-host cleanup lease for acpx/agent
+--        subprocesses. A dispatch is the logical LLM call; an execution is
+--        the concrete process/session cleanup authority on one host.
+CREATE TABLE IF NOT EXISTS agent_executions (
+  id                   TEXT PRIMARY KEY,              -- 'aex-<hex12>'
+  dispatch_id          TEXT REFERENCES agent_dispatches(id),
+  host_id              TEXT NOT NULL REFERENCES agent_hosts(id),
+  agent                TEXT NOT NULL CHECK(agent IN ('claude','codex')),
+  execution_mode       TEXT NOT NULL CHECK(execution_mode IN ('local','ssh')),
+  correlation_kind     TEXT NOT NULL CHECK(correlation_kind IN ('design_work','dev_work')),
+  correlation_id       TEXT NOT NULL,
+  run_token            TEXT NOT NULL UNIQUE,
+  session_name         TEXT,
+  session_role         TEXT,
+  cwd                  TEXT NOT NULL,
+  pid                  INTEGER,
+  pgid                 INTEGER,
+  pid_starttime        TEXT,
+  worker_pid           INTEGER,
+  worker_pid_starttime TEXT,
+  state                TEXT NOT NULL CHECK(state IN (
+                         'starting','running','stale','cancelling',
+                         'terminated','killed','exited','abandoned'
+                       )),
+  last_heartbeat_at    TEXT,
+  lease_expires_at     TEXT NOT NULL,
+  started_at           TEXT NOT NULL,
+  finished_at          TEXT,
+  exit_code            INTEGER,
+  cleanup_reason       TEXT,
+  cleanup_attempts     INTEGER NOT NULL DEFAULT 0,
+  created_at           TEXT NOT NULL,
+  updated_at           TEXT NOT NULL
+);
+
 -- 2d. repos — Repo Registry (Phase 1, repo-registry feature).
 --     One row per registered git repository. ``ssh_key_path`` is the
 --     filesystem path to a passphraseless SSH private key, or NULL for a
@@ -300,6 +335,11 @@ CREATE INDEX IF NOT EXISTS idx_agent_dispatches_correlation
   ON agent_dispatches(correlation_kind, correlation_id);
 CREATE INDEX IF NOT EXISTS idx_agent_dispatches_host       ON agent_dispatches(host_id);
 CREATE INDEX IF NOT EXISTS idx_agent_dispatches_state      ON agent_dispatches(state);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_host_state ON agent_executions(host_id, state);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_dispatch   ON agent_executions(dispatch_id);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_correlation
+  ON agent_executions(correlation_kind, correlation_id);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_lease      ON agent_executions(lease_expires_at);
 CREATE INDEX IF NOT EXISTS idx_repos_fetch_status          ON repos(fetch_status);
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_repos_local_path
   ON repos(local_path) WHERE local_path IS NOT NULL;

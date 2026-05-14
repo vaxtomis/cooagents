@@ -10,6 +10,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from src.acpx_executor import AcpxExecutor
+from src.acpx_janitor import AcpxJanitor
+from src.acpx_remote_janitor import RemoteAcpxJanitor
 from src.llm_runner import LLMRunner
 from src.auth import AuthError, AuthSettings, get_current_user
 from src.request_utils import client_ip
@@ -102,11 +104,18 @@ async def lifespan(app: FastAPI):
     # Phase 8a: agent host registry, dispatcher, and probe loop. Construct
     # before the executor / SMs so they can be injected.
     from src.agent_hosts import (
-        AgentDispatchRepo, AgentHostRepo, HealthProbeLoop, SshDispatcher,
+        AgentDispatchRepo,
+        AgentExecutionRepo,
+        AgentHostRepo,
+        HealthProbeLoop,
+        SshDispatcher,
     )
 
     agent_host_repo = AgentHostRepo(db)
     agent_dispatch_repo = AgentDispatchRepo(db)
+    agent_execution_repo = AgentExecutionRepo(
+        db, lease_ttl_s=settings.acpx.lease_ttl_s,
+    )
     try:
         sync_report = await agent_host_repo.sync_from_config(settings.agents)
         logging.getLogger(__name__).info(
@@ -196,7 +205,11 @@ async def lifespan(app: FastAPI):
         project_root=project_root,
         ssh_dispatcher=ssh_dispatcher,
     )
-    llm_runner = LLMRunner(executor=executor, config=settings)
+    llm_runner = LLMRunner(
+        executor=executor,
+        config=settings,
+        agent_execution_repo=agent_execution_repo,
+    )
     # Phase 9 (devwork-acpx-overhaul): reap any acpx sessions left over
     # from a prior process. Best-effort — a flaky list/close path must not
     # block startup; a future round's start_session will reopen anything
@@ -236,7 +249,25 @@ async def lifespan(app: FastAPI):
         webhooks=webhooks,
         agent_host_repo=agent_host_repo,
         agent_dispatch_repo=agent_dispatch_repo,
+        agent_execution_repo=agent_execution_repo,
         llm_runner=llm_runner,
+    )
+    acpx_janitor = AcpxJanitor(
+        execution_repo=agent_execution_repo,
+        llm_runner=llm_runner,
+        workspaces_root=workspaces_root,
+        interval_s=settings.acpx.cleanup_interval_s,
+        terminate_grace_s=settings.acpx.terminate_grace_s,
+        kill_grace_s=settings.acpx.kill_grace_s,
+        kill_enabled=settings.acpx.cleanup_kill_enabled,
+    )
+    remote_acpx_janitor = RemoteAcpxJanitor(
+        agent_host_repo=agent_host_repo,
+        ssh_dispatcher=ssh_dispatcher,
+        interval_s=settings.acpx.cleanup_interval_s,
+        terminate_grace_s=settings.acpx.terminate_grace_s,
+        kill_grace_s=settings.acpx.kill_grace_s,
+        kill_enabled=settings.acpx.cleanup_kill_enabled,
     )
 
     app.state.db = db
@@ -251,6 +282,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.agent_host_repo = agent_host_repo
     app.state.agent_dispatch_repo = agent_dispatch_repo
+    app.state.agent_execution_repo = agent_execution_repo
     app.state.repo_registry_repo = repo_registry_repo
     app.state.dev_work_repo_state = dev_work_repo_state
     app.state.dev_work_publisher = dev_work_publisher
@@ -259,13 +291,20 @@ async def lifespan(app: FastAPI):
     app.state.repo_inspector = repo_inspector
     app.state.ssh_dispatcher = ssh_dispatcher
     app.state.health_probe_loop = health_probe_loop
+    app.state.acpx_janitor = acpx_janitor
+    app.state.remote_acpx_janitor = remote_acpx_janitor
     app.state.start_time = time.time()
 
     health_probe_loop.start()
     repo_health_loop.start()
+    if settings.acpx.cleanup_enabled:
+        acpx_janitor.start()
+        remote_acpx_janitor.start()
 
     yield
 
+    await remote_acpx_janitor.stop()
+    await acpx_janitor.stop()
     await repo_health_loop.stop()
     await health_probe_loop.stop()
     await webhooks.close()
@@ -401,6 +440,7 @@ async def health(request: Request):
 from fastapi import Depends
 
 from routes.auth import router as auth_router
+from routes.agent_executions import router as agent_executions_router
 from routes.design_docs import router as design_docs_router
 from routes.design_works import router as design_works_router
 from routes.dev_iteration_notes import router as dev_iteration_notes_router
@@ -432,4 +472,5 @@ app.include_router(gates_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(metrics_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(metrics_repos_router, prefix="/api/v1", dependencies=auth_required)
 app.include_router(agent_hosts_router, prefix="/api/v1", dependencies=auth_required)
+app.include_router(agent_executions_router, prefix="/api/v1", dependencies=auth_required)
 mount_dashboard_spa(app)

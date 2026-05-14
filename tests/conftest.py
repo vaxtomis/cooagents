@@ -129,7 +129,7 @@ def make_test_llm_runner(executor):
 
         async def run_with_progress(
             self, *, cmd, cwd, heartbeat, heartbeat_interval_s,
-            idle_timeout_s, step_tag,
+            idle_timeout_s, step_tag, **_execution_kwargs,
         ):
             self.oneshot_call_count += 1   # Phase 10
             # Parse by sentinel rather than positional index so the test
@@ -163,6 +163,7 @@ def make_test_llm_runner(executor):
         async def prompt_session_with_progress(
             self, session, *, task_file=None, text=None, timeout_sec,
             heartbeat, heartbeat_interval_s, idle_timeout_s, step_tag,
+            **_execution_kwargs,
         ):
             self.prompt_call_count += 1   # Phase 10
             # Phase 9: session-mode in test mode delegates to the same
@@ -176,7 +177,7 @@ def make_test_llm_runner(executor):
             )
             return stdout, rc, []
 
-        async def start_session(self, *, name, anchor_cwd, agent):
+        async def start_session(self, *, name, anchor_cwd, agent, **_execution_kwargs):
             self.created_sessions.append(name)
             return Session(
                 name=name, anchor_cwd=anchor_cwd, agent=agent,
@@ -225,7 +226,7 @@ class _FakeLLMRunner:
 
     async def run_with_progress(
         self, *, cmd, cwd, heartbeat, heartbeat_interval_s,
-        idle_timeout_s, step_tag,
+        idle_timeout_s, step_tag, **_execution_kwargs,
     ):
         self.calls.append(dict(
             kind="progress", cmd=list(cmd), cwd=cwd, step_tag=step_tag,
@@ -266,7 +267,7 @@ class _FakeLLMRunner:
     def _resolve_agent(self, agent_type):
         return "claude" if agent_type == "claude" else "codex"
 
-    async def start_session(self, *, name, anchor_cwd, agent):
+    async def start_session(self, *, name, anchor_cwd, agent, **_execution_kwargs):
         from src.llm_runner import Session
 
         self.calls.append(dict(
@@ -283,6 +284,7 @@ class _FakeLLMRunner:
     async def prompt_session_with_progress(
         self, session, *, task_file=None, text=None, timeout_sec,
         heartbeat, heartbeat_interval_s, idle_timeout_s, step_tag,
+        **_execution_kwargs,
     ):
         self.calls.append(dict(
             kind="session-prompt", session_name=session.name,

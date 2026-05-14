@@ -30,6 +30,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import signal
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -143,10 +145,12 @@ class LLMRunner:
         *,
         clock: Callable[[], str] | None = None,
         monotonic: Callable[[], float] | None = None,
+        agent_execution_repo: Any | None = None,
     ) -> None:
         self._executor = executor
         self._config = config
         self._clock = clock or _default_clock
+        self._agent_execution_repo = agent_execution_repo
         # Phase 3: injectable monotonic clock so heartbeat tests can advance
         # wall-time deterministically without sleeping.
         self._monotonic = monotonic or time.monotonic
@@ -265,8 +269,79 @@ class LLMRunner:
 
     # ---- subprocess plumbing --------------------------------------------
 
+    @staticmethod
+    def _pid_starttime(pid: int) -> str | None:
+        if os.name == "nt":
+            return None
+        try:
+            stat = (f"/proc/{pid}/stat")
+            data = open(stat, "r", encoding="utf-8").read()
+        except OSError:
+            return None
+        try:
+            # comm can contain spaces and is wrapped in parentheses. The
+            # starttime field is the 22nd token, i.e. index 19 after ") ".
+            tail = data.rsplit(") ", 1)[1].split()
+            return tail[19]
+        except (IndexError, ValueError):
+            return None
+
+    @staticmethod
+    def _process_group(pid: int) -> int | None:
+        if os.name == "nt":
+            return None
+        try:
+            return os.getpgid(pid)
+        except ProcessLookupError:
+            return None
+
+    @staticmethod
+    def _terminate_process_group(pid: int, sig: signal.Signals) -> None:
+        if os.name == "nt":
+            return
+        try:
+            os.killpg(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            return
+
+    @staticmethod
+    def _execution_env(
+        *,
+        execution_id: str | None,
+        run_token: str | None,
+        dispatch_id: str | None,
+        host_id: str | None,
+        session_name: str | None,
+    ) -> dict[str, str] | None:
+        if not execution_id or not run_token:
+            return None
+        env = os.environ.copy()
+        env.update(
+            {
+                "COOAGENTS_OWNER": "cooagents",
+                "COOAGENTS_EXECUTION_ID": execution_id,
+                "COOAGENTS_RUN_TOKEN": run_token,
+            }
+        )
+        if dispatch_id:
+            env["COOAGENTS_DISPATCH_ID"] = dispatch_id
+        if host_id:
+            env["COOAGENTS_HOST_ID"] = host_id
+        if session_name:
+            env["COOAGENTS_SESSION_NAME"] = session_name
+        return env
+
     async def _run_local(
-        self, cmd: list[str], cwd: str, *, timeout: float | None = 30.0,
+        self,
+        cmd: list[str],
+        cwd: str,
+        *,
+        timeout: float | None = 30.0,
+        execution_id: str | None = None,
+        run_token: str | None = None,
+        dispatch_id: str | None = None,
+        host_id: str | None = None,
+        session_name: str | None = None,
     ) -> tuple[str, str, int]:
         """Run ``cmd`` locally; return ``(stdout, stderr, returncode)``.
 
@@ -294,7 +369,28 @@ class LLMRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            env=self._execution_env(
+                execution_id=execution_id,
+                run_token=run_token,
+                dispatch_id=dispatch_id,
+                host_id=host_id,
+                session_name=session_name,
+            ),
         )
+        if execution_id and self._agent_execution_repo is not None:
+            try:
+                await self._agent_execution_repo.mark_process_started(
+                    execution_id,
+                    pid=proc.pid,
+                    pgid=self._process_group(proc.pid),
+                    pid_starttime=self._pid_starttime(proc.pid),
+                    cwd=cwd,
+                )
+            except Exception:
+                logger.exception(
+                    "agent execution %s process-start record failed",
+                    execution_id,
+                )
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
 
@@ -328,6 +424,7 @@ class LLMRunner:
             # the subprocess already exited (acpx 0.6.x exits cleanly while
             # leaving codex-acp grandchild holding the pipe — exact shape
             # Phase 10 hit). Swallow it; the kill is best-effort cleanup.
+            self._terminate_process_group(proc.pid, signal.SIGTERM)
             try:
                 proc.kill()
             except ProcessLookupError:
@@ -335,6 +432,7 @@ class LLMRunner:
             try:
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
             except (asyncio.TimeoutError, ProcessLookupError):
+                self._terminate_process_group(proc.pid, signal.SIGKILL)
                 pass
             raise TimeoutError(
                 f"acpx subprocess timed out after {timeout}s; "
@@ -344,6 +442,16 @@ class LLMRunner:
             for task in (stdout_task, stderr_task):
                 task.cancel()
             await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            if execution_id and self._agent_execution_repo is not None:
+                try:
+                    await self._agent_execution_repo.mark_exited(
+                        execution_id, exit_code=proc.returncode,
+                    )
+                except Exception:
+                    logger.exception(
+                        "agent execution %s exit record failed",
+                        execution_id,
+                    )
         return (
             b"".join(stdout_chunks).decode("utf-8", errors="replace").strip(),
             b"".join(stderr_chunks).decode("utf-8", errors="replace").strip(),
@@ -388,12 +496,23 @@ class LLMRunner:
         host_id: str = "local",
         workspace_id: str | None = None,
         correlation_id: str | None = None,
+        execution_id: str | None = None,
+        run_token: str | None = None,
+        session_name: str | None = None,
     ) -> tuple[str, int]:
         """Delegate to :meth:`AcpxExecutor.run_once` byte-for-byte."""
+        execution_kwargs: dict[str, str] = {}
+        if execution_id:
+            execution_kwargs["execution_id"] = execution_id
+        if run_token:
+            execution_kwargs["run_token"] = run_token
+        if session_name:
+            execution_kwargs["session_name"] = session_name
         return await self._executor.run_once(
             agent, worktree, timeout_sec,
             task_file=task_file, prompt=prompt,
             host_id=host_id, workspace_id=workspace_id, correlation_id=correlation_id,
+            **execution_kwargs,
         )
 
     # ---- one-shot with progress (Phase 3) -------------------------------
@@ -407,6 +526,11 @@ class LLMRunner:
         heartbeat_interval_s: float,
         idle_timeout_s: float,
         step_tag: str,
+        execution_id: str | None = None,
+        run_token: str | None = None,
+        dispatch_id: str | None = None,
+        host_id: str | None = None,
+        session_name: str | None = None,
     ) -> tuple[str, int, list[ProgressTick]]:
         """Spawn ``cmd`` and call ``heartbeat`` on every interval tick.
 
@@ -431,7 +555,28 @@ class LLMRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            env=self._execution_env(
+                execution_id=execution_id,
+                run_token=run_token,
+                dispatch_id=dispatch_id,
+                host_id=host_id,
+                session_name=session_name,
+            ),
         )
+        if execution_id and self._agent_execution_repo is not None:
+            try:
+                await self._agent_execution_repo.mark_process_started(
+                    execution_id,
+                    pid=proc.pid,
+                    pgid=self._process_group(proc.pid),
+                    pid_starttime=self._pid_starttime(proc.pid),
+                    cwd=cwd,
+                )
+            except Exception:
+                logger.exception(
+                    "agent execution %s process-start record failed",
+                    execution_id,
+                )
         start = self._monotonic()
         progress_log: list[ProgressTick] = []
         stdout_chunks: list[bytes] = []
@@ -467,6 +612,15 @@ class LLMRunner:
                         "llm_runner: heartbeat callback raised at step=%r",
                         step_tag,
                     )
+                if execution_id and self._agent_execution_repo is not None:
+                    try:
+                        await self._agent_execution_repo.heartbeat(execution_id)
+                    except Exception:
+                        logger.warning(
+                            "agent execution %s heartbeat failed",
+                            execution_id,
+                            exc_info=True,
+                        )
                 # Phase 3 oneshot: process-alive == advance. Phase 4 swaps
                 # this for a status_session-derived predicate.
                 if proc.returncode is None:
@@ -476,7 +630,11 @@ class LLMRunner:
                         "llm_runner: idle_timeout step=%r idle_window_s=%s",
                         step_tag, idle_timeout_s,
                     )
-                    proc.kill()
+                    self._terminate_process_group(proc.pid, signal.SIGTERM)
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
                     raise IdleTimeoutError(
                         step_tag=step_tag,
                         idle_window_s=int(idle_timeout_s),
@@ -500,6 +658,16 @@ class LLMRunner:
             for task in (stdout_task, stderr_task):
                 task.cancel()
             await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            if execution_id and self._agent_execution_repo is not None:
+                try:
+                    await self._agent_execution_repo.mark_exited(
+                        execution_id, exit_code=proc.returncode,
+                    )
+                except Exception:
+                    logger.exception(
+                        "agent execution %s exit record failed",
+                        execution_id,
+                    )
         if idle_exc is not None:
             raise idle_exc
         return (
@@ -511,7 +679,15 @@ class LLMRunner:
     # ---- session lifecycle ----------------------------------------------
 
     async def start_session(
-        self, *, name: str, anchor_cwd: str, agent: str,
+        self,
+        *,
+        name: str,
+        anchor_cwd: str,
+        agent: str,
+        execution_id: str | None = None,
+        run_token: str | None = None,
+        dispatch_id: str | None = None,
+        host_id: str | None = None,
     ) -> Session:
         """``acpx --cwd <anchor> <agent> sessions ensure --name <name>``.
 
@@ -520,7 +696,14 @@ class LLMRunner:
         resolved = self._resolve_agent(agent)
         cmd = self._build_ensure_cmd(name, anchor_cwd, resolved)
         _stdout, stderr, rc = await self._run_local(
-            cmd, anchor_cwd, timeout=30.0,
+            cmd,
+            anchor_cwd,
+            timeout=30.0,
+            execution_id=execution_id,
+            run_token=run_token,
+            dispatch_id=dispatch_id,
+            host_id=host_id,
+            session_name=name,
         )
         if rc != 0:
             raise SessionLifecycleError("ensure", rc, stderr[-512:])
@@ -530,7 +713,14 @@ class LLMRunner:
                 name, anchor_cwd, resolved, session_mode,
             )
             _stdout, stderr, rc = await self._run_local(
-                mode_cmd, anchor_cwd, timeout=30.0,
+                mode_cmd,
+                anchor_cwd,
+                timeout=30.0,
+                execution_id=execution_id,
+                run_token=run_token,
+                dispatch_id=dispatch_id,
+                host_id=host_id,
+                session_name=name,
             )
             if rc != 0:
                 raise SessionLifecycleError("set-mode", rc, stderr[-512:])
@@ -548,13 +738,24 @@ class LLMRunner:
         text: str | None = None,
         task_file: str | None = None,
         timeout_sec: int,
+        execution_id: str | None = None,
+        run_token: str | None = None,
+        dispatch_id: str | None = None,
+        host_id: str | None = None,
     ) -> tuple[str, int]:
         """Run ``prompt --session`` from the session's anchor cwd."""
         cmd = self._build_prompt_cmd(
             session, text=text, task_file=task_file, timeout_sec=timeout_sec,
         )
         stdout, _stderr, rc = await self._run_local(
-            cmd, session.anchor_cwd, timeout=30.0,
+            cmd,
+            session.anchor_cwd,
+            timeout=30.0,
+            execution_id=execution_id,
+            run_token=run_token,
+            dispatch_id=dispatch_id,
+            host_id=host_id,
+            session_name=session.name,
         )
         return stdout, rc
 
@@ -569,6 +770,10 @@ class LLMRunner:
         heartbeat_interval_s: float,
         idle_timeout_s: float,
         step_tag: str,
+        execution_id: str | None = None,
+        run_token: str | None = None,
+        dispatch_id: str | None = None,
+        host_id: str | None = None,
     ) -> tuple[str, int, list[ProgressTick]]:
         """Run ``prompt --session`` with the same heartbeat machinery as
         :meth:`run_with_progress`.
@@ -582,6 +787,17 @@ class LLMRunner:
         cmd = self._build_prompt_cmd(
             session, text=text, task_file=task_file, timeout_sec=timeout_sec,
         )
+        execution_kwargs: dict[str, str] = {}
+        if execution_id:
+            execution_kwargs["execution_id"] = execution_id
+        if run_token:
+            execution_kwargs["run_token"] = run_token
+        if dispatch_id:
+            execution_kwargs["dispatch_id"] = dispatch_id
+        if host_id:
+            execution_kwargs["host_id"] = host_id
+        if execution_kwargs:
+            execution_kwargs["session_name"] = session.name
         return await self.run_with_progress(
             cmd=cmd,
             cwd=session.anchor_cwd,
@@ -589,6 +805,7 @@ class LLMRunner:
             heartbeat_interval_s=heartbeat_interval_s,
             idle_timeout_s=idle_timeout_s,
             step_tag=step_tag,
+            **execution_kwargs,
         )
 
     async def status_session(self, session: Session) -> dict[str, str]:

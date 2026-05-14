@@ -67,6 +67,78 @@ class CooagentsClient:
         self._raise_for_status(resp, path)
         return resp.json()
 
+    async def mark_execution_started(
+        self,
+        execution_id: str,
+        *,
+        pid: int,
+        pgid: int | None,
+        pid_starttime: str | None,
+        cwd: str,
+        worker_pid: int | None = None,
+        worker_pid_starttime: str | None = None,
+    ) -> dict[str, Any]:
+        path = f"/api/v1/internal/agent-executions/{execution_id}/started"
+        resp = await self._client.post(
+            path,
+            json={
+                "pid": pid,
+                "pgid": pgid,
+                "pid_starttime": pid_starttime,
+                "cwd": cwd,
+                "worker_pid": worker_pid,
+                "worker_pid_starttime": worker_pid_starttime,
+            },
+        )
+        self._raise_for_status(resp, path)
+        return resp.json()
+
+    async def heartbeat_execution(
+        self, execution_id: str,
+    ) -> dict[str, Any]:
+        path = f"/api/v1/internal/agent-executions/{execution_id}/heartbeat"
+        resp = await self._client.post(path)
+        self._raise_for_status(resp, path)
+        return resp.json()
+
+    async def mark_execution_exited(
+        self, execution_id: str, *, exit_code: int | None,
+    ) -> dict[str, Any]:
+        path = f"/api/v1/internal/agent-executions/{execution_id}/exited"
+        resp = await self._client.post(path, json={"exit_code": exit_code})
+        self._raise_for_status(resp, path)
+        return resp.json()
+
+    async def list_expired_executions(
+        self, *, host_id: str, limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        path = "/api/v1/internal/agent-executions/expired"
+        resp = await self._client.get(
+            path, params={"host_id": host_id, "limit": limit},
+        )
+        self._raise_for_status(resp, path)
+        return list(resp.json())
+
+    async def mark_cleanup_result(
+        self,
+        execution_id: str,
+        *,
+        state: str,
+        exit_code: int | None = None,
+        cleanup_reason: str | None = None,
+    ) -> dict[str, Any]:
+        path = f"/api/v1/internal/agent-executions/{execution_id}/cleanup-result"
+        resp = await self._client.post(
+            path,
+            json={
+                "state": state,
+                "exit_code": exit_code,
+                "cleanup_reason": cleanup_reason,
+            },
+        )
+        self._raise_for_status(resp, path)
+        return resp.json()
+
     async def post_file(
         self,
         workspace_id: str,

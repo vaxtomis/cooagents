@@ -46,6 +46,42 @@ async def test_get_files_index_success():
     assert body["slug"] == "demo"
 
 
+async def test_execution_lifecycle_methods_hit_internal_routes():
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.method == "GET":
+            return httpx.Response(200, json=[{"id": "aex-1"}])
+        return httpx.Response(200, json={"id": "aex-1"})
+
+    async with _make_client(handler) as c:
+        await c.mark_execution_started(
+            "aex-1",
+            pid=11,
+            pgid=11,
+            pid_starttime="42",
+            cwd="/workspace",
+            worker_pid=10,
+            worker_pid_starttime="41",
+        )
+        await c.heartbeat_execution("aex-1")
+        await c.mark_execution_exited("aex-1", exit_code=0)
+        expired = await c.list_expired_executions(host_id="remote-1")
+        await c.mark_cleanup_result(
+            "aex-1", state="killed", cleanup_reason="SIGKILL",
+        )
+
+    assert expired == [{"id": "aex-1"}]
+    assert calls == [
+        ("POST", "/api/v1/internal/agent-executions/aex-1/started"),
+        ("POST", "/api/v1/internal/agent-executions/aex-1/heartbeat"),
+        ("POST", "/api/v1/internal/agent-executions/aex-1/exited"),
+        ("GET", "/api/v1/internal/agent-executions/expired"),
+        ("POST", "/api/v1/internal/agent-executions/aex-1/cleanup-result"),
+    ]
+
+
 async def test_post_file_sends_cas_none_for_first_write():
     captured: dict = {}
 

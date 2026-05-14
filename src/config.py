@@ -61,6 +61,13 @@ class AcpxConfig(BaseModel):
     json_strict: bool = True
     model: str | None = None
     session_mode: str | None = "auto"
+    cleanup_enabled: bool = True
+    cleanup_interval_s: int = Field(default=60, ge=10, le=3600)
+    lease_ttl_s: int = Field(default=120, ge=30, le=3600)
+    lease_grace_s: int = Field(default=120, ge=0, le=3600)
+    terminate_grace_s: int = Field(default=15, ge=1, le=300)
+    kill_grace_s: int = Field(default=10, ge=1, le=300)
+    cleanup_kill_enabled: bool = True
 
 
 class TurnsConfig(BaseModel):

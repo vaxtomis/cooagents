@@ -202,6 +202,9 @@ class SshDispatcher:
         correlation_id: str | None = None,
         task_file: str | None = None,
         agent: str | None = None,
+        execution_id: str | None = None,
+        run_token: str | None = None,
+        session_name: str | None = None,
         **_extra: Any,
     ) -> tuple[str, int]:
         """SSH into ``host_id`` and run ``cooagents-worker run ...``.
@@ -256,14 +259,22 @@ class SshDispatcher:
 
         # Build the worker command. asyncssh.run takes a single string and
         # passes it to the remote shell; quote every user-supplied value.
-        worker_cmd = " ".join([
+        worker_parts = [
             "cooagents-worker", "run",
             "--workspace-id", shlex.quote(workspace_id),
             "--task-file", shlex.quote(task_file),
             "--agent", shlex.quote(agent),
             "--timeout", str(int(timeout)),
             "--correlation-id", shlex.quote(correlation_id or ""),
-        ])
+        ]
+        if execution_id:
+            worker_parts += ["--execution-id", shlex.quote(execution_id)]
+        if run_token:
+            worker_parts += ["--run-token", shlex.quote(run_token)]
+        worker_parts += ["--host-id", shlex.quote(host_id)]
+        if session_name:
+            worker_parts += ["--session-name", shlex.quote(session_name)]
+        worker_cmd = " ".join(worker_parts)
         logger.info(
             "ssh run_remote host=%s workspace=%s correlation=%s agent=%s",
             host_id, workspace_id, correlation_id, agent,
@@ -283,3 +294,68 @@ class SshDispatcher:
         stdout = (result.stdout or "")
         rc = int(result.exit_status or 0)
         return stdout.strip(), rc
+
+    async def cleanup_remote(
+        self,
+        host_id: str,
+        *,
+        terminate_grace_s: int = 15,
+        kill_grace_s: int = 10,
+        kill_enabled: bool = True,
+        limit: int = 50,
+        timeout_s: int = 60,
+    ) -> tuple[str, int]:
+        """Run one cleanup pass on the remote host via ``cooagents-worker``."""
+        host = await self.repo.get(host_id)
+        if host is None:
+            raise NotFoundError(f"agent host not found: {host_id!r}")
+        if host["host"] == LOCAL_HOST_ID:
+            raise ValueError("cleanup_remote called for local host")
+
+        try:
+            import asyncssh  # type: ignore[import-not-found]
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("asyncssh is not installed") from exc
+
+        try:
+            user, hostname, port = _parse_ssh_target(host["host"])
+        except ValueError as exc:
+            raise RuntimeError(f"bad ssh target for {host_id!r}: {exc}") from exc
+
+        if self.strict_host_key and not self._known_hosts_path:
+            raise RuntimeError(
+                f"strict_host_key=True but ssh_known_hosts_path is unset; "
+                f"refusing to connect to {host_id!r}"
+            )
+
+        connect_kwargs: dict[str, Any] = {
+            "host": hostname,
+            "port": port,
+            "username": user,
+            "known_hosts": (
+                self._known_hosts_path if self.strict_host_key else None
+            ),
+        }
+        if host.get("ssh_key"):
+            connect_kwargs["client_keys"] = [host["ssh_key"]]
+
+        parts = [
+            "cooagents-worker", "cleanup-once",
+            "--host-id", shlex.quote(host_id),
+            "--limit", str(int(limit)),
+            "--terminate-grace", str(float(terminate_grace_s)),
+            "--kill-grace", str(float(kill_grace_s)),
+        ]
+        if not kill_enabled:
+            parts.append("--no-kill")
+        cmd = " ".join(parts)
+        logger.info("ssh cleanup_remote host=%s", host_id)
+        try:
+            async with asyncssh.connect(**connect_kwargs) as conn:
+                result = await asyncio.wait_for(
+                    conn.run(cmd, check=False),
+                    timeout=timeout_s,
+                )
+        except asyncio.TimeoutError:
+            return ("", 124)
+        return (result.stdout or "").strip(), int(result.exit_status or 0)

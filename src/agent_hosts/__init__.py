@@ -18,12 +18,14 @@ from src.agent_hosts.dispatch_decider import (
     resolve_configured_agent,
 )
 from src.agent_hosts.health_probe import HealthProbeLoop
+from src.agent_hosts.execution_repo import AgentExecutionRepo
 from src.agent_hosts.repo import AgentDispatchRepo, AgentHostRepo
 from src.agent_hosts.ssh_dispatcher import SshDispatcher
 
 __all__ = [
     "AgentHostRepo",
     "AgentDispatchRepo",
+    "AgentExecutionRepo",
     "SshDispatcher",
     "HealthProbeLoop",
     "choose_configured_host",

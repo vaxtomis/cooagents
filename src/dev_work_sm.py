@@ -31,7 +31,7 @@ from src.dev_prompt_composer import MountTableEntry
 from src.dev_work_steps import DevWorkStepHandlersMixin
 from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.git_utils import DEVWORK_BRANCH_FMT, ensure_worktree
-from src.llm_runner import IdleTimeoutError, ProgressTick, dw_session_name
+from src.llm_runner import IdleTimeoutError, ProgressTick, Session, dw_session_name
 from src.models import (
     REPO_ROLE_PRIMARY_PRIORITY,
     DevRepoRef,
@@ -94,6 +94,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         webhooks: Any = None,  # WebhookNotifier (optional; None disables deliver side-channel)
         agent_host_repo: Any = None,      # Phase 8a: AgentHostRepo
         agent_dispatch_repo: Any = None,  # Phase 8a: AgentDispatchRepo
+        agent_execution_repo: Any = None, # Cleanup leases for acpx processes
         *,
         llm_runner: Any,                  # Phase 2: LLMRunner — required.
     ) -> None:
@@ -110,6 +111,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         self.webhooks = webhooks
         self.agent_host_repo = agent_host_repo
         self.agent_dispatch_repo = agent_dispatch_repo
+        self.agent_execution_repo = agent_execution_repo
         self.llm_runner = llm_runner
         # Phase 2 manager owns workspaces_root; mirror it for quick path math
         # (absolute paths embedded in LLM prompts).
@@ -464,6 +466,37 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         except Exception:
             logger.exception("agent_dispatches mark_finished failed")
 
+    async def _open_execution(
+        self,
+        *,
+        dispatch_id: str | None,
+        host_id: str,
+        agent: str,
+        correlation_id: str,
+        correlation_kind: str,
+        cwd: str,
+        session_name: str | None = None,
+        session_role: str | None = None,
+    ) -> dict[str, Any] | None:
+        if self.agent_execution_repo is None:
+            return None
+        try:
+            mode = "local" if host_id == "local" else "ssh"
+            return await self.agent_execution_repo.create_starting(
+                dispatch_id=dispatch_id,
+                host_id=host_id,
+                agent=self.llm_runner._resolve_agent(agent),
+                execution_mode=mode,
+                correlation_kind=correlation_kind,
+                correlation_id=correlation_id,
+                cwd=cwd,
+                session_name=session_name,
+                session_role=session_role,
+            )
+        except Exception:
+            logger.exception("agent_executions create_starting failed")
+            return None
+
     # ---- public API ----
 
     async def create(
@@ -656,25 +689,60 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         treated as a bug: escalate and surface a RuntimeError so operators
         see it.
         """
-        for _ in range(_MAX_TICKS):
-            dw = await self.tick(dev_id, from_driver=True)
-            if DevWorkStep(dw["current_step"]) in _TERMINAL:
-                return dw
-        logger.error(
-            "dev_work %s exceeded %s ticks without reaching terminal",
-            dev_id,
-            _MAX_TICKS,
-        )
-        dw = await self._get(dev_id)
-        if dw is not None and DevWorkStep(dw["current_step"]) not in _TERMINAL:
-            await self._escalate(
-                dw,
-                reason=f"run_to_completion exceeded {_MAX_TICKS} ticks",
-                problem_category=None,
+        try:
+            for _ in range(_MAX_TICKS):
+                dw = await self.tick(dev_id, from_driver=True)
+                if DevWorkStep(dw["current_step"]) in _TERMINAL:
+                    return dw
+            logger.error(
+                "dev_work %s exceeded %s ticks without reaching terminal",
+                dev_id,
+                _MAX_TICKS,
             )
-        raise RuntimeError(
-            f"dev_work {dev_id!r} exceeded {_MAX_TICKS} ticks without terminal"
-        )
+            dw = await self._get(dev_id)
+            if dw is not None and DevWorkStep(dw["current_step"]) not in _TERMINAL:
+                await self._escalate(
+                    dw,
+                    reason=f"run_to_completion exceeded {_MAX_TICKS} ticks",
+                    problem_category=None,
+                )
+            raise RuntimeError(
+                f"dev_work {dev_id!r} exceeded {_MAX_TICKS} ticks without terminal"
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("dev_work %s driver exception", dev_id)
+            dw = await self._get(dev_id)
+            if dw is not None and DevWorkStep(dw["current_step"]) not in _TERMINAL:
+                try:
+                    await self._delete_all_sessions(dev_id)
+                except Exception:
+                    logger.exception(
+                        "dev_work %s driver exception session cleanup failed",
+                        dev_id,
+                    )
+                try:
+                    await self.db.execute(
+                        "UPDATE dev_works SET current_progress_json=NULL, "
+                        "updated_at=? WHERE id=?",
+                        (self._now(), dev_id),
+                    )
+                except Exception:
+                    logger.warning(
+                        "driver exception progress clear failed", exc_info=True
+                    )
+                await self._escalate(
+                    dw,
+                    reason=(
+                        f"driver_exception: {type(exc).__name__}: {exc}"
+                    ),
+                    problem_category=None,
+                )
+                refreshed = await self._get(dev_id)
+                if refreshed is not None:
+                    return refreshed
+            raise
 
     async def cancel(self, dev_id: str) -> None:
         dw = await self._get(dev_id)
@@ -1429,6 +1497,26 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             host_id=host_id, workspace_id=dw["workspace_id"],
             correlation_id=dw["id"], correlation_kind="dev_work",
         )
+        execution = await self._open_execution(
+            dispatch_id=ad_id,
+            host_id=host_id,
+            agent=agent,
+            correlation_id=dw["id"],
+            correlation_kind="dev_work",
+            cwd=worktree,
+        )
+        execution_id = execution["id"] if execution is not None else None
+        run_token = execution["run_token"] if execution is not None else None
+        execution_kwargs = (
+            {
+                "execution_id": execution_id,
+                "run_token": run_token,
+                "dispatch_id": ad_id,
+                "host_id": host_id,
+            }
+            if execution_id and run_token
+            else {}
+        )
 
         cmd = self.llm_runner._build_oneshot_cmd(
             agent, worktree, timeout,
@@ -1485,6 +1573,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 ),
                 idle_timeout_s=self.config.devwork.step_idle_timeout_s,
                 step_tag=step_tag,
+                **execution_kwargs,
             )
             dispatch_state = "succeeded" if rc == 0 else "failed"
         except IdleTimeoutError as exc:
@@ -1577,6 +1666,33 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             )
         resolved_agent = self.llm_runner._resolve_agent(agent)
         name = dw_session_name(dw["id"], round_n, role)
+        host_id = dw.get("agent_host_id") or "local"
+        ad_id = await self._open_dispatch(
+            host_id=host_id, workspace_id=dw["workspace_id"],
+            correlation_id=dw["id"], correlation_kind="dev_work",
+        )
+        execution = await self._open_execution(
+            dispatch_id=ad_id,
+            host_id=host_id,
+            agent=resolved_agent,
+            correlation_id=dw["id"],
+            correlation_kind="dev_work",
+            cwd=anchor,
+            session_name=name,
+            session_role=role,
+        )
+        execution_id = execution["id"] if execution is not None else None
+        run_token = execution["run_token"] if execution is not None else None
+        execution_kwargs = (
+            {
+                "execution_id": execution_id,
+                "run_token": run_token,
+                "dispatch_id": ad_id,
+                "host_id": host_id,
+            }
+            if execution_id and run_token
+            else {}
+        )
         per_dw = self._active_sessions.setdefault(dw["id"], {})
         session = per_dw.get(role)
         if session is None or session.name != name:
@@ -1590,16 +1706,56 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                         "stale session cleanup failed for %s",
                         session.name, exc_info=True,
                     )
-            session = await self.llm_runner.start_session(
-                name=name, anchor_cwd=anchor, agent=resolved_agent,
-            )
+            try:
+                session = await self.llm_runner.start_session(
+                    name=name,
+                    anchor_cwd=anchor,
+                    agent=resolved_agent,
+                    **execution_kwargs,
+                )
+            except Exception:
+                logger.exception(
+                    "dev_work %s start_session failed at %s round=%s",
+                    dw["id"], step_tag, round_n,
+                )
+                synthetic = Session(
+                    name=name, anchor_cwd=anchor, agent=resolved_agent,
+                    created_at=self._now(),
+                )
+                try:
+                    await self.llm_runner.delete_session(synthetic)
+                except Exception:
+                    logger.warning(
+                        "start_session cleanup failed for %s",
+                        name, exc_info=True,
+                    )
+                if self.agent_execution_repo is not None and execution_id:
+                    try:
+                        await self.agent_execution_repo.mark_state(
+                            execution_id,
+                            state="abandoned",
+                            exit_code=124,
+                            cleanup_reason="start_session failed",
+                        )
+                    except Exception:
+                        logger.exception(
+                            "agent execution %s abandon failed",
+                            execution_id,
+                        )
+                rc, stdout, dispatch_state = 124, "", "timeout"
+                await self._close_dispatch(
+                    ad_id, state=dispatch_state, exit_code=rc,
+                )
+                await emit_and_deliver(
+                    self.db,
+                    self.webhooks,
+                    event_name="dev_work.step_completed",
+                    workspace_id=dw["workspace_id"],
+                    correlation_id=dw["id"],
+                    payload={"step": step_tag, "round": round_n, "rc": rc},
+                )
+                return rc, stdout
             per_dw[role] = session
-
-        host_id = dw.get("agent_host_id") or "local"
-        ad_id = await self._open_dispatch(
-            host_id=host_id, workspace_id=dw["workspace_id"],
-            correlation_id=dw["id"], correlation_kind="dev_work",
-        )
 
         async def heartbeat(tick: ProgressTick) -> None:
             payload = {
@@ -1650,6 +1806,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                     ),
                     idle_timeout_s=self.config.devwork.step_idle_timeout_s,
                     step_tag=step_tag,
+                    **execution_kwargs,
                 )
             )
             dispatch_state = "succeeded" if rc == 0 else "failed"

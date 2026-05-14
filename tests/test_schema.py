@@ -19,6 +19,7 @@ EXPECTED_TABLES = {
     "dev_iteration_notes",
     "reviews",
     "workspace_events",
+    "agent_executions",
     # repo-registry Phase 1
     "repos",
     "design_work_repos",

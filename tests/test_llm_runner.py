@@ -698,6 +698,54 @@ async def test_run_with_progress_emits_ticks_at_interval(monkeypatch, runner):
 
 
 @pytest.mark.asyncio
+async def test_run_with_progress_refreshes_execution_lease(monkeypatch):
+    proc = _SlowFakeProc(sleep_s=0.06)
+    proc.pid = 123
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+
+    class _Repo:
+        def __init__(self) -> None:
+            self.started: list[str] = []
+            self.heartbeats: list[str] = []
+            self.exited: list[str] = []
+
+        async def mark_process_started(self, execution_id, **_kwargs):
+            self.started.append(execution_id)
+
+        async def heartbeat(self, execution_id):
+            self.heartbeats.append(execution_id)
+
+        async def mark_exited(self, execution_id, *, exit_code):
+            self.exited.append(execution_id)
+
+    repo = _Repo()
+    runner = LLMRunner(
+        executor=AcpxExecutor(db=None, webhook_notifier=None),
+        agent_execution_repo=repo,
+    )
+
+    async def heartbeat(_t: ProgressTick) -> None:
+        return
+
+    await runner.run_with_progress(
+        cmd=["acpx"], cwd=".",
+        heartbeat=heartbeat,
+        heartbeat_interval_s=0.02,
+        idle_timeout_s=5.0,
+        step_tag="STEP4_DEVELOP",
+        execution_id="aex-1",
+        run_token="tok",
+    )
+    assert repo.started == ["aex-1"]
+    assert repo.heartbeats
+    assert repo.exited == ["aex-1"]
+
+
+@pytest.mark.asyncio
 async def test_run_with_progress_returns_stdout_rc_and_log(monkeypatch, runner):
     proc = _SlowFakeProc(sleep_s=0.005, stdout=b"hello\n", rc=0)
 

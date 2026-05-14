@@ -108,6 +108,9 @@ class AcpxExecutor:
         host_id: str = LOCAL_HOST_ID,
         workspace_id: str | None = None,
         correlation_id: str | None = None,
+        execution_id: str | None = None,
+        run_token: str | None = None,
+        session_name: str | None = None,
     ) -> tuple[str, int]:
         """Run ``acpx <agent> exec`` once against ``worktree``.
 
@@ -147,6 +150,9 @@ class AcpxExecutor:
             correlation_id=correlation_id,
             task_file=remote_task_file,
             agent=self._resolve_agent(agent_type),
+            execution_id=execution_id,
+            run_token=run_token,
+            session_name=session_name,
         )
 
     @staticmethod
