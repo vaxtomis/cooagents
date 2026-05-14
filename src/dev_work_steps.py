@@ -44,6 +44,14 @@ from src.dev_prompt_composer import (
     compose_step5,
     extract_rubric_section,
 )
+from src.dev_plan_audit import (
+    PLAN_CHECKBOX_RE as _PLAN_CHECKBOX_RE,
+    extract_plan_checklist_items as _extract_plan_checklist_items,
+    extract_plan_ids_from_value as _extract_plan_ids_from_value,
+    format_plan_sample as _format_plan_sample,
+    missing_plan_verification_ids as _missing_plan_verification_ids,
+    render_step5_plan_audit_targets as _render_step5_plan_audit_targets,
+)
 from src.exceptions import BadRequestError, NotFoundError
 from src.git_utils import run_git
 from src.models import DevWorkStep, ProblemCategory
@@ -54,10 +62,6 @@ logger = logging.getLogger(__name__)
 
 _REQUIRED_H2 = ("本轮目标", "开发计划", "用例清单")
 _RECOMMENDED_TECH_STACK_H2 = "推荐技术栈"
-_PLAN_CHECKBOX_RE = re.compile(
-    r"^(\s*[-*]\s+\[)([ xX])(\]\s+)"
-    r"([A-Za-z][A-Za-z0-9_-]*-\d+(?:\.\d+)*)(\s*[:：].*)$"
-)
 
 
 _REPAIR_STDOUT_LIMIT = 6000
@@ -245,8 +249,19 @@ def _compose_step4_artifact_repair_prompt(
 
 
 def _compose_step5_artifact_repair_prompt(
-    *, output_path: str, parse_reason: str, stdout: str,
+    *,
+    output_path: str,
+    parse_reason: str,
+    stdout: str,
+    plan_audit_targets: str | None = None,
 ) -> str:
+    audit_block = (
+        f"\n{plan_audit_targets}\n\n"
+        "The repaired JSON must include one `plan_verification` item for "
+        "every active plan ID listed above.\n\n"
+        if plan_audit_targets
+        else ""
+    )
     return (
         "# DevWork STEP5 review artifact repair\n\n"
         "## System retry feedback\n\n"
@@ -265,6 +280,7 @@ def _compose_step5_artifact_repair_prompt(
         "\"issues\": [], \"plan_verification\": [], "
         "\"next_round_hints\": [], \"problem_category\": null}\n"
         "```\n\n"
+        f"{audit_block}"
         "Before exiting, read the file back and confirm it is non-empty "
         "valid JSON. stdout is not accepted as the artifact.\n\n"
         "Previous stdout tail:\n"
@@ -313,13 +329,13 @@ def _apply_plan_verification_checkboxes(
         if not in_plan:
             continue
         match = _PLAN_CHECKBOX_RE.match(body)
-        if not match or match.group(4) not in done_ids:
+        if not match or match.group(5) not in done_ids:
             continue
         if match.group(2).lower() == "x":
             continue
         lines[idx] = (
             f"{match.group(1)}x{match.group(3)}{match.group(4)}"
-            f"{match.group(5)}{newline}"
+            f"{match.group(5)}{match.group(6)}{newline}"
         )
         changed = True
 
@@ -482,6 +498,100 @@ class DevWorkStepHandlersMixin:
                 )
 
         return None
+
+    async def _collect_step5_changed_paths(
+        self, dw: dict[str, Any],
+    ) -> set[str]:
+        rows = await self.db.fetchall(
+            "SELECT mount_name, is_primary, worktree_path FROM dev_work_repos "
+            "WHERE dev_work_id=? ORDER BY is_primary DESC, mount_name",
+            (dw["id"],),
+        )
+        if not rows and dw.get("worktree_path"):
+            rows = [{
+                "mount_name": "primary",
+                "is_primary": True,
+                "worktree_path": dw.get("worktree_path"),
+            }]
+
+        changed: set[str] = set()
+        for row in rows:
+            worktree_path = row["worktree_path"]
+            if not worktree_path and row["is_primary"]:
+                worktree_path = dw.get("worktree_path")
+            if not worktree_path:
+                continue
+            try:
+                diff_names, _err, _rc = await run_git(
+                    "diff", "HEAD", "--name-only",
+                    cwd=worktree_path, check=False,
+                )
+                status_out, _err, _rc = await run_git(
+                    "status", "--porcelain=v1",
+                    cwd=worktree_path, check=False,
+                )
+            except Exception:
+                logger.warning(
+                    "dev_work %s Step5 changed-path collection failed "
+                    "for mount=%s",
+                    dw["id"],
+                    row["mount_name"],
+                    exc_info=True,
+                )
+                continue
+            for path in diff_names.splitlines():
+                normalised = _normalise_git_path(path)
+                if normalised:
+                    changed.add(normalised)
+            for path in _paths_from_git_status_porcelain(status_out):
+                normalised = _normalise_git_path(path)
+                if normalised:
+                    changed.add(normalised)
+        return changed
+
+    async def _load_previous_plan_ledger(
+        self, dev_work_id: str, round_n: int,
+    ) -> dict[str, dict[str, Any]]:
+        row = await self.db.fetchone(
+            "SELECT findings_json FROM reviews "
+            "WHERE dev_work_id=? AND round < ? "
+            "ORDER BY round DESC, created_at DESC LIMIT 1",
+            (dev_work_id, round_n),
+        )
+        if row is None or not row["findings_json"]:
+            return {}
+        try:
+            payload = json.loads(row["findings_json"])
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(payload, list):
+            return {}
+        ledger: dict[str, dict[str, Any]] = {}
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            plan_id = item.get("id")
+            if isinstance(plan_id, str) and plan_id.strip():
+                ledger[plan_id.strip()] = item
+        return ledger
+
+    async def _load_step4_touched_plan_ids(
+        self,
+        *,
+        workspace_row: dict[str, Any],
+        findings_rel: str,
+    ) -> set[str]:
+        try:
+            raw = await self.registry.read_text(
+                workspace_slug=workspace_row["slug"],
+                relative_path=findings_rel,
+            )
+            payload = json.loads(raw)
+        except (NotFoundError, TypeError, ValueError):
+            return set()
+        if not isinstance(payload, dict):
+            return set()
+        return _extract_plan_ids_from_value(payload.get("plan_execution"))
 
     async def _repair_step5_generated_diff(
         self,
@@ -727,12 +837,14 @@ class DevWorkStepHandlersMixin:
         review_abs: str,
         parse_reason: str,
         stdout: str,
+        plan_audit_targets: str | None = None,
     ) -> ReviewOutcome | None:
         """Ask the current Step5 session to persist only the review JSON."""
         repair_prompt = _compose_step5_artifact_repair_prompt(
             output_path=review_abs,
             parse_reason=parse_reason,
             stdout=stdout,
+            plan_audit_targets=plan_audit_targets,
         )
         prompt_rel = (
             f"devworks/{dw['id']}/prompts/"
@@ -1326,6 +1438,20 @@ class DevWorkStepHandlersMixin:
                 problem_category=None,
             )
             return
+        try:
+            note_body = await self.registry.read_text(
+                workspace_slug=ws["slug"],
+                relative_path=note["markdown_path"],
+            )
+        except NotFoundError as exc:
+            await self._loop_or_escalate(
+                dw,
+                back_to=DevWorkStep.STEP2_ITERATION,
+                reason=f"Step5 iteration note unreadable: {exc}",
+                problem_category=ProblemCategory.req_gap,
+            )
+            return
+        plan_items = _extract_plan_checklist_items(note_body)
 
         findings_rel = (
             f"devworks/{dw['id']}/artifacts/step4-findings-round{round_n}.json"
@@ -1363,6 +1489,21 @@ class DevWorkStepHandlersMixin:
                 problem_category=ProblemCategory.impl_gap,
             )
             return
+
+        changed_paths = await self._collect_step5_changed_paths(dw)
+        previous_plan_ledger = await self._load_previous_plan_ledger(
+            dw["id"], round_n,
+        )
+        touched_plan_ids = await self._load_step4_touched_plan_ids(
+            workspace_row=ws,
+            findings_rel=findings_rel,
+        )
+        plan_audit_targets = _render_step5_plan_audit_targets(
+            plan_items=plan_items,
+            previous_ledger=previous_plan_ledger,
+            touched_plan_ids=touched_plan_ids,
+            changed_paths=changed_paths,
+        )
 
         mount_entries = await self._load_mount_table_entries(dw)
         retry_feedback = await self._loop_feedback_for_round(
@@ -1411,6 +1552,7 @@ class DevWorkStepHandlersMixin:
                 output_json_path=review_abs,
                 previous_actual_score_b=previous_actual_score_b,
                 retry_feedback=retry_feedback,
+                plan_audit_targets=plan_audit_targets,
             )
         )
         prompt_rel = f"devworks/{dw['id']}/prompts/step5-round{round_n}.md"
@@ -1493,6 +1635,7 @@ class DevWorkStepHandlersMixin:
                     review_abs=review_abs,
                     parse_reason=parse_reason,
                     stdout=stdout,
+                    plan_audit_targets=plan_audit_targets,
                 )
                 if outcome is not None:
                     parse_reason = None
@@ -1504,6 +1647,22 @@ class DevWorkStepHandlersMixin:
                     problem_category=None,
                 )
                 return
+
+        missing_plan_ids = _missing_plan_verification_ids(
+            plan_items=plan_items,
+            plan_verification=outcome.plan_verification,
+        )
+        if missing_plan_ids:
+            await self._loop_or_escalate(
+                dw,
+                back_to=DevWorkStep.STEP5_REVIEW,
+                reason=(
+                    "Step5 plan_verification missing active plan ids: "
+                    f"{_format_plan_sample(missing_plan_ids)}"
+                ),
+                problem_category=None,
+            )
+            return
 
         await self._record_review(
             dw,

@@ -493,6 +493,7 @@ def test_step5_prompt_carries_plan_verification_guide():
     assert _PLAN_VERIFICATION_GUIDE in out
     assert out.index("## 计划执行核验") > out.index("## 越界检查")
     assert out.index("## 计划执行核验") < out.index("## 下一轮提示")
+    assert out.index("## 计划审查目标") < out.index("## 下一轮提示")
     assert "\"plan_verification\":" in out
     assert "\"implemented\": true" in out
     assert "\"verified\": true" in out
@@ -500,6 +501,23 @@ def test_step5_prompt_carries_plan_verification_guide():
     assert "\"required_for_exit\": true" in out
     assert "implemented` 未显式为 false 的项回写 checkbox" in out
     assert "`verified` 影响评分和后续补证" in out
+    assert "必须覆盖下方" in out
+    assert "verification_mode=\"carried_forward\"" in out
+
+
+def test_step5_prompt_carries_plan_audit_targets():
+    out = compose_step5(Step5Inputs(
+        design_doc_path="/d", iteration_note_path="/n",
+        step4_findings_path="/f", context_path="/c.md",
+        mount_table_entries=(),
+        primary_worktree_path=None, rubric_threshold=85,
+        output_json_path="/s",
+        plan_audit_targets=(
+            "## 计划审查目标（系统轻量预筛）\n\n"
+            "| ID | 审查模式 |\n|---|---|\n| `DW-01` | `must_review` |"
+        ),
+    ))
+    assert "| `DW-01` | `must_review` |" in out
 
 
 def test_step5_prompt_carries_next_round_hints_guide():

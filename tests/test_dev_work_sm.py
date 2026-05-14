@@ -14,7 +14,11 @@ from src.agent_hosts.repo import AgentHostRepo
 from src.database import Database
 from src.design_doc_manager import DesignDocManager
 from src.dev_iteration_note_manager import DevIterationNoteManager
-from src.dev_work_steps import _apply_plan_verification_checkboxes
+from src.dev_work_steps import (
+    _apply_plan_verification_checkboxes,
+    _extract_plan_checklist_items,
+    _missing_plan_verification_ids,
+)
 from src.dev_work_sm import DevWorkStateMachine
 from src.exceptions import BadRequestError, NotFoundError
 from src.storage import LocalFileStore
@@ -242,6 +246,45 @@ def _last_json_output_path(prompt: str) -> Path | None:
     return Path(matches[-1]) if matches else None
 
 
+def _step5_plan_ids_from_prompt(prompt: str) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(
+        r"\|\s*`([A-Za-z][A-Za-z0-9_-]*-\d+(?:\.\d+)*)`\s*\|",
+        prompt,
+    ):
+        plan_id = match.group(1)
+        if plan_id not in seen:
+            seen.add(plan_id)
+            ids.append(plan_id)
+    return ids
+
+
+def _payload_with_default_plan_verification(
+    payload: dict, prompt: str,
+) -> dict:
+    if "plan_verification" in payload:
+        return dict(payload)
+    plan_ids = _step5_plan_ids_from_prompt(prompt)
+    if not plan_ids:
+        return dict(payload)
+    delivered = payload.get("problem_category") is None
+    status = "done" if delivered else "unverified"
+    return {
+        **payload,
+        "plan_verification": [
+            {
+                "id": plan_id,
+                "status": status,
+                "implemented": delivered,
+                "verified": delivered,
+                "verification_mode": "test_default",
+            }
+            for plan_id in plan_ids
+        ],
+    }
+
+
 def _first_mount_worktree_path(prompt: str, fallback: str) -> str:
     for line in prompt.splitlines():
         mount_line = re.search(r"- mount `[^`]+`: `([^`]+)`", line)
@@ -350,7 +393,10 @@ def step5_invalid_review_json(step_tag, round_n, prompt, worktree):
 
 
 def step5_missing_review_file_with_stdout(step_tag, round_n, prompt, worktree):
-    payload = {"score": 90, "issues": [], "problem_category": None}
+    payload = _payload_with_default_plan_verification(
+        {"score": 90, "issues": [], "problem_category": None},
+        prompt,
+    )
     return (f"review chatter\n```json\n{json.dumps(payload)}\n```", 0)
 
 
@@ -365,7 +411,10 @@ def step5_write_review_but_fail(step_tag, round_n, prompt, worktree):
 def step5_success_without_rewriting_review(step_tag, round_n, prompt, worktree):
     assert "System retry feedback" in prompt
     assert "Step5 unparseable" in prompt
-    payload = {"score": 91, "issues": [], "problem_category": None}
+    payload = _payload_with_default_plan_verification(
+        {"score": 91, "issues": [], "problem_category": None},
+        prompt,
+    )
     return (f"```json\n{json.dumps(payload)}\n```", 0)
 
 
@@ -380,17 +429,31 @@ def _step5_writer_expect_retry_feedback(payload: dict):
     return _w
 
 
+def _step5_writer_expect_plan_coverage_feedback(payload: dict):
+    writer = _step5_writer(payload)
+
+    def _w(step_tag, round_n, prompt, worktree):
+        assert "System retry feedback" in prompt
+        assert "plan_verification missing active plan ids" in prompt
+        return writer(step_tag, round_n, prompt, worktree)
+
+    return _w
+
+
 def _step5_writer(payload: dict):
     def _w(step_tag, round_n, prompt, worktree):
         m = re.search(r"必须\*\*将结果写入 `([^`]+\.json)`", prompt) or \
             re.search(r"将结果写入 `([^`]+\.json)`", prompt)
         if not m:
             return ("", 1)
+        resolved_payload = _payload_with_default_plan_verification(
+            payload, prompt,
+        )
         out = Path(m.group(1))
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(payload), encoding="utf-8")
+        out.write_text(json.dumps(resolved_payload), encoding="utf-8")
         # Also echo on stdout as a fenced block (reviewer prefers file though).
-        return (f"```json\n{json.dumps(payload)}\n```", 0)
+        return (f"```json\n{json.dumps(resolved_payload)}\n```", 0)
     return _w
 
 
@@ -417,9 +480,12 @@ def _step5_writer(payload: dict):
         out = _last_json_output_path(prompt)
         if out is None:
             return ("", 1)
+        resolved_payload = _payload_with_default_plan_verification(
+            payload, prompt,
+        )
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(payload), encoding="utf-8")
-        return (f"```json\n{json.dumps(payload)}\n```", 0)
+        out.write_text(json.dumps(resolved_payload), encoding="utf-8")
+        return (f"```json\n{json.dumps(resolved_payload)}\n```", 0)
     return _w
 
 
@@ -458,6 +524,31 @@ def test_plan_verification_checkbox_patch_checks_delivered_done_items():
     assert "  - [x] DW-02.1: 校验空邮箱" in updated
     assert "- [ ] DW-03: 补充失败态" in updated
     assert "- [ ] 非计划 checkbox 不应改变" in updated
+
+
+def test_plan_coverage_ignores_cancelled_items():
+    body = (
+        "# 迭代设计 — Round 1\n\n"
+        "## 开发计划\n\n"
+        "- [x] DW-01: [P0] 加表单\n"
+        "- [ ] ~~DW-02: [P1] 取消的旧计划~~\n"
+        "  - [ ] DW-02.1: [P1] 子计划\n"
+        "\n## 用例清单\n"
+    )
+
+    items = _extract_plan_checklist_items(body)
+    assert [item.id for item in items] == ["DW-01", "DW-02", "DW-02.1"]
+    assert items[0].importance == "P0"
+    assert items[1].cancelled is True
+
+    missing = _missing_plan_verification_ids(
+        plan_items=items,
+        plan_verification=[
+            {"id": "DW-01", "status": "done", "verified": True},
+        ],
+    )
+
+    assert missing == ["DW-02.1"]
 
 
 # ---------------------------------------------------------------------------
@@ -1635,6 +1726,55 @@ async def test_step5_plan_verification_checks_iteration_plan_items(env):
     )
     assert json.loads(review["findings_json"]) == payload["plan_verification"]
     assert json.loads(review["score_breakdown_json"]) == payload["score_breakdown"]
+
+
+async def test_step5_retries_when_plan_verification_misses_active_items(env):
+    incomplete_payload = {
+        "score": 90,
+        "issues": [],
+        "plan_verification": [
+            {"id": "DW-01", "status": "done", "verified": True},
+        ],
+        "problem_category": None,
+    }
+    complete_payload = {
+        "score": 90,
+        "issues": [],
+        "plan_verification": [
+            {"id": "DW-01", "status": "done", "verified": True},
+            {"id": "DW-02", "status": "done", "verified": True},
+            {"id": "DW-02.1", "status": "done", "verified": True},
+            {"id": "DW-03", "status": "done", "verified": True},
+        ],
+        "problem_category": None,
+    }
+    script = [
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        _step5_writer(incomplete_payload),
+        _step5_writer_expect_plan_coverage_feedback(complete_payload),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor)
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "COMPLETED"
+    gates = json.loads(final["gates_json"])
+    assert gates["step5_retry_round1"] == 1
+    assert executor.script == []
+    review = await env["db"].fetchone(
+        "SELECT findings_json FROM reviews WHERE dev_work_id=?",
+        (dw["id"],),
+    )
+    assert json.loads(review["findings_json"]) == complete_payload["plan_verification"]
 
 
 async def test_step2_front_matter_not_tampered(env):

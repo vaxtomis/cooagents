@@ -31,6 +31,8 @@ $boundary_check
 
 $plan_verification_guide
 
+$plan_audit_targets
+
 $next_round_hints_guide
 
 ## 输出要求

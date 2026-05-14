@@ -157,7 +157,8 @@ _PLAN_VERIFICATION_GUIDE = (
     "## 计划执行核验（plan_verification）\n"
     "\n"
     "对照迭代设计 `## 开发计划`、Step4 `plan_execution`、git diff 与"
-    "测试结果，输出顶层数组 `plan_verification`。每项必须带 "
+    "测试结果，输出顶层数组 `plan_verification`。必须覆盖下方"
+    "「计划审查目标」中的每一个 active plan ID，且同一 ID 不要重复。每项必须带 "
     "`id/status/implemented/verified`；`status` 仅可取 `done/partial/"
     "deferred/blocked/failed/unverified`，并尽量带 `importance`（P0/P1/P2）"
     "与 `required_for_exit`。`implemented` 表示 Step4 是否已交付该计划项；"
@@ -166,7 +167,12 @@ _PLAN_VERIFICATION_GUIDE = (
     "并在 `missing_evidence` 说明缺口；不要因缺少专项测试把已交付项降成 "
     "`unverified`。不要修改迭代设计文件；状态机会根据 `status=done` 且 "
     "`implemented` 未显式为 false 的项回写 checkbox；`verified` 影响评分和"
-    "后续补证，不直接阻止 checkbox。"
+    "后续补证，不直接阻止 checkbox。\n"
+    "\n"
+    "审查模式：`must_review` 必须结合 diff/测试/Step4 自述深度核验；"
+    "`watch_unfinished` 做常态化轻量核验，确认是否仍未完成或本轮已补齐；"
+    "`carry_forward` 可继承上一轮 `done+verified` 结论，但仍必须在"
+    " `plan_verification` 输出该 ID，并带 `verification_mode=\"carried_forward\"`。"
 )
 
 # Forward-looking hints written to next_round_hints[] for Round N+1's
@@ -482,6 +488,7 @@ class Step5Inputs:
     output_json_path: str
     previous_actual_score_b: int | None = None
     retry_feedback: str | None = None
+    plan_audit_targets: str | None = None
 
 
 def compose_step5(inputs: Step5Inputs) -> str:
@@ -508,6 +515,11 @@ def compose_step5(inputs: Step5Inputs) -> str:
         step_wall=_STEP_WALL_STEP5,
         boundary_check=_BOUNDARY_CHECK_RUBRIC,
         plan_verification_guide=_PLAN_VERIFICATION_GUIDE,
+        plan_audit_targets=(
+            inputs.plan_audit_targets
+            or "## 计划审查目标（系统轻量预筛）\n\n"
+            "未检测到 active checkbox plan ID；按迭代设计内容自行核验。"
+        ),
         next_round_hints_guide=_NEXT_ROUND_HINTS_GUIDE,
         retry_feedback=_render_retry_feedback(inputs.retry_feedback),
     )
