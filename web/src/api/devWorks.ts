@@ -61,6 +61,16 @@ export async function cancelDevWork(id: string): Promise<void> {
   await apiFetch<void>(`/dev-works/${encodeURIComponent(id)}/cancel`, { method: "POST" });
 }
 
+export async function rerunDevWork(id: string): Promise<DevWork> {
+  return apiFetch<DevWork>(`/dev-works/${encodeURIComponent(id)}/rerun`, {
+    method: "POST",
+  });
+}
+
+export async function deleteDevWork(id: string): Promise<void> {
+  await apiFetch<void>(`/dev-works/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 export async function pushDevWorkBranches(id: string): Promise<DevWork> {
   return apiFetch<DevWork>(`/dev-works/${encodeURIComponent(id)}/push`, {
     method: "POST",

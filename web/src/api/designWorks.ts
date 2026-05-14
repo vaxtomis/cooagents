@@ -61,3 +61,13 @@ export async function tickDesignWork(id: string): Promise<DesignWork> {
 export async function cancelDesignWork(id: string): Promise<void> {
   await apiFetch<void>(`/design-works/${encodeURIComponent(id)}/cancel`, { method: "POST" });
 }
+
+export async function rerunDesignWork(id: string): Promise<DesignWork> {
+  return apiFetch<DesignWork>(`/design-works/${encodeURIComponent(id)}/rerun`, {
+    method: "POST",
+  });
+}
+
+export async function deleteDesignWork(id: string): Promise<void> {
+  await apiFetch<void>(`/design-works/${encodeURIComponent(id)}`, { method: "DELETE" });
+}

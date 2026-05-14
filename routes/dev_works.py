@@ -446,6 +446,31 @@ async def cancel_dev_work(dev_id: str, request: Request) -> Response:
     return Response(status_code=204)
 
 
+@router.post("/dev-works/{dev_id}/rerun")
+@limiter.limit("10/minute")
+async def rerun_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
+    sm = request.app.state.dev_work_sm
+    state_repo = request.app.state.dev_work_repo_state
+    dw = await sm.rerun_cancelled(dev_id)
+    sm.schedule_driver(dev_id)
+    repos = await _load_worker_repos(state_repo, dev_id)
+    refs = [_handoff_to_repo_ref(h) for h in repos]
+    return _row_to_progress(
+        dw,
+        refs,
+        repos,
+        is_running=sm.is_running(dev_id),
+        max_rounds=sm._resolve_max_rounds(dw),
+    )
+
+
+@router.delete("/dev-works/{dev_id}", status_code=204)
+@limiter.limit("10/minute")
+async def delete_dev_work(dev_id: str, request: Request) -> Response:
+    await request.app.state.dev_work_sm.delete_terminal(dev_id)
+    return Response(status_code=204)
+
+
 @router.post("/dev-works/{dev_id}/push", response_model=DevWorkProgress)
 @limiter.limit("10/minute")
 async def push_dev_work_branches(

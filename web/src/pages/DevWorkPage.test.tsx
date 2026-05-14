@@ -17,7 +17,9 @@ vi.mock("../api/devWorks", () => ({
   getDevWork: vi.fn(),
   cancelDevWork: vi.fn(),
   continueDevWork: vi.fn(),
+  deleteDevWork: vi.fn(),
   resumeDevWorkStep: vi.fn(),
+  rerunDevWork: vi.fn(),
   pushDevWorkBranches: vi.fn(),
 }));
 vi.mock("../api/devIterationNotes", () => ({
@@ -37,8 +39,10 @@ vi.mock("../api/workspaceEvents", () => ({
 import {
   cancelDevWork,
   continueDevWork,
+  deleteDevWork,
   getDevWork,
   pushDevWorkBranches,
+  rerunDevWork,
   resumeDevWorkStep,
 } from "../api/devWorks";
 import { getIterationNoteContent, listIterationNotes } from "../api/devIterationNotes";
@@ -223,6 +227,52 @@ describe("DevWorkPage", () => {
 
     await waitFor(() => {
       expect(cancelDevWork).toHaveBeenCalledWith("dv-1");
+    });
+  });
+
+  it("reruns a cancelled DevWork", async () => {
+    vi.mocked(getDevWork).mockResolvedValue({
+      ...devWork,
+      current_step: "CANCELLED",
+    });
+    vi.mocked(rerunDevWork).mockResolvedValue({
+      ...devWork,
+      current_step: "STEP2_ITERATION",
+      is_running: true,
+    });
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "重新执行" }));
+
+    await waitFor(() => {
+      expect(rerunDevWork).toHaveBeenCalledWith("dv-1");
+    });
+  });
+
+  it("confirms before deleting an escalated DevWork", async () => {
+    vi.mocked(getDevWork).mockResolvedValue({
+      ...devWork,
+      current_step: "ESCALATED",
+      escalated_at: "2026-04-23T00:00:01Z",
+    });
+    vi.mocked(deleteDevWork).mockResolvedValue(undefined);
+    vi.mocked(listIterationNotes).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    expect(deleteDevWork).not.toHaveBeenCalled();
+    expect(screen.getByText("删除并清理 DevWork")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteDevWork).toHaveBeenCalledWith("dv-1");
     });
   });
 

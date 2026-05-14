@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_ATTACHMENT_PROMPT_CHARS = 20_000
 _MAX_ATTACHMENT_PROMPT_TOTAL_CHARS = 80_000
+_CANCELLED_FROM_STATE_KEY = "cancelled_from_state"
+_CANCELLED_AT_KEY = "cancelled_at"
 
 
 class DesignWorkStateMachine:
@@ -419,12 +421,28 @@ class DesignWorkStateMachine:
                 return dw
 
     async def cancel(self, dw_id: str) -> None:
+        dw = await self._get(dw_id)
+        if dw is None:
+            raise NotFoundError(f"design_work {dw_id!r} not found")
+        state = DesignWorkState(dw["current_state"])
+        if state in {
+            DesignWorkState.COMPLETED,
+            DesignWorkState.ESCALATED,
+            DesignWorkState.CANCELLED,
+        }:
+            raise NotFoundError(
+                f"design_work {dw_id!r} not found or already terminal"
+            )
         now = self._now()
+        gates = _decode_gates(dw.get("gates_json"))
+        gates[_CANCELLED_FROM_STATE_KEY] = state.value
+        gates[_CANCELLED_AT_KEY] = now
         rowcount = await self.db.execute_rowcount(
-            "UPDATE design_works SET current_state=?, updated_at=? "
+            "UPDATE design_works SET current_state=?, gates_json=?, updated_at=? "
             "WHERE id=? AND current_state NOT IN (?, ?, ?)",
             (
                 DesignWorkState.CANCELLED.value,
+                json.dumps(gates, ensure_ascii=False),
                 now,
                 dw_id,
                 DesignWorkState.COMPLETED.value,
@@ -436,7 +454,6 @@ class DesignWorkStateMachine:
             raise NotFoundError(
                 f"design_work {dw_id!r} not found or already terminal"
             )
-        dw = await self._get(dw_id)
         await emit_and_deliver(
             self.db,
             self.webhooks,
@@ -447,6 +464,143 @@ class DesignWorkStateMachine:
         task = self._running.pop(dw_id, None)
         if task is not None:
             task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def rerun_cancelled(self, dw_id: str) -> dict:
+        dw = await self._get(dw_id)
+        if dw is None:
+            raise NotFoundError(f"design_work {dw_id!r} not found")
+        if self.is_running(dw_id):
+            raise ConflictError(
+                f"design_work {dw_id!r} is already being advanced",
+                current_stage=dw["current_state"],
+            )
+        if dw["current_state"] != DesignWorkState.CANCELLED.value:
+            raise ConflictError(
+                f"design_work {dw_id!r} is not cancelled",
+                current_stage=dw["current_state"],
+            )
+        gates = _decode_gates(dw.get("gates_json"))
+        try:
+            resume_state = DesignWorkState(gates[_CANCELLED_FROM_STATE_KEY])
+        except (KeyError, ValueError) as exc:
+            raise BadRequestError(
+                "cancelled DesignWork has no resumable prior state"
+            ) from exc
+        if resume_state in {
+            DesignWorkState.COMPLETED,
+            DesignWorkState.ESCALATED,
+            DesignWorkState.CANCELLED,
+        }:
+            raise BadRequestError(
+                "cancelled DesignWork prior state is terminal"
+            )
+
+        history = gates.get("rerun_history")
+        if not isinstance(history, list):
+            history = []
+        clean_history = [item for item in history if isinstance(item, dict)]
+        clean_history.append({
+            "at": self._now(),
+            "from_state": resume_state.value,
+        })
+        gates["rerun_history"] = clean_history[-20:]
+        gates.pop(_CANCELLED_FROM_STATE_KEY, None)
+        gates.pop(_CANCELLED_AT_KEY, None)
+
+        now = self._now()
+        rowcount = await self.db.execute_rowcount(
+            "UPDATE design_works SET current_state=?, gates_json=?, updated_at=? "
+            "WHERE id=? AND current_state=?",
+            (
+                resume_state.value,
+                json.dumps(gates, ensure_ascii=False),
+                now,
+                dw_id,
+                DesignWorkState.CANCELLED.value,
+            ),
+        )
+        if rowcount == 0:
+            raise ConflictError(
+                f"design_work {dw_id!r} changed while rerunning",
+                current_stage=dw["current_state"],
+            )
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="design_work.started",
+            workspace_id=dw["workspace_id"],
+            correlation_id=dw_id,
+            payload={"rerun": True, "from_state": resume_state.value},
+        )
+        try:
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
+        except Exception:
+            logger.exception(
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
+            )
+        refreshed = await self._get(dw_id)
+        assert refreshed is not None
+        return refreshed
+
+    async def delete_terminal(self, dw_id: str) -> None:
+        dw = await self._get(dw_id)
+        if dw is None:
+            raise NotFoundError(f"design_work {dw_id!r} not found")
+        if self.is_running(dw_id):
+            raise ConflictError(
+                f"design_work {dw_id!r} is still running",
+                current_stage=dw["current_state"],
+            )
+        state = DesignWorkState(dw["current_state"])
+        if state not in {DesignWorkState.CANCELLED, DesignWorkState.ESCALATED}:
+            raise ConflictError(
+                "only CANCELLED or ESCALATED DesignWork can be deleted",
+                current_stage=state.value,
+            )
+        ws = await self.workspaces.get(dw["workspace_id"])
+        if ws is None:
+            raise NotFoundError(f"workspace {dw['workspace_id']!r} not found")
+
+        paths = {
+            p for p in (dw.get("user_input_path"), dw.get("output_path"))
+            if isinstance(p, str) and p
+        }
+        prefix = f"designs/.drafts/{dw_id}-"
+        file_rows = await self.registry.repo.list_for_workspace(ws["id"])
+        paths.update(
+            row["relative_path"]
+            for row in file_rows
+            if row["relative_path"].startswith(prefix)
+        )
+        for rel in sorted(paths):
+            await self.registry.delete(workspace_row=ws, relative_path=rel)
+
+        async with self.db.transaction():
+            await self.db.execute(
+                "DELETE FROM reviews WHERE design_work_id=?", (dw_id,),
+            )
+            await self.db.execute(
+                "DELETE FROM design_work_repos WHERE design_work_id=?", (dw_id,),
+            )
+            await self.db.execute(
+                "DELETE FROM agent_dispatches "
+                "WHERE correlation_kind='design_work' AND correlation_id=?",
+                (dw_id,),
+            )
+            await self.db.execute(
+                "DELETE FROM workspace_events WHERE correlation_id=?", (dw_id,),
+            )
+            await self.db.execute("DELETE FROM design_works WHERE id=?", (dw_id,))
+        try:
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
+        except Exception:
+            logger.exception(
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
+            )
 
     # ---- state handlers ----
     #

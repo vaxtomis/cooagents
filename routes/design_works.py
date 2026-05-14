@@ -441,3 +441,25 @@ async def cancel_design_work(dw_id: str, request: Request) -> Response:
     sm = request.app.state.design_work_sm
     await sm.cancel(dw_id)
     return Response(status_code=204)
+
+
+@router.post("/design-works/{dw_id}/rerun")
+@limiter.limit("10/minute")
+async def rerun_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
+    sm = request.app.state.design_work_sm
+    dw = await sm.rerun_cancelled(dw_id)
+    sm.schedule_driver(dw_id)
+    refs = await _load_repo_refs(request.app.state.db, dw_id)
+    return _row_to_progress(
+        dw,
+        refs,
+        is_running=sm.is_running(dw_id),
+        max_loops=sm._resolve_max_loops(dw),
+    )
+
+
+@router.delete("/design-works/{dw_id}", status_code=204)
+@limiter.limit("10/minute")
+async def delete_design_work(dw_id: str, request: Request) -> Response:
+    await request.app.state.design_work_sm.delete_terminal(dw_id)
+    return Response(status_code=204)

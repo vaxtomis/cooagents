@@ -205,6 +205,7 @@ async def client(tmp_path):
     test_app.state.workspaces = workspaces
     test_app.state.design_docs = design_docs
     test_app.state.iteration_notes = iteration_notes
+    test_app.state.registry = registry
     test_app.state.dev_work_sm = sm
     test_app.state.settings = settings
     test_app.state.repo_registry_repo = repo_registry
@@ -658,6 +659,81 @@ async def test_manual_push_rejects_non_completed_dev_work(client):
 
     assert r.status_code == 409
     assert r.json()["current_stage"] == "CANCELLED"
+
+
+async def test_rerun_cancelled_dev_work_resumes_driver(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    assert create.status_code == 201, create.text
+    dev_id = create.json()["id"]
+    await _wait_for_terminal(client, dev_id)
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_step='CANCELLED', completed_at=NULL, "
+        "escalated_at=NULL, gates_json=? WHERE id=?",
+        (json.dumps({"cancelled_from_step": "STEP2_ITERATION"}), dev_id),
+    )
+
+    r = await client.post(f"/api/v1/dev-works/{dev_id}/rerun")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["current_step"] != "CANCELLED"
+    assert r.json()["is_running"] is True
+    await _wait_for_terminal(client, dev_id)
+
+
+async def test_delete_escalated_dev_work_cleans_files_worktrees_and_rows(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    assert create.status_code == 201, create.text
+    dev_id = create.json()["id"]
+    await _wait_for_terminal(client, dev_id)
+    await _wait_until_idle(client, dev_id)
+    extra_rel = f"devworks/{dev_id}/artifacts/delete-me.json"
+    await app.state.registry.put_json(
+        workspace_row=app.state._ws,
+        relative_path=extra_rel,
+        payload={"delete": True},
+        kind="artifact",
+    )
+    repo_row = await app.state.db.fetchone(
+        "SELECT worktree_path FROM dev_work_repos WHERE dev_work_id=? "
+        "AND mount_name='backend'",
+        (dev_id,),
+    )
+    assert repo_row is not None
+    worktree_path = Path(repo_row["worktree_path"])
+    assert worktree_path.exists()
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_step='ESCALATED', completed_at=NULL, "
+        "escalated_at=? WHERE id=?",
+        ("2026-04-23T00:00:00Z", dev_id),
+    )
+    await app.state.db.execute(
+        "INSERT INTO workspace_events(event_id, event_name, workspace_id, "
+        "correlation_id, ts) VALUES(?,?,?,?,?)",
+        ("evt-delete-dev", "dev_work.escalated", app.state._ws["id"], dev_id,
+         "2026-04-23T00:00:01Z"),
+    )
+
+    r = await client.delete(f"/api/v1/dev-works/{dev_id}")
+
+    assert r.status_code == 204, r.text
+    assert (await client.get(f"/api/v1/dev-works/{dev_id}")).status_code == 404
+    assert await app.state.registry.stat(
+        workspace_slug=app.state._ws["slug"], relative_path=extra_rel,
+    ) is None
+    assert not worktree_path.exists()
+    assert await app.state.db.fetchone(
+        "SELECT dev_work_id FROM dev_work_repos WHERE dev_work_id=?",
+        (dev_id,),
+    ) is None
+    assert await app.state.db.fetchone(
+        "SELECT id FROM dev_iteration_notes WHERE dev_work_id=?",
+        (dev_id,),
+    ) is None
+    assert await app.state.db.fetchone(
+        "SELECT id FROM workspace_events WHERE event_id='evt-delete-dev'",
+    ) is None
 
 
 async def test_manual_push_completed_calls_publisher(client):

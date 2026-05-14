@@ -1,12 +1,14 @@
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
-import { FileText, X } from "lucide-react";
+import { FileText, RotateCw, Trash2, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
 import {
   cancelDesignWork,
+  deleteDesignWork,
   getDesignWork,
   getDesignWorkRetrySource,
+  rerunDesignWork,
   retryDesignWork,
 } from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
@@ -328,9 +330,12 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
   const navigate = useNavigate();
   const polling = useWorkspacePolling();
   const detailPolling = useWorkspaceDetailPolling<DesignWork>((latest) => Boolean(latest?.is_running));
-  const [actionPending, setActionPending] = useState<"cancel" | "retry" | null>(null);
+  const [actionPending, setActionPending] = useState<
+    "cancel" | "delete" | "rerun" | "retry" | null
+  >(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [retryOpen, setRetryOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<DesignDetailTab>("overview");
 
@@ -352,6 +357,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
   const cancelled = designWork?.current_state === "CANCELLED";
   const terminal =
     escalated || cancelled || designWork?.current_state === "COMPLETED";
+  const deleteEligible = Boolean(escalated || cancelled);
   const activityPolling = useWorkspaceActivePolling(Boolean(designWork?.is_running && !terminal));
   const workspaceEventsQuery = useSWR(
     ["workspace-events", "design-work", wsId, dwId],
@@ -423,6 +429,33 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
       await dwQuery.mutate();
     } catch (err) {
       setActionError(extractError(err, "操作失败"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function deleteWork() {
+    setActionPending("delete");
+    setActionError(null);
+    try {
+      await deleteDesignWork(dwId);
+      navigate(`/workspaces/${wsId}`);
+    } catch (err) {
+      setActionError(extractError(err, "删除失败"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function rerunWork() {
+    setActionPending("rerun");
+    setActionError(null);
+    try {
+      const updated = await rerunDesignWork(dwId);
+      await dwQuery.mutate(updated, { revalidate: false });
+      await workspaceEventsQuery.mutate();
+    } catch (err) {
+      setActionError(extractError(err, "重新执行失败"));
     } finally {
       setActionPending(null);
     }
@@ -504,9 +537,63 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
         </div>
       </AppDialog>
 
+      <AppDialog
+        description="删除后会移除当前 DesignWork 记录，并清理它产生的草稿、提示词和未发布输出文件。"
+        onClose={() => setDeleteConfirmOpen(false)}
+        open={deleteConfirmOpen && deleteEligible}
+        title="删除并清理 DesignWork"
+      >
+        <div className="space-y-5">
+          <p className="rounded-2xl border border-danger/25 bg-danger/10 p-4 text-sm leading-relaxed text-danger">
+            该操作不可恢复。仅取消或升级的 DesignWork 可以删除。
+          </p>
+          <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              className="inline-flex w-full items-center justify-center rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft transition hover:border-accent/50 hover:bg-panel hover:text-copy sm:w-auto"
+              disabled={actionPending === "delete"}
+              onClick={() => setDeleteConfirmOpen(false)}
+              type="button"
+            >
+              返回
+            </button>
+            <button
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-danger px-5 py-3 text-sm font-semibold text-ink-invert disabled:opacity-50 sm:w-auto"
+              disabled={actionPending === "delete"}
+              onClick={() => void deleteWork()}
+              type="button"
+            >
+              <Trash2 aria-hidden="true" className="h-4 w-4" />
+              {actionPending === "delete" ? "删除中..." : "确认删除"}
+            </button>
+          </div>
+        </div>
+      </AppDialog>
+
       <SectionPanel
         actions={
           <>
+            {cancelled ? (
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/35 bg-accent/15 px-3 py-1.5 text-xs font-medium text-copy transition hover:bg-accent/20 disabled:opacity-50"
+                disabled={actionPending !== null}
+                onClick={() => void rerunWork()}
+                type="button"
+              >
+                <RotateCw aria-hidden="true" className="h-3.5 w-3.5" />
+                {actionPending === "rerun" ? "重新执行中..." : "重新执行"}
+              </button>
+            ) : null}
+            {deleteEligible ? (
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg border border-danger/35 bg-danger/10 px-3 py-1.5 text-xs font-medium text-danger transition hover:bg-danger/15 disabled:opacity-50"
+                disabled={actionPending !== null}
+                onClick={() => setDeleteConfirmOpen(true)}
+                type="button"
+              >
+                <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                {actionPending === "delete" ? "删除中..." : "删除"}
+              </button>
+            ) : null}
             <button
               className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
               disabled={actionPending !== null || terminal}

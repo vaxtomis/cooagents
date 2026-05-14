@@ -11,6 +11,8 @@ vi.mock("../api/designWorks", () => ({
   getDesignWorkRetrySource: vi.fn(),
   retryDesignWork: vi.fn(),
   cancelDesignWork: vi.fn(),
+  rerunDesignWork: vi.fn(),
+  deleteDesignWork: vi.fn(),
 }));
 vi.mock("../api/designDocs", () => ({
   getDesignDocContent: vi.fn(),
@@ -28,8 +30,10 @@ vi.mock("../api/repos", () => ({
 
 import {
   cancelDesignWork,
+  deleteDesignWork,
   getDesignWork,
   getDesignWorkRetrySource,
+  rerunDesignWork,
   retryDesignWork,
 } from "../api/designWorks";
 import { getDesignDocContent } from "../api/designDocs";
@@ -147,6 +151,53 @@ describe("DesignWorkPage", () => {
     await waitFor(() => {
       expect(cancelDesignWork).toHaveBeenCalledWith("dw-1");
     });
+  });
+
+  it("reruns a cancelled DesignWork", async () => {
+    vi.mocked(getDesignWork).mockResolvedValue({
+      ...baseDesignWork,
+      current_state: "CANCELLED",
+    });
+    vi.mocked(rerunDesignWork).mockResolvedValue({
+      ...baseDesignWork,
+      current_state: "PRE_VALIDATE",
+      is_running: true,
+    });
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "重新执行" }));
+
+    await waitFor(() => {
+      expect(rerunDesignWork).toHaveBeenCalledWith("dw-1");
+    });
+  });
+
+  it("confirms before deleting an escalated DesignWork", async () => {
+    vi.mocked(getDesignWork).mockResolvedValue({
+      ...baseDesignWork,
+      current_state: "ESCALATED",
+      escalation_reason: "post-validate failed",
+    });
+    vi.mocked(deleteDesignWork).mockResolvedValue(undefined);
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    expect(deleteDesignWork).not.toHaveBeenCalled();
+    expect(screen.getByText("删除并清理 DesignWork")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteDesignWork).toHaveBeenCalledWith("dw-1");
+    });
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/workspaces/ws-1",
+    );
   });
 
   it("opens editable retry form before creating the new row", async () => {

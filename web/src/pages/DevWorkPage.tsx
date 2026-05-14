@@ -1,12 +1,15 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { RotateCw, Trash2 } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
 import {
   cancelDevWork,
   continueDevWork,
+  deleteDevWork,
   getDevWork,
   pushDevWorkBranches,
+  rerunDevWork,
   resumeDevWorkStep,
 } from "../api/devWorks";
 import { getIterationNoteContent, listIterationNotes } from "../api/devIterationNotes";
@@ -172,15 +175,17 @@ export function DevWorkPage() {
 }
 
 function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
+  const navigate = useNavigate();
   const polling = useWorkspacePolling();
   const detailPolling = useWorkspaceDetailPolling<DevWork>((latest) => Boolean(latest?.is_running));
   const [tab, setTab] = useState<TabId>("overview");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState<
-    "cancel" | "continue" | "push" | "resume" | null
+    "cancel" | "continue" | "delete" | "push" | "rerun" | "resume" | null
   >(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [continueRounds, setContinueRounds] = useState("3");
   const [continueThreshold, setContinueThreshold] = useState("");
 
@@ -264,6 +269,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const escalated = devWork.current_step === "ESCALATED";
   const cancelled = devWork.current_step === "CANCELLED";
   const terminal = escalated || cancelled || devWork.current_step === "COMPLETED";
+  const deleteEligible = escalated || cancelled;
   const maxRounds = devWork.max_rounds ?? Math.max(devWork.iteration_rounds, 1);
   const executedRounds = Math.max(
     highestNoteRound(notesQuery.data),
@@ -300,6 +306,37 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
       await dvQuery.mutate();
     } catch (err) {
       setActionError(extractError(err, "操作失败"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function deleteWork() {
+    setActionPending("delete");
+    setActionError(null);
+    try {
+      await deleteDevWork(dvId);
+      navigate(`/workspaces/${wsId}`);
+    } catch (err) {
+      setActionError(extractError(err, "删除失败"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function rerunWork() {
+    setActionPending("rerun");
+    setActionError(null);
+    try {
+      const updated = await rerunDevWork(dvId);
+      await dvQuery.mutate(updated, { revalidate: false });
+      await Promise.all([
+        notesQuery.mutate(),
+        reviewsQuery.mutate(),
+        workspaceEventsQuery.mutate(),
+      ]);
+    } catch (err) {
+      setActionError(extractError(err, "重新执行失败"));
     } finally {
       setActionPending(null);
     }
@@ -426,9 +463,63 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
         </div>
       </AppDialog>
 
+      <AppDialog
+        description="删除后会移除当前 DevWork 记录，并清理它产生的迭代文件、提示词、上下文、artifact 和工作目录。"
+        onClose={() => setDeleteConfirmOpen(false)}
+        open={deleteConfirmOpen && deleteEligible}
+        title="删除并清理 DevWork"
+      >
+        <div className="space-y-5">
+          <p className="rounded-2xl border border-danger/25 bg-danger/10 p-4 text-sm leading-relaxed text-danger">
+            该操作不可恢复。仅取消或升级的 DevWork 可以删除。
+          </p>
+          <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              className="inline-flex w-full items-center justify-center rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft transition hover:border-accent/50 hover:bg-panel hover:text-copy sm:w-auto"
+              disabled={actionPending === "delete"}
+              onClick={() => setDeleteConfirmOpen(false)}
+              type="button"
+            >
+              返回
+            </button>
+            <button
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-danger px-5 py-3 text-sm font-semibold text-ink-invert disabled:opacity-50 sm:w-auto"
+              disabled={actionPending === "delete"}
+              onClick={() => void deleteWork()}
+              type="button"
+            >
+              <Trash2 aria-hidden="true" className="h-4 w-4" />
+              {actionPending === "delete" ? "删除中..." : "确认删除"}
+            </button>
+          </div>
+        </div>
+      </AppDialog>
+
       <SectionPanel
         actions={
           <>
+            {cancelled ? (
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/35 bg-accent/15 px-3 py-1.5 text-xs font-medium text-copy transition hover:bg-accent/20 disabled:opacity-50"
+                disabled={actionPending !== null}
+                onClick={() => void rerunWork()}
+                type="button"
+              >
+                <RotateCw aria-hidden="true" className="h-3.5 w-3.5" />
+                {actionPending === "rerun" ? "重新执行中..." : "重新执行"}
+              </button>
+            ) : null}
+            {deleteEligible ? (
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg border border-danger/35 bg-danger/10 px-3 py-1.5 text-xs font-medium text-danger transition hover:bg-danger/15 disabled:opacity-50"
+                disabled={actionPending !== null}
+                onClick={() => setDeleteConfirmOpen(true)}
+                type="button"
+              >
+                <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                {actionPending === "delete" ? "删除中..." : "删除"}
+              </button>
+            ) : null}
             <button
               className="rounded-lg bg-danger px-3 py-1.5 text-xs font-medium text-ink-invert disabled:opacity-50"
               disabled={actionPending !== null || terminal}

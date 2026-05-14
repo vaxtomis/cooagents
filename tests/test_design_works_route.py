@@ -6,6 +6,7 @@ Stubs AcpxExecutor so tests stay deterministic.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from pathlib import Path
@@ -568,6 +569,129 @@ async def test_cancel_moves_to_cancelled(client):
     assert r2.status_code in (204, 404)
     final = await client.get(f"/api/v1/design-works/{dw_id}")
     assert final.json()["current_state"] in {"CANCELLED", "COMPLETED"}
+
+
+async def test_rerun_cancelled_design_work_resumes_driver(client):
+    ws = await _create_workspace(client, slug="rerun-cancelled")
+    app = client._app
+    dw_id = "desw-rerun0001"
+    input_rel = f"designs/.drafts/{dw_id}-input.md"
+    await app.state.registry.put_markdown(
+        workspace_row=ws,
+        relative_path=input_rel,
+        text="substantial requirement text for rerun",
+        kind="design_input",
+    )
+    await app.state.db.execute(
+        """INSERT INTO design_works
+           (id, workspace_id, mode, needs_frontend_mockup, current_state,
+            loop, agent, user_input_path, title, sub_slug, version,
+            output_path, gates_json, created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            dw_id,
+            ws["id"],
+            "new",
+            0,
+            "CANCELLED",
+            0,
+            "codex",
+            input_rel,
+            "Rerun",
+            "rerun",
+            "1.0.0",
+            "designs/DES-rerun-1.0.0.md",
+            json.dumps({"cancelled_from_state": "PRE_VALIDATE"}),
+            "2026-04-23T00:00:00Z",
+            "2026-04-23T00:00:00Z",
+        ),
+    )
+
+    r = await client.post(f"/api/v1/design-works/{dw_id}/rerun")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["current_state"] != "CANCELLED"
+    final = await _wait_for_terminal(client, dw_id)
+    assert final["current_state"] in {"COMPLETED", "ESCALATED"}
+
+
+async def test_delete_cancelled_design_work_cleans_files_and_rows(client):
+    ws = await _create_workspace(client, slug="delete-cancelled")
+    app = client._app
+    dw_id = "desw-delete0001"
+    input_rel = f"designs/.drafts/{dw_id}-input.md"
+    prompt_rel = f"designs/.drafts/{dw_id}-prompt-loop0.md"
+    output_rel = "designs/DES-delete-me-1.0.0.md"
+    await app.state.registry.put_markdown(
+        workspace_row=ws,
+        relative_path=input_rel,
+        text="input",
+        kind="design_input",
+    )
+    await app.state.registry.put_markdown(
+        workspace_row=ws,
+        relative_path=prompt_rel,
+        text="prompt",
+        kind="prompt",
+    )
+    await app.state.registry.store.put_bytes(
+        f"{ws['slug']}/{output_rel}",
+        b"unregistered draft output",
+    )
+    await app.state.db.execute(
+        """INSERT INTO design_works
+           (id, workspace_id, mode, needs_frontend_mockup, current_state,
+            loop, agent, user_input_path, title, sub_slug, version,
+            output_path, created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            dw_id,
+            ws["id"],
+            "new",
+            0,
+            "CANCELLED",
+            0,
+            "codex",
+            input_rel,
+            "Delete me",
+            "delete-me",
+            "1.0.0",
+            output_rel,
+            "2026-04-23T00:00:00Z",
+            "2026-04-23T00:00:00Z",
+        ),
+    )
+    await app.state.db.execute(
+        "INSERT INTO reviews(id, design_work_id, round, created_at) "
+        "VALUES(?,?,?,?)",
+        ("rev-delete-design", dw_id, 1, "2026-04-23T00:00:01Z"),
+    )
+    await app.state.db.execute(
+        "INSERT INTO workspace_events(event_id, event_name, workspace_id, "
+        "correlation_id, ts) VALUES(?,?,?,?,?)",
+        ("evt-delete-design", "design_work.cancelled", ws["id"], dw_id,
+         "2026-04-23T00:00:02Z"),
+    )
+
+    r = await client.delete(f"/api/v1/design-works/{dw_id}")
+
+    assert r.status_code == 204, r.text
+    assert (await client.get(f"/api/v1/design-works/{dw_id}")).status_code == 404
+    assert await app.state.registry.stat(
+        workspace_slug=ws["slug"], relative_path=input_rel,
+    ) is None
+    assert await app.state.registry.stat(
+        workspace_slug=ws["slug"], relative_path=prompt_rel,
+    ) is None
+    assert await app.state.registry.stat(
+        workspace_slug=ws["slug"], relative_path=output_rel,
+    ) is None
+    assert await app.state.db.fetchone(
+        "SELECT id FROM reviews WHERE id='rev-delete-design'",
+    ) is None
+    assert await app.state.db.fetchone(
+        "SELECT id FROM workspace_events WHERE event_id='evt-delete-design'",
+    ) is None
 
 
 async def test_create_invalid_slug_returns_422(client):

@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +50,8 @@ _TERMINAL = {
 }
 _HARD_MAX_ROUNDS = 50
 _STEP_FAILURE_RESUME_KEY = "resume_after_step_failure"
+_CANCELLED_FROM_STEP_KEY = "cancelled_from_step"
+_CANCELLED_AT_KEY = "cancelled_at"
 
 # Hard upper bound on ticks driven by ``run_to_completion``. Serves as a
 # circuit-breaker: if a retry path ever fails to transition the current_step
@@ -650,12 +653,24 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         )
 
     async def cancel(self, dev_id: str) -> None:
+        dw = await self._get(dev_id)
+        if dw is None:
+            raise NotFoundError(f"dev_work {dev_id!r} not found")
+        step = DevWorkStep(dw["current_step"])
+        if step in _TERMINAL:
+            raise NotFoundError(
+                f"dev_work {dev_id!r} not found or already terminal"
+            )
         now = self._now()
+        gates = _decode_gates(dw.get("gates_json"))
+        gates[_CANCELLED_FROM_STEP_KEY] = step.value
+        gates[_CANCELLED_AT_KEY] = now
         rowcount = await self.db.execute_rowcount(
-            "UPDATE dev_works SET current_step=?, updated_at=? "
+            "UPDATE dev_works SET current_step=?, gates_json=?, updated_at=? "
             "WHERE id=? AND current_step NOT IN (?, ?, ?)",
             (
                 DevWorkStep.CANCELLED.value,
+                json.dumps(gates, ensure_ascii=False),
                 now,
                 dev_id,
                 DevWorkStep.COMPLETED.value,
@@ -685,7 +700,6 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 # released its session references.
                 pass
         await self._delete_all_sessions(dev_id)
-        dw = await self._get(dev_id)
         await emit_and_deliver(
             self.db,
             self.webhooks,
@@ -693,6 +707,180 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             workspace_id=dw["workspace_id"],
             correlation_id=dev_id,
         )
+
+    async def rerun_cancelled(self, dev_id: str) -> dict[str, Any]:
+        dw = await self._get(dev_id)
+        if dw is None:
+            raise NotFoundError(f"dev_work {dev_id!r} not found")
+        if self.is_running(dev_id):
+            raise ConflictError(
+                f"dev_work {dev_id!r} is already being advanced",
+                current_stage=dw["current_step"],
+            )
+        if dw["current_step"] != DevWorkStep.CANCELLED.value:
+            raise ConflictError(
+                f"dev_work {dev_id!r} is not cancelled",
+                current_stage=dw["current_step"],
+            )
+        gates = _decode_gates(dw.get("gates_json"))
+        try:
+            resume_step = DevWorkStep(gates[_CANCELLED_FROM_STEP_KEY])
+        except (KeyError, ValueError) as exc:
+            raise BadRequestError(
+                "cancelled DevWork has no resumable prior step"
+            ) from exc
+        if resume_step in _TERMINAL:
+            raise BadRequestError("cancelled DevWork prior step is terminal")
+
+        history = gates.get("rerun_history")
+        if not isinstance(history, list):
+            history = []
+        clean_history = [item for item in history if isinstance(item, dict)]
+        clean_history.append({
+            "at": self._now(),
+            "from_step": resume_step.value,
+        })
+        gates["rerun_history"] = clean_history[-20:]
+        gates.pop(_CANCELLED_FROM_STEP_KEY, None)
+        gates.pop(_CANCELLED_AT_KEY, None)
+
+        now = self._now()
+        rowcount = await self.db.execute_rowcount(
+            "UPDATE dev_works SET current_step=?, current_progress_json=NULL, "
+            "gates_json=?, updated_at=? WHERE id=? AND current_step=?",
+            (
+                resume_step.value,
+                json.dumps(gates, ensure_ascii=False),
+                now,
+                dev_id,
+                DevWorkStep.CANCELLED.value,
+            ),
+        )
+        if rowcount == 0:
+            raise ConflictError(
+                f"dev_work {dev_id!r} changed while rerunning",
+                current_stage=dw["current_step"],
+            )
+        await emit_and_deliver(
+            self.db,
+            self.webhooks,
+            event_name="dev_work.continued",
+            workspace_id=dw["workspace_id"],
+            correlation_id=dev_id,
+            payload={"mode": "cancelled_rerun", "back_to": resume_step.value},
+        )
+        try:
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
+        except Exception:
+            logger.exception(
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
+            )
+        refreshed = await self._get(dev_id)
+        assert refreshed is not None
+        return refreshed
+
+    async def delete_terminal(self, dev_id: str) -> None:
+        dw = await self._get(dev_id)
+        if dw is None:
+            raise NotFoundError(f"dev_work {dev_id!r} not found")
+        if self.is_running(dev_id):
+            raise ConflictError(
+                f"dev_work {dev_id!r} is still running",
+                current_stage=dw["current_step"],
+            )
+        step = DevWorkStep(dw["current_step"])
+        if step not in {DevWorkStep.CANCELLED, DevWorkStep.ESCALATED}:
+            raise ConflictError(
+                "only CANCELLED or ESCALATED DevWork can be deleted",
+                current_stage=step.value,
+            )
+        await self._delete_all_sessions(dev_id)
+        ws = await self.workspaces.get(dw["workspace_id"])
+        if ws is None:
+            raise NotFoundError(f"workspace {dw['workspace_id']!r} not found")
+
+        prefix = f"devworks/{dev_id}/"
+        file_rows = await self.registry.repo.list_for_workspace(ws["id"])
+        for row in file_rows:
+            rel = row["relative_path"]
+            if rel.startswith(prefix):
+                await self.registry.delete(workspace_row=ws, relative_path=rel)
+
+        self._safe_rmtree_under(
+            self.workspaces_root / ws["slug"],
+            self.workspaces_root / ws["slug"] / "devworks" / dev_id,
+        )
+        repo_rows = await self.db.fetchall(
+            "SELECT worktree_path FROM dev_work_repos WHERE dev_work_id=?",
+            (dev_id,),
+        )
+        worktrees_root = self.workspaces_root / ".coop" / "worktrees"
+        for repo_row in repo_rows:
+            worktree_path = repo_row.get("worktree_path")
+            if isinstance(worktree_path, str) and worktree_path:
+                self._safe_rmtree_under(worktrees_root, Path(worktree_path))
+
+        note_ids = [
+            row["id"]
+            for row in await self.db.fetchall(
+                "SELECT id FROM dev_iteration_notes WHERE dev_work_id=?",
+                (dev_id,),
+            )
+        ]
+        async with self.db.transaction():
+            if note_ids:
+                placeholders = ",".join("?" for _ in note_ids)
+                await self.db.execute(
+                    "DELETE FROM reviews WHERE dev_work_id=? "
+                    f"OR dev_iteration_note_id IN ({placeholders})",
+                    (dev_id, *note_ids),
+                )
+            else:
+                await self.db.execute(
+                    "DELETE FROM reviews WHERE dev_work_id=?", (dev_id,),
+                )
+            await self.db.execute(
+                "DELETE FROM dev_iteration_notes WHERE dev_work_id=?",
+                (dev_id,),
+            )
+            await self.db.execute(
+                "DELETE FROM dev_work_repos WHERE dev_work_id=?", (dev_id,),
+            )
+            await self.db.execute(
+                "DELETE FROM agent_dispatches "
+                "WHERE correlation_kind='dev_work' AND correlation_id=?",
+                (dev_id,),
+            )
+            await self.db.execute(
+                "DELETE FROM workspace_events WHERE correlation_id=?", (dev_id,),
+            )
+            await self.db.execute("DELETE FROM dev_works WHERE id=?", (dev_id,))
+        try:
+            await self.workspaces.regenerate_workspace_md(dw["workspace_id"])
+        except Exception:
+            logger.exception(
+                "regenerate_workspace_md failed for %s", dw["workspace_id"]
+            )
+
+    @staticmethod
+    def _safe_rmtree_under(root: Path, target: Path) -> None:
+        root_resolved = root.resolve()
+        target_resolved = target.resolve()
+        try:
+            target_resolved.relative_to(root_resolved)
+        except ValueError:
+            logger.warning(
+                "refusing to delete path outside root: root=%s target=%s",
+                root_resolved,
+                target_resolved,
+            )
+            return
+        if not target_resolved.exists():
+            return
+        if target_resolved.is_dir():
+            shutil.rmtree(target_resolved)
+            return
+        target_resolved.unlink()
 
     async def continue_after_escalation(
         self,
