@@ -187,15 +187,54 @@ describe("DevWorkPage", () => {
         "",
         "## 开发计划",
         "",
-        "- [x] DW-01: 登录表单",
-        "- [ ] DW-02: 错误提示",
-        "  - [ ] DW-02.1: 空邮箱提示",
-        "- [ ] ~~DW-03: 已取消入口~~",
+        "- [x] DW-01: [P0] 登录表单",
+        "- [ ] DW-02: [P1] 错误提示",
+        "  - [ ] DW-02.1: [P2] 空邮箱提示",
+        "- [ ] ~~DW-03: [P2] 已取消入口~~",
         "",
         "## 用例清单",
       ].join("\n"),
     );
-    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listReviews).mockResolvedValue([
+      {
+        id: "review-1",
+        dev_work_id: "dv-1",
+        design_work_id: null,
+        dev_iteration_note_id: "note-1",
+        round: 1,
+        score: 72,
+        score_breakdown: null,
+        issues: [],
+        findings: [
+          {
+            id: "DW-01",
+            status: "done",
+            implemented: true,
+            verified: false,
+            required_for_exit: true,
+            missing_evidence: ["缺少失败态断言"],
+          },
+          {
+            id: "DW-02",
+            status: "partial",
+            implemented: false,
+            verified: false,
+            required_for_exit: true,
+          },
+          {
+            id: "DW-02.1",
+            status: "deferred",
+            implemented: false,
+            verified: false,
+            required_for_exit: false,
+          },
+        ],
+        next_round_hints: [],
+        problem_category: "impl_gap",
+        reviewer: "claude",
+        created_at: "2026-04-23T00:00:02Z",
+      },
+    ]);
     vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
 
     renderPage();
@@ -204,7 +243,11 @@ describe("DevWorkPage", () => {
 
     const panel = await screen.findByRole("region", { name: "开发计划结构化视图" });
     expect(within(panel).getByText("1/3 完成")).toBeInTheDocument();
+    expect(within(panel).getByText("P0 准出必需")).toBeInTheDocument();
+    expect(within(panel).getByText("1 个准出阻断")).toBeInTheDocument();
+    expect(within(panel).getByText("已交付 / 证据不足")).toBeInTheDocument();
     expect(within(panel).getByText("DW-02.1")).toBeInTheDocument();
+    expect(within(panel).getByText("已延期，不阻断")).toBeInTheDocument();
     expect(within(panel).getByText("空邮箱提示")).toBeInTheDocument();
     expect(within(panel).getByText("已取消入口")).toHaveClass("line-through");
   });

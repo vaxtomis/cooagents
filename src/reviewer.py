@@ -33,11 +33,13 @@ _FENCE_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 _NEXT_ROUND_HINT_KINDS = ("missing_feature", "optimization")
 _PLAN_VERIFICATION_STATUSES = (
     "done",
+    "partial",
     "deferred",
     "blocked",
     "failed",
     "unverified",
 )
+_PLAN_IMPORTANCE_VALUES = ("P0", "P1", "P2")
 
 
 def _expected_final_score(plan_score_a: int, actual_score_b: int) -> int:
@@ -198,6 +200,27 @@ def _coerce(payload: dict) -> ReviewOutcome:
             if not isinstance(item.get("verified"), bool):
                 raise BadRequestError(
                     "review output 'plan_verification[].verified' must be a bool"
+                )
+            if (
+                "implemented" in item
+                and not isinstance(item.get("implemented"), bool)
+            ):
+                raise BadRequestError(
+                    "review output 'plan_verification[].implemented' must be a bool"
+                )
+            importance = item.get("importance")
+            if importance not in (None, "") and importance not in _PLAN_IMPORTANCE_VALUES:
+                raise BadRequestError(
+                    "review output 'plan_verification[].importance' must be "
+                    f"one of {list(_PLAN_IMPORTANCE_VALUES)} or omitted; "
+                    f"got {importance!r}"
+                )
+            if (
+                "required_for_exit" in item
+                and not isinstance(item.get("required_for_exit"), bool)
+            ):
+                raise BadRequestError(
+                    "review output 'plan_verification[].required_for_exit' must be a bool"
                 )
             plan_verification.append(item)
     else:

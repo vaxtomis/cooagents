@@ -231,6 +231,13 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const selectedNote =
     notesDesc.find((note) => note.id === selectedNoteId) ?? notesDesc[0] ?? null;
   const effectiveNoteId = selectedNote?.id ?? null;
+  const selectedPlanVerification = useMemo(() => {
+    if (!selectedNote) return null;
+    const review =
+      reviewsDesc.find((item) => item.dev_iteration_note_id === selectedNote.id) ??
+      reviewsDesc.find((item) => item.round === selectedNote.round);
+    return review?.findings ?? null;
+  }, [reviewsDesc, selectedNote]);
 
   const noteContentQuery = useSWR(
     effectiveNoteId ? ["iteration-note-content", effectiveNoteId] : null,
@@ -781,7 +788,10 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
                 </p>
               ) : (
                 <div className="space-y-4">
-                  <PlanChecklistPanel content={noteContent.content} />
+                  <PlanChecklistPanel
+                    content={noteContent.content}
+                    planVerification={selectedPlanVerification}
+                  />
                   <MarkdownPanel content={noteContent.content} reader />
                 </div>
               )}

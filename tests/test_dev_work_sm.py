@@ -423,7 +423,7 @@ def _step5_writer(payload: dict):
     return _w
 
 
-def test_plan_verification_checkbox_patch_only_checks_verified_done_items():
+def test_plan_verification_checkbox_patch_checks_delivered_done_items():
     body = (
         "# 迭代设计 — Round 1\n\n"
         "## 本轮目标\n\n做登录。\n\n"
@@ -438,9 +438,19 @@ def test_plan_verification_checkbox_patch_only_checks_verified_done_items():
 
     updated = _apply_plan_verification_checkboxes(body, [
         {"id": "DW-01", "status": "done", "verified": True},
-        {"id": "DW-02.1", "status": "done", "verified": True},
+        {
+            "id": "DW-02.1",
+            "status": "done",
+            "implemented": True,
+            "verified": False,
+        },
         {"id": "DW-02", "status": "deferred", "verified": True},
-        {"id": "DW-03", "status": "done", "verified": False},
+        {
+            "id": "DW-03",
+            "status": "done",
+            "implemented": False,
+            "verified": True,
+        },
     ])
 
     assert "- [x] DW-01: 加表单" in updated
@@ -1577,9 +1587,19 @@ async def test_step5_plan_verification_checks_iteration_plan_items(env):
         },
         "plan_verification": [
             {"id": "DW-01", "status": "done", "verified": True},
-            {"id": "DW-02.1", "status": "done", "verified": True},
+            {
+                "id": "DW-02.1",
+                "status": "done",
+                "implemented": True,
+                "verified": False,
+            },
             {"id": "DW-02", "status": "deferred", "verified": True},
-            {"id": "DW-03", "status": "done", "verified": False},
+            {
+                "id": "DW-03",
+                "status": "done",
+                "implemented": False,
+                "verified": True,
+            },
         ],
         "problem_category": None,
     }

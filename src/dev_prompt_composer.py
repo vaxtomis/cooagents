@@ -158,10 +158,15 @@ _PLAN_VERIFICATION_GUIDE = (
     "\n"
     "对照迭代设计 `## 开发计划`、Step4 `plan_execution`、git diff 与"
     "测试结果，输出顶层数组 `plan_verification`。每项必须带 "
-    "`id/status/verified`；`status` 仅可取 `done/deferred/blocked/"
-    "failed/unverified`。只有证据充分时才写 `status=done, verified=true`。"
-    "不要修改迭代设计文件；状态机会根据审核通过的 `done` 项只回写 "
-    "checkbox。"
+    "`id/status/implemented/verified`；`status` 仅可取 `done/partial/"
+    "deferred/blocked/failed/unverified`，并尽量带 `importance`（P0/P1/P2）"
+    "与 `required_for_exit`。`implemented` 表示 Step4 是否已交付该计划项；"
+    "`verified` 只表示 Step5 是否有充分 diff/测试/运行证据。"
+    "已交付但证据不足时写 `status=done, implemented=true, verified=false`，"
+    "并在 `missing_evidence` 说明缺口；不要因缺少专项测试把已交付项降成 "
+    "`unverified`。不要修改迭代设计文件；状态机会根据 `status=done` 且 "
+    "`implemented` 未显式为 false 的项回写 checkbox；`verified` 影响评分和"
+    "后续补证，不直接阻止 checkbox。"
 )
 
 # Forward-looking hints written to next_round_hints[] for Round N+1's
@@ -425,16 +430,24 @@ $previous_score_note
 规则：
 1. 按设计文档 rubric 权重给 `a`；总权重非 100 时先归一化到 0-100。
 2. 先给 `a`：核验迭代设计是否覆盖用户故事、场景、流程、验收标准和用户诉求。
-3. 再给 `b`：只有 `plan_verification.status="done"`、`verified=true` 且有
-   diff/测试证据的开发计划项才算完成；不能只信 Step4 自述。
-4. 存在重大不满足点时必须扣分并写入 `issues`：计划未覆盖关键需求为
+3. 再给 `b`：`plan_verification.status="done"` 且 `implemented` 未显式为 false
+   的开发计划项可计入交付完成；`verified=false` 代表证据不足，应降低置信度、
+   在 `missing_evidence` / `issues` / `next_round_hints` 中说明，但不等同于未交付。
+   不能只信 Step4 自述，必须至少有 diff、文件引用或测试/运行证据之一支撑 `done`。
+4. 逐项评估 `importance` 与 `required_for_exit`：P0 或 `required_for_exit=true`
+   的计划项必须完成才能准出；任何这类项未 `done+implemented` 时，
+   `problem_category` 必须为 `req_gap` 或 `impl_gap`，且总分不得高于 79
+   （安全/数据/授权高风险不得高于 60）。P2 且 `required_for_exit=false`
+   的计划项可 `deferred` 到后续实现，不阻断准出，但应降低 `actual_score_b`
+   或写入 `next_round_hints`。
+5. 存在重大不满足点时必须扣分并写入 `issues`：计划未覆盖关键需求为
    `req_gap`；计划覆盖但实现/测试/diff 未完成为 `impl_gap`。
-5. 关键需求或必需计划项未满足、lint/typecheck/unit 失败、自审与 diff 不一致：
+6. 关键需求或必需计划项未满足、lint/typecheck/unit 失败、自审与 diff 不一致：
    总分不得高于 79；仅非关键优化未完成不得高于 89；安全/数据/授权高风险不得高于 60。
-6. 无重大缺口且证据充分才允许 `problem_category=null`；最终 `score >= $rubric_threshold`
+7. 无重大缺口且证据充分才允许 `problem_category=null`；最终 `score >= $rubric_threshold`
    但 category 非 null 是不一致输出。
-7. 通常每轮 `b` 应增长；若未增长，必须在 `issues` 或 `next_round_hints` 说明原因。
-8. 当 `a >= 90` 时，不得继续建议新增主 PLAN；如需要细化，只能建议在已有主 PLAN
+8. 通常每轮 `b` 应增长；若未增长，必须在 `issues` 或 `next_round_hints` 说明原因。
+9. 当 `a >= 90` 时，不得继续建议新增主 PLAN；如需要细化，只能建议在已有主 PLAN
    下追加缩进子 PLAN，例如 `DW-02.1`。
 
 同时输出 `score_breakdown`：

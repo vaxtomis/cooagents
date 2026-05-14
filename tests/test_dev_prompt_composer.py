@@ -90,6 +90,9 @@ def test_step2_round1_prefers_coarse_main_plan_framework():
     assert "只写顶层 DW-xx" in out
     assert "覆盖需求/流程/验收面" in out
     assert "默认不展开大量子 PLAN" in out
+    assert "[P0|P1|P2]" in out
+    assert "P0=准出必需" in out
+    assert "P2=可延期" in out
 
 
 def test_step2_round_n_requires_cumulative_plan_append_or_refine():
@@ -462,6 +465,9 @@ def test_step5_prompt_carries_score_formula():
     assert "`a / 100`" in out
     assert "`b / 100`" in out
     assert "score = round(plan_score_a * actual_score_b / 100)" in out
+    assert "required_for_exit=true" in out
+    assert "P2" in out
+    assert "不阻断准出" in out
     assert "存在重大不满足点时必须扣分" in out
     assert "problem_category=null" in out
     assert "score >= 85" in out
@@ -488,8 +494,12 @@ def test_step5_prompt_carries_plan_verification_guide():
     assert out.index("## 计划执行核验") > out.index("## 越界检查")
     assert out.index("## 计划执行核验") < out.index("## 下一轮提示")
     assert "\"plan_verification\":" in out
+    assert "\"implemented\": true" in out
     assert "\"verified\": true" in out
-    assert "状态机会根据审核通过的 `done` 项只回写 checkbox" in out
+    assert "\"importance\": \"P0\"" in out
+    assert "\"required_for_exit\": true" in out
+    assert "implemented` 未显式为 false 的项回写 checkbox" in out
+    assert "`verified` 影响评分和后续补证" in out
 
 
 def test_step5_prompt_carries_next_round_hints_guide():
@@ -547,7 +557,7 @@ def test_step5_rendered_size_budget():
     out = compose_step5(_step5_minimal())
     # Budget covers wall + boundary check + next-round-hints guide +
     # aggregation/scoring rules + tail JSON schema + field rules.
-    assert len(out.encode("utf-8")) <= 10000
+    assert len(out.encode("utf-8")) <= 12 * 1024
 
 
 def test_step3_dropped_reference_paths_heading():

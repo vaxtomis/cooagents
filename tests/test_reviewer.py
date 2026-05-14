@@ -191,14 +191,42 @@ def test_parse_review_extracts_plan_verification():
         "score": 90,
         "issues": [],
         "plan_verification": [
-            {"id": "DW-01", "status": "done", "verified": True},
-            {"id": "DW-02", "status": "deferred", "verified": True},
+            {
+                "id": "DW-01",
+                "status": "done",
+                "importance": "P0",
+                "required_for_exit": True,
+                "implemented": True,
+                "verified": False,
+                "missing_evidence": ["unit test not found"],
+            },
+            {
+                "id": "DW-02",
+                "status": "partial",
+                "importance": "P2",
+                "required_for_exit": False,
+                "verified": True,
+            },
         ],
         "problem_category": None,
     }))
     assert out.plan_verification == [
-        {"id": "DW-01", "status": "done", "verified": True},
-        {"id": "DW-02", "status": "deferred", "verified": True},
+        {
+            "id": "DW-01",
+            "status": "done",
+            "importance": "P0",
+            "required_for_exit": True,
+            "implemented": True,
+            "verified": False,
+            "missing_evidence": ["unit test not found"],
+        },
+        {
+            "id": "DW-02",
+            "status": "partial",
+            "importance": "P2",
+            "required_for_exit": False,
+            "verified": True,
+        },
     ]
 
 
@@ -280,6 +308,57 @@ def test_parse_review_rejects_non_bool_plan_verification_verified():
             "issues": [],
             "plan_verification": [
                 {"id": "DW-01", "status": "done", "verified": "true"},
+            ],
+            "problem_category": None,
+        }))
+
+
+def test_parse_review_rejects_non_bool_plan_verification_implemented():
+    with pytest.raises(BadRequestError, match="plan_verification"):
+        parse_review_output(json.dumps({
+            "score": 90,
+            "issues": [],
+            "plan_verification": [
+                {
+                    "id": "DW-01",
+                    "status": "done",
+                    "implemented": "true",
+                    "verified": True,
+                },
+            ],
+            "problem_category": None,
+        }))
+
+
+def test_parse_review_rejects_invalid_plan_verification_importance():
+    with pytest.raises(BadRequestError, match="plan_verification"):
+        parse_review_output(json.dumps({
+            "score": 90,
+            "issues": [],
+            "plan_verification": [
+                {
+                    "id": "DW-01",
+                    "status": "done",
+                    "importance": "P3",
+                    "verified": True,
+                },
+            ],
+            "problem_category": None,
+        }))
+
+
+def test_parse_review_rejects_non_bool_plan_verification_required_for_exit():
+    with pytest.raises(BadRequestError, match="plan_verification"):
+        parse_review_output(json.dumps({
+            "score": 90,
+            "issues": [],
+            "plan_verification": [
+                {
+                    "id": "DW-01",
+                    "status": "done",
+                    "required_for_exit": "true",
+                    "verified": True,
+                },
             ],
             "problem_category": None,
         }))

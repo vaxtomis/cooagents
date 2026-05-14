@@ -286,14 +286,14 @@ def _is_step4_findings_shape(value: Any) -> bool:
 def _apply_plan_verification_checkboxes(
     markdown: str, plan_verification: list[dict],
 ) -> str:
-    """Check off only Step5-verified done items in ``## 开发计划``."""
+    """Check off Step5-confirmed delivered items in ``## 开发计划``."""
     done_ids = {
         item.get("id")
         for item in plan_verification
         if (
             isinstance(item, dict)
             and item.get("status") == "done"
-            and item.get("verified") is True
+            and item.get("implemented") is not False
             and isinstance(item.get("id"), str)
         )
     }
