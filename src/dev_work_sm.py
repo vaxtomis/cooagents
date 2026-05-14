@@ -516,6 +516,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 "repo_refs must contain at least one entry"
             )
 
+        prompt = prompt.strip() if isinstance(prompt, str) else ""
         dev_id = self._new_id()
         now = self._now()
         resolved_agent = await self._resolve_agent(agent)
@@ -1908,8 +1909,16 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             if plan_score_a is not None and plan_score_a >= 90:
                 lines.append(
                     "PLAN 扩展限制：上一轮 plan_score_a >= 90，"
-                    "本轮不得新增主 PLAN，只能在已有 PLAN 下追加缩进子 PLAN "
-                    "或补充验证细节。"
+                    "说明迭代设计已高度贴合设计文档；本轮必须谨慎新增和"
+                    "细化计划，不得新增主 PLAN，只能追加缩进子 PLAN（需"
+                    "确有必要）或补充验证细节。"
+                )
+            elif plan_score_a is not None and plan_score_a <= 70:
+                lines.append(
+                    "PLAN 补齐建议：上一轮 plan_score_a <= 70，"
+                    "说明迭代设计仍不太贴合设计文档；本轮鼓励新增和细化计划，"
+                    "主动补齐遗漏主 PLAN，并细化 P0/P1 主流程、验收、边界、"
+                    "测试。"
                 )
         # Forward-looking hints get their own H2 so Step2 can scan for them
         # explicitly and treat them as "next round must address X" inputs.

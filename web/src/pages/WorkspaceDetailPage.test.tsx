@@ -196,6 +196,13 @@ function renderPage() {
   );
 }
 
+function fillDevWorkExecutionPrompt(value = "ship feature x") {
+  fireEvent.click(screen.getByLabelText("使用执行提示"));
+  fireEvent.change(screen.getByLabelText("DevWork 执行提示"), {
+    target: { value },
+  });
+}
+
 describe("WorkspaceDetailPage", () => {
   it("renders workspace header and switchable tabs", async () => {
     vi.mocked(getWorkspace).mockResolvedValue(workspace);
@@ -311,8 +318,7 @@ describe("WorkspaceDetailPage", () => {
     const branchSelect = (await screen.findAllByRole("combobox"))[2];
     fireEvent.change(branchSelect, { target: { value: "main" } });
 
-    const promptArea = screen.getByLabelText("DevWork 执行提示");
-    fireEvent.change(promptArea, { target: { value: "ship feature x" } });
+    fillDevWorkExecutionPrompt();
 
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
@@ -357,7 +363,6 @@ describe("WorkspaceDetailPage", () => {
     await waitFor(() => expect(repoBranches).toHaveBeenCalled());
     fireEvent.change((await screen.findAllByRole("combobox"))[2], { target: { value: "main" } });
 
-    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
     fireEvent.click(screen.getByLabelText("推荐技术栈"));
     fireEvent.change(screen.getByLabelText("人工推荐技术栈"), {
       target: { value: " React 18 + FastAPI " },
@@ -391,7 +396,6 @@ describe("WorkspaceDetailPage", () => {
     await waitFor(() => expect(repoBranches).toHaveBeenCalled());
     fireEvent.change((await screen.findAllByRole("combobox"))[2], { target: { value: "main" } });
 
-    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
     fireEvent.click(screen.getByLabelText("推荐技术栈"));
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
@@ -424,13 +428,13 @@ describe("WorkspaceDetailPage", () => {
     const branchSelect = (await screen.findAllByRole("combobox"))[2];
     fireEvent.change(branchSelect, { target: { value: "main" } });
 
-    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
     fireEvent.change(screen.getByLabelText("执行 Agent"), { target: { value: "codex" } });
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
     await waitFor(() => {
       const args = vi.mocked(createDevWork).mock.calls[0][0];
       expect(args.agent).toBe("codex");
+      expect(args.prompt).toBeUndefined();
     });
   });
 
@@ -455,7 +459,6 @@ describe("WorkspaceDetailPage", () => {
     await waitFor(() => expect(repoBranches).toHaveBeenCalled());
     fireEvent.change((await screen.findAllByRole("combobox"))[2], { target: { value: "main" } });
 
-    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
     fireEvent.change(screen.getByLabelText("DevWork max rounds"), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText("DevWork rubric threshold"), { target: { value: "90" } });
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
@@ -487,7 +490,7 @@ describe("WorkspaceDetailPage", () => {
     await waitFor(() => expect(repoBranches).toHaveBeenCalled());
     fireEvent.change((await screen.findAllByRole("combobox"))[2], { target: { value: "main" } });
 
-    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
+    fillDevWorkExecutionPrompt();
     const thresholdInput = screen.getByLabelText("DevWork rubric threshold");
     expect(thresholdInput).toHaveAttribute("min", "70");
     expect(thresholdInput).toHaveAttribute("max", "90");
@@ -529,7 +532,6 @@ describe("WorkspaceDetailPage", () => {
     fireEvent.change(selects[2], { target: { value: "main" } });
     fireEvent.change(selects[4], { target: { value: "main" } });
 
-    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
     expect(await screen.findByText(/mount_name "frontend" 重复/)).toBeInTheDocument();
@@ -746,7 +748,6 @@ describe("WorkspaceDetailPage", () => {
     fireEvent.change(selects[1], { target: { value: "repo-aaa111" } });
     await waitFor(() => expect(repoBranches).toHaveBeenCalled());
     fireEvent.change((await screen.findAllByRole("combobox"))[2], { target: { value: "main" } });
-    fireEvent.change(screen.getByLabelText("DevWork 执行提示"), { target: { value: "ship feature x" } });
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
     await waitFor(() => {

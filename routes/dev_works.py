@@ -247,7 +247,7 @@ async def create_dev_work(
             workspace_id=req.workspace_id,
             design_doc_id=req.design_doc_id,
             repo_refs=validated,
-            prompt=req.prompt,
+            prompt=req.prompt or "",
             agent=req.agent.value if req.agent is not None else None,
             rubric_threshold=req.rubric_threshold,
             max_rounds=req.max_rounds,

@@ -843,6 +843,12 @@ async def test_step5_non_null_category_cannot_complete_even_with_high_score(env)
 
 
 async def test_step5_round2_prompt_includes_previous_actual_b(env):
+    def _round2_step4_writer(step_tag, round_n, prompt, worktree):
+        assert round_n == 2
+        assert "上一轮 `actual_score_b`=50" in prompt
+        assert "优先实现未实现的开发计划" in prompt
+        return step4_write_findings(step_tag, round_n, prompt, worktree)
+
     def _round2_writer(step_tag, round_n, prompt, worktree):
         assert round_n == 2
         assert "DevWork Step5" in prompt
@@ -871,7 +877,7 @@ async def test_step5_round2_prompt_includes_previous_actual_b(env):
         }),
         step2_append_h2,
         step3_write_ctx,
-        step4_write_findings,
+        _round2_step4_writer,
         _round2_writer,
     ]
     sm = _make_sm(env, ScriptedExecutor(script))
@@ -1066,9 +1072,47 @@ async def test_step2_feedback_includes_next_round_hints(env):
     assert "(backend)" in body
     assert "PLAN 扩展限制" in body
     assert "plan_score_a >= 90" in body
+    assert "谨慎新增和细化计划" in body
     # Render guard: hint without kind/mount has no double-space artefact.
     assert "- bare hint, no kind no mount" in body
     assert "-  " not in body  # no "- <space><space>" anywhere
+
+
+async def test_step2_feedback_low_plan_score_encourages_plan_expansion(env):
+    script = [
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({
+            "score": 35,
+            "score_breakdown": {
+                "plan_score_a": 65,
+                "actual_score_b": 54,
+                "final_score": 35,
+            },
+            "issues": [{"message": "core acceptance is not planned"}],
+            "problem_category": "req_gap",
+        }),
+        step2_append_h2, step3_write_ctx, step4_write_findings,
+        _step5_writer({"score": 95, "issues": [], "problem_category": None}),
+    ]
+    sm = _make_sm(env, ScriptedExecutor(script))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+    assert final["current_step"] == "COMPLETED"
+
+    body = await env["registry"].read_text(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"devworks/{dw['id']}/feedback/feedback-for-round2.md",
+    )
+    assert "PLAN 补齐建议" in body
+    assert "plan_score_a <= 70" in body
+    assert "鼓励新增和细化计划" in body
+    assert "主动补齐遗漏主 PLAN" in body
 
 
 async def test_step2_prompt_artifact_under_4kib(env):

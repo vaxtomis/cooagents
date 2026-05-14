@@ -641,7 +641,12 @@ describe("DevWorkPage", () => {
           {
             id: "DW-01",
             status: "done",
+            implemented: true,
             verified: true,
+            importance: "P0",
+            required_for_exit: true,
+            confidence: "high",
+            evidence: ["src/Login.tsx:42"],
           },
           {
             title: "Validation guard is present",
@@ -679,11 +684,22 @@ describe("DevWorkPage", () => {
     const findingsTable = screen.getByRole("table", { name: "发现项" });
     expect(within(findingsTable).getByText("DW-01")).toBeInTheDocument();
     expect(within(findingsTable).getByText("done")).toBeInTheDocument();
-    expect(within(findingsTable).getByText("true")).toBeInTheDocument();
+    expect(within(findingsTable).getAllByText("true").length).toBeGreaterThanOrEqual(3);
+    expect(within(findingsTable).getByText("实现")).toBeInTheDocument();
+    expect(within(findingsTable).getByText("优先级")).toBeInTheDocument();
+    expect(within(findingsTable).getByText("准出")).toBeInTheDocument();
+    expect(within(findingsTable).getByText("证据 / 缺口")).toBeInTheDocument();
+    expect(within(findingsTable).queryByText("标签")).not.toBeInTheDocument();
+    expect(within(findingsTable).queryByText("位置")).not.toBeInTheDocument();
+    expect(within(findingsTable).queryByText("补充")).not.toBeInTheDocument();
+    expect(within(findingsTable).getByText("P0")).toBeInTheDocument();
+    expect(within(findingsTable).getByText("src/Login.tsx:42")).toBeInTheDocument();
+    expect(within(findingsTable).getByText("confidence")).toBeInTheDocument();
+    expect(within(findingsTable).getByText("high")).toBeInTheDocument();
     expect(screen.getByText("Validation guard is present")).toBeInTheDocument();
     expect(within(findingsTable).getByText("schema guard exists")).toBeInTheDocument();
     expect(screen.getByText("Add logout route")).toBeInTheDocument();
-    expect(screen.getByText("src/Login.tsx:42")).toBeInTheDocument();
+    expect(screen.getAllByText("src/Login.tsx:42").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("routes/auth.py")).toBeInTheDocument();
     expect(screen.getByText("submit request")).toBeInTheDocument();
     expect(screen.queryByText(/"message"/)).not.toBeInTheDocument();

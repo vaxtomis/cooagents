@@ -106,10 +106,17 @@ def test_step2_round_n_requires_cumulative_plan_append_or_refine():
     ))
     assert "必须 Read 此文件并继承其中 `## 开发计划`" in out
     assert "必须保留所有历史 PLAN" in out
+    assert "必要、未重复、有交付价值" in out
+    assert "不要新增主 PLAN，优先沿用原 ID" in out
+    assert "不得用不同措辞重复同一验收点" in out
     assert "追加遗漏主 PLAN" in out
     assert "细粒度子 PLAN" in out
     assert "plan_score_a >= 90" in out
+    assert "谨慎新增和细化计划" in out
     assert "不得新增主 PLAN" in out
+    assert "plan_score_a <= 70" in out
+    assert "鼓励新增和细化计划" in out
+    assert "主动补齐遗漏主 PLAN" in out
     assert "追加缩进子 PLAN" in out
     assert "DW-02.1" in out
     assert "- [ ] ~~DW-02:" in out
@@ -162,7 +169,7 @@ def test_step2_prompt_does_not_embed_design_body():
             "iteration-round-3.md"
         ),
     ))
-    assert len(out.encode("utf-8")) <= 3 * 1024
+    assert len(out.encode("utf-8")) <= 4 * 1024
     # The composer must reference the design doc by path, never by body.
     assert design_path in out
     # Markers that would only appear if the design body got inlined.
@@ -180,6 +187,18 @@ def test_step2_preserves_literal_dollar_signs():
         output_path="/tmp/x.md",
     ))
     assert "$5" in out
+
+
+def test_step2_omits_user_prompt_item_when_execution_prompt_omitted():
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-1", round=1,
+        design_doc_path="/d.md",
+        user_prompt="   ",
+        previous_review_path=None,
+        output_path="/tmp/x.md",
+    ))
+    assert "**用户 prompt**" not in out
+    assert "未提供执行提示" not in out
 
 
 def _two_mount_entries() -> tuple[MountTableEntry, ...]:
@@ -234,6 +253,34 @@ def test_step4_prompt_includes_findings_path():
     assert "不要 `git commit` / `git push`" in out
     assert "退出前检查" in out
     assert "不要只把 JSON 打印到 stdout" in out
+    assert "建议开展项目既有的 lint / typecheck / 单元测试" in out
+    assert "未运行建议测试时" in out
+
+
+def test_step4_prompt_includes_high_b_execution_strategy():
+    out = compose_step4(Step4Inputs(
+        worktree_path="/wt", iteration_note_path="/n.md",
+        context_path="/c.md", findings_output_path="/f.json",
+        mount_table_entries=(),
+        previous_actual_score_b=80,
+    ))
+    assert "上一轮 `actual_score_b`=80" in out
+    assert "优先优化高优先级计划" in out
+    assert "required_for_exit=true" in out
+    assert "actual_score_b >= 80" in out
+
+
+def test_step4_prompt_includes_low_b_execution_strategy():
+    out = compose_step4(Step4Inputs(
+        worktree_path="/wt", iteration_note_path="/n.md",
+        context_path="/c.md", findings_output_path="/f.json",
+        mount_table_entries=(),
+        previous_actual_score_b=79,
+    ))
+    assert "上一轮 `actual_score_b`=79" in out
+    assert "优先实现未实现的开发计划" in out
+    assert "P0/P1 主流程和阻断缺口" in out
+    assert "actual_score_b < 80" in out
 
 
 def test_step4_prompt_includes_mount_table():
@@ -568,7 +615,7 @@ def test_step4_rendered_size_budget():
         context_path="/c.md", findings_output_path="/f.json",
         mount_table_entries=(),
     ))
-    assert len(out.encode("utf-8")) <= 2700
+    assert len(out.encode("utf-8")) <= 4 * 1024
 
 
 def test_step5_rendered_size_budget():

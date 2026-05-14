@@ -346,6 +346,21 @@ async def test_create_201_returns_repo_refs(client):
     assert refs[0]["devwork_branch"].startswith("devwork/")
 
 
+async def test_create_allows_omitted_prompt(client):
+    app = client._app
+    payload = _payload(app)
+    payload.pop("prompt")
+
+    r = await client.post("/api/v1/dev-works", json=payload)
+
+    assert r.status_code == 201, r.text
+    row = await app.state.db.fetchone(
+        "SELECT prompt FROM dev_works WHERE id=?",
+        (r.json()["id"],),
+    )
+    assert row["prompt"] == ""
+
+
 async def test_create_projects_max_rounds_override(client):
     app = client._app
     r = await client.post("/api/v1/dev-works", json=_payload(app, max_rounds=2))

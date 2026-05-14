@@ -54,6 +54,28 @@ def _render_retry_feedback(feedback: str | None) -> str:
     )
 
 
+def _render_step4_execution_strategy(previous_actual_score_b: int | None) -> str:
+    if previous_actual_score_b is None:
+        return ""
+    if previous_actual_score_b >= 80:
+        guidance = (
+            "上一轮实施情况已经较贴合迭代计划；本轮优先优化高优先级计划，"
+            "尤其是 P0/P1 或 `required_for_exit=true` 的计划项，补齐测试、"
+            "边界处理、错误处理、可维护性和质量细节，避免把容量消耗在"
+            "低优先级扩展上。"
+        )
+    else:
+        guidance = (
+            "上一轮实施情况还不够贴合迭代计划；本轮优先实现未实现的"
+            "开发计划，先覆盖 active 计划中的 P0/P1 主流程和阻断缺口，"
+            "再考虑局部优化。"
+        )
+    return (
+        "\n## 执行策略\n\n"
+        f"上一轮 `actual_score_b`={previous_actual_score_b}。{guidance}\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Step responsibility walls (Phase 5)
 # ---------------------------------------------------------------------------
@@ -228,10 +250,20 @@ def compose_iteration_header(inputs: IterationHeaderInputs) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_recommended_tech_stack_read_item(stack: str | None) -> str:
+def _render_user_prompt_read_item(prompt: str | None) -> str:
+    if not prompt or not prompt.strip():
+        return ""
+    return f"4. **用户 prompt**：\n\n   {prompt.strip()}\n"
+
+
+def _render_recommended_tech_stack_read_item(
+    stack: str | None,
+    *,
+    item_number: int,
+) -> str:
     if not stack or not stack.strip():
         return ""
-    return f"5. **人工推荐技术栈**：\n\n   {stack.strip()}\n"
+    return f"{item_number}. **人工推荐技术栈**：\n\n   {stack.strip()}\n"
 
 
 def _render_recommended_tech_stack_output_requirement(stack: str | None) -> str:
@@ -272,15 +304,17 @@ def compose_step2(inputs: Step2Inputs) -> str:
         inputs.recommended_tech_stack
         and inputs.recommended_tech_stack.strip()
     )
+    has_user_prompt = bool(inputs.user_prompt and inputs.user_prompt.strip())
     return _STEP2_TEMPLATE.safe_substitute(
         dev_work_id=inputs.dev_work_id,
         round=str(inputs.round),
         design_doc_path=inputs.design_doc_path,
-        user_prompt=inputs.user_prompt,
+        user_prompt_read_item=_render_user_prompt_read_item(inputs.user_prompt),
         previous_review_path=prev,
         previous_iteration_note_path=prev_note,
         recommended_tech_stack_read_item=_render_recommended_tech_stack_read_item(
-            inputs.recommended_tech_stack
+            inputs.recommended_tech_stack,
+            item_number=5 if has_user_prompt else 4,
         ),
         recommended_tech_stack_output_requirement=(
             _render_recommended_tech_stack_output_requirement(
@@ -382,6 +416,7 @@ class Step4Inputs:
     # only the default landing pad referenced in the prompt header.
     mount_table_entries: tuple[MountTableEntry, ...]
     retry_feedback: str | None = None
+    previous_actual_score_b: int | None = None
 
 
 def compose_step4(inputs: Step4Inputs) -> str:
@@ -393,6 +428,9 @@ def compose_step4(inputs: Step4Inputs) -> str:
         mount_table=_render_mount_table(inputs.mount_table_entries),
         step_wall=_STEP_WALL_STEP4,
         retry_feedback=_render_retry_feedback(inputs.retry_feedback),
+        execution_strategy=_render_step4_execution_strategy(
+            inputs.previous_actual_score_b
+        ),
     )
 
 

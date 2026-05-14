@@ -367,7 +367,7 @@ export interface CreateDevWorkPayload {
   // Phase 4 (repo-registry): at least one ref required; mount uniqueness
   // enforced server-side and pre-validated client-side in the form.
   repo_refs: DevRepoRef[];
-  prompt: string;
+  prompt?: string;
   agent?: AgentKind;
   recommend_tech_stack?: boolean;
   recommended_tech_stack?: string;

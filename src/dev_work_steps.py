@@ -1161,6 +1161,16 @@ class DevWorkStepHandlersMixin:
         # ``worktree_path`` below remains the primary's path, used as the
         # prompt's default landing pad.
         mount_entries = await self._load_mount_table_entries(dw)
+        previous_review = await self.db.fetchone(
+            "SELECT score_breakdown_json FROM reviews "
+            "WHERE dev_work_id=? ORDER BY round DESC, created_at DESC LIMIT 1",
+            (dw["id"],),
+        )
+        previous_actual_score_b = (
+            _extract_actual_score_b(previous_review["score_breakdown_json"])
+            if previous_review is not None
+            else None
+        )
         retry_feedback = await self._loop_feedback_for_round(
             dw["id"], round_n, DevWorkStep.STEP4_DEVELOP
         )
@@ -1172,6 +1182,7 @@ class DevWorkStepHandlersMixin:
                 findings_output_path=self._abs_for(ws, findings_rel),
                 mount_table_entries=mount_entries,
                 retry_feedback=retry_feedback,
+                previous_actual_score_b=previous_actual_score_b,
             )
         )
         prompt_rel = f"devworks/{dw['id']}/prompts/step4-round{round_n}.md"

@@ -4,6 +4,10 @@ import { StatusBadge } from "./StatusBadge";
 
 type ReviewInsight = Record<string, unknown>;
 type ReviewScalar = string | number | boolean;
+type ReviewStringList = {
+  key: string;
+  values: string[];
+};
 type ReviewBadge = {
   key: string;
   value: string;
@@ -15,6 +19,11 @@ const REVIEW_SUMMARY_KEYS = ["message", "title", "summary", "description", "reas
 const REVIEW_ITEM_KEYS = ["id", "task_id", "task", "name"] as const;
 const REVIEW_STATUS_KEYS = ["status", "state"] as const;
 const REVIEW_VERIFIED_KEYS = ["verified", "passed"] as const;
+const REVIEW_IMPLEMENTED_KEYS = ["implemented"] as const;
+const REVIEW_IMPORTANCE_KEYS = ["importance"] as const;
+const REVIEW_REQUIRED_FOR_EXIT_KEYS = ["required_for_exit", "requiredForExit"] as const;
+const REVIEW_EVIDENCE_KEYS = ["evidence"] as const;
+const REVIEW_MISSING_EVIDENCE_KEYS = ["missing_evidence", "missingEvidence"] as const;
 const REVIEW_PRIMARY_BADGE_KEYS = ["kind", "severity"] as const;
 const REVIEW_SECONDARY_BADGE_KEYS = ["mount", "dimension"] as const;
 const REVIEW_LOCATION_KEYS = ["file", "path", "line"] as const;
@@ -74,6 +83,25 @@ function readFirstReviewScalar(
   for (const key of keys) {
     const value = readReviewScalar(item, key);
     if (value) return { key, value };
+  }
+  return null;
+}
+
+function readReviewStringList(item: ReviewInsight, keys: readonly string[]): ReviewStringList | null {
+  for (const key of keys) {
+    const value = item[key];
+    if (Array.isArray(value)) {
+      const values = value
+        .filter(isReviewScalar)
+        .map(formatReviewScalar)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      if (values.length > 0) return { key, values };
+    }
+    if (isReviewScalar(value)) {
+      const rendered = formatReviewScalar(value).trim();
+      if (rendered) return { key, values: [rendered] };
+    }
   }
   return null;
 }
@@ -151,17 +179,6 @@ function ReviewBadgePill({ badge }: { badge: ReviewBadge }) {
 
   return (
     <span className={`${baseClassName} ${getBadgeToneClassName(badge)}`}>
-      <span className="text-muted-soft">{badge.key}</span>
-      <span>{badge.value}</span>
-    </span>
-  );
-}
-
-function ReviewTableBadge({ badge }: { badge: ReviewBadge }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] ${getBadgeToneClassName(badge)}`}
-    >
       <span className="text-muted-soft">{badge.key}</span>
       <span>{badge.value}</span>
     </span>
@@ -251,23 +268,78 @@ function ReviewTableDetails({
   );
 }
 
+function ReviewEvidenceList({
+  evidence,
+  missingEvidence,
+  location,
+}: {
+  evidence: ReviewStringList | null;
+  missingEvidence: ReviewStringList | null;
+  location: string | null;
+}) {
+  if (!evidence && !missingEvidence && !location) {
+    return <span className="text-muted-soft">-</span>;
+  }
+
+  const groups = [
+    evidence ? { label: "证据", values: evidence.values, tone: "text-muted" } : null,
+    missingEvidence
+      ? { label: "缺口", values: missingEvidence.values, tone: "text-[#d6a461]" }
+      : null,
+    location ? { label: "位置", values: [location], tone: "text-muted" } : null,
+  ].filter((group): group is { label: string; values: string[]; tone: string } => Boolean(group));
+
+  return (
+    <div className="space-y-1.5">
+      {groups.map((group) => (
+        <div className="min-w-0" key={group.label}>
+          <p className="mb-1 text-[10px] text-muted-soft">{group.label}</p>
+          <div className="flex flex-wrap gap-1">
+            {group.values.map((value, index) => (
+              <span
+                className={`inline-flex max-w-full rounded-md border border-border/70 bg-panel-strong/45 px-1.5 py-0.5 font-mono text-[10px] ${group.tone}`}
+                key={`${group.label}-${value}-${index}`}
+                title={value}
+              >
+                <span className="truncate">{value}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function getReviewTableRows(items: ReviewInsight[]) {
   return items.map((item, index) => {
     const summary = getReviewSummary(item);
     const itemLabel = readFirstReviewScalar(item, REVIEW_ITEM_KEYS);
     const status = readFirstReviewScalar(item, REVIEW_STATUS_KEYS);
     const verified = readFirstReviewScalar(item, REVIEW_VERIFIED_KEYS);
+    const implemented = readFirstReviewScalar(item, REVIEW_IMPLEMENTED_KEYS);
+    const importance = readFirstReviewScalar(item, REVIEW_IMPORTANCE_KEYS);
+    const requiredForExit = readFirstReviewScalar(item, REVIEW_REQUIRED_FOR_EXIT_KEYS);
+    const evidence = readReviewStringList(item, REVIEW_EVIDENCE_KEYS);
+    const missingEvidence = readReviewStringList(item, REVIEW_MISSING_EVIDENCE_KEYS);
+    const location = getReviewLocation(item);
     const usedKeys = new Set(
       [
         summary.key,
         itemLabel?.key,
         status?.key,
         verified?.key,
+        implemented?.key,
+        importance?.key,
+        requiredForExit?.key,
+        evidence?.key,
+        missingEvidence?.key,
+        ...(location ? REVIEW_LOCATION_KEYS : []),
       ].filter((key): key is string => Boolean(key)),
     );
     const title = itemLabel?.value ?? summary.value;
     const details = Object.entries(item).flatMap(([key, value]) => {
-      if (usedKeys.has(key) || REVIEW_PROMOTED_KEYS.has(key) || !isReviewScalar(value)) {
+      if (usedKeys.has(key) || key === summary.key || !isReviewScalar(value)) {
         return [];
       }
       return [[key, value] as [string, ReviewScalar]];
@@ -278,8 +350,12 @@ function getReviewTableRows(items: ReviewInsight[]) {
       title,
       status: status?.value ?? null,
       verified: verified?.value ?? null,
-      badges: getReviewBadges(item),
-      location: getReviewLocation(item),
+      implemented: implemented?.value ?? null,
+      importance: importance?.value ?? null,
+      requiredForExit: requiredForExit?.value ?? null,
+      evidence,
+      missingEvidence,
+      location,
       details,
     };
   });
@@ -297,15 +373,17 @@ function ReviewInsightTable({
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-panel-deep/70">
       <div className="max-h-[360px] overflow-auto">
-        <table aria-label={title} className="min-w-[760px] w-full border-collapse text-left text-xs">
+        <table aria-label={title} className="min-w-[920px] w-full border-collapse text-left text-xs">
           <thead className="sticky top-0 z-10 bg-panel-strong/95 text-[10px] uppercase text-muted-soft">
             <tr className="border-b border-border/70">
-              <th className="w-[18%] px-3 py-2 font-medium">条目</th>
-              <th className="w-[10%] px-3 py-2 font-medium">状态</th>
-              <th className="w-[10%] px-3 py-2 font-medium">核验</th>
-              <th className="w-[18%] px-3 py-2 font-medium">标签</th>
-              <th className="w-[20%] px-3 py-2 font-medium">位置</th>
-              <th className="px-3 py-2 font-medium">补充</th>
+              <th className="w-[14%] px-3 py-2 font-medium">条目</th>
+              <th className="w-[9%] px-3 py-2 font-medium">状态</th>
+              <th className="w-[9%] px-3 py-2 font-medium">实现</th>
+              <th className="w-[9%] px-3 py-2 font-medium">核验</th>
+              <th className="w-[8%] px-3 py-2 font-medium">优先级</th>
+              <th className="w-[8%] px-3 py-2 font-medium">准出</th>
+              <th className="w-[24%] px-3 py-2 font-medium">证据 / 缺口</th>
+              <th className="px-3 py-2 font-medium">备注</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border/60">
@@ -318,21 +396,23 @@ function ReviewInsightTable({
                   <ReviewScalarTone value={row.status} />
                 </td>
                 <td className="px-3 py-2">
+                  <ReviewScalarTone value={row.implemented} />
+                </td>
+                <td className="px-3 py-2">
                   <ReviewScalarTone value={row.verified} />
                 </td>
                 <td className="px-3 py-2">
-                  {row.badges.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {row.badges.map((badge) => (
-                        <ReviewTableBadge badge={badge} key={`${badge.key}:${badge.value}`} />
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-muted-soft">-</span>
-                  )}
+                  <ReviewScalarTone value={row.importance} />
                 </td>
-                <td className="break-all px-3 py-2 font-mono text-[11px] text-muted">
-                  {row.location ?? <span className="text-muted-soft">-</span>}
+                <td className="px-3 py-2">
+                  <ReviewScalarTone value={row.requiredForExit} />
+                </td>
+                <td className="px-3 py-2">
+                  <ReviewEvidenceList
+                    evidence={row.evidence}
+                    location={row.location}
+                    missingEvidence={row.missingEvidence}
+                  />
                 </td>
                 <td className="px-3 py-2">
                   <ReviewTableDetails details={row.details} />

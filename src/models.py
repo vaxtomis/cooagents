@@ -448,7 +448,7 @@ class DesignWorkPage(BaseModel):
 class CreateDevWorkRequest(BaseModel):
     workspace_id: str
     design_doc_id: str
-    prompt: str = Field(..., min_length=1, max_length=20000)
+    prompt: str | None = Field(default=None, max_length=20000)
     agent: AgentKind | None = None
     # Optional human guidance for the planning round. When disabled, Step2
     # should reuse historical choices or let the agent infer a stack from the
@@ -468,6 +468,7 @@ class CreateDevWorkRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_repo_refs(self) -> "CreateDevWorkRequest":
+        self.prompt = (self.prompt or "").strip()
         mounts = [r.mount_name for r in self.repo_refs]
         if len(set(mounts)) != len(mounts):
             raise ValueError(

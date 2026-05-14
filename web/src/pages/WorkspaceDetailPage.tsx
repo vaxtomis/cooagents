@@ -409,6 +409,7 @@ function DevWorkCreateForm({
 }) {
   const [designDocId, setDesignDocId] = useState("");
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
+  const [useExecutionPrompt, setUseExecutionPrompt] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [agent, setAgent] = useState<AgentKind | "">("");
   const [recommendTechStack, setRecommendTechStack] = useState(false);
@@ -433,7 +434,7 @@ function DevWorkCreateForm({
       if (mountSeen.has(mount)) return setError(`mount_name "${mount}" 重复`);
       mountSeen.add(mount);
     }
-    if (!prompt.trim()) return setError("执行提示不能为空");
+    if (useExecutionPrompt && !prompt.trim()) return setError("已选择执行提示时，提示内容不能为空");
     if (recommendTechStack && !recommendedTechStack.trim()) {
       return setError("已选择推荐技术栈时，推荐内容不能为空");
     }
@@ -463,7 +464,7 @@ function DevWorkCreateForm({
           workspace_id: workspaceId,
           design_doc_id: designDocId,
           repo_refs: payloadRefs,
-          prompt: prompt.trim(),
+          ...(useExecutionPrompt ? { prompt: prompt.trim() } : {}),
           agent: agent || undefined,
           recommend_tech_stack: recommendTechStack || undefined,
           ...(recommendTechStack
@@ -474,6 +475,7 @@ function DevWorkCreateForm({
       });
       setDesignDocId("");
       setRepoRefs([]);
+      setUseExecutionPrompt(false);
       setPrompt("");
       setRecommendTechStack(false);
       setRecommendedTechStack("");
@@ -510,16 +512,34 @@ function DevWorkCreateForm({
         <RepoRefsEditor minRows={1} mode="dev" onChange={setRepoRefs} value={repoRefs} />
       </div>
 
-      <label className="block space-y-1.5 text-sm text-muted">
-        <span>执行提示</span>
-        <textarea
-          aria-label="DevWork 执行提示"
-          className={`${FORM_FIELD_CLASSNAME} min-h-[9rem] resize-y`}
-          rows={4}
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-        />
-      </label>
+      <div className="space-y-3 rounded-2xl border border-border bg-panel-strong/55 p-4">
+        <label className="flex items-center gap-3 text-sm text-muted">
+          <input
+            aria-label="使用执行提示"
+            type="checkbox"
+            checked={useExecutionPrompt}
+            onChange={(event) => setUseExecutionPrompt(event.target.checked)}
+          />
+          <span>执行提示</span>
+        </label>
+        {useExecutionPrompt ? (
+          <label className="block space-y-1.5 text-sm text-muted">
+            <span>本轮执行提示</span>
+            <textarea
+              aria-label="DevWork 执行提示"
+              className={`${FORM_FIELD_CLASSNAME} min-h-[9rem] resize-y`}
+              rows={4}
+              value={prompt}
+              placeholder="可补充本次开发的特别关注点、实施边界或验收偏好。"
+              onChange={(event) => setPrompt(event.target.value)}
+            />
+          </label>
+        ) : (
+          <p className="text-xs leading-relaxed text-muted-soft">
+            不填写时默认按设计文档、迭代反馈与仓库现状规划和执行。
+          </p>
+        )}
+      </div>
 
       <div className="space-y-3 rounded-2xl border border-border bg-panel-strong/55 p-4">
         <label className="flex items-center gap-3 text-sm text-muted">
