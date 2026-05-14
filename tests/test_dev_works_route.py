@@ -681,6 +681,52 @@ async def test_rerun_cancelled_dev_work_resumes_driver(client):
     await _wait_for_terminal(client, dev_id)
 
 
+async def test_rerun_legacy_cancelled_dev_work_without_resume_metadata(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    assert create.status_code == 201, create.text
+    dev_id = create.json()["id"]
+    await _wait_for_terminal(client, dev_id)
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_step='CANCELLED', completed_at=NULL, "
+        "escalated_at=NULL, current_progress_json=NULL, gates_json=NULL "
+        "WHERE id=?",
+        (dev_id,),
+    )
+
+    r = await client.post(f"/api/v1/dev-works/{dev_id}/rerun")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["current_step"] != "CANCELLED"
+    assert r.json()["is_running"] is True
+
+
+async def test_rerun_legacy_cancelled_dev_work_uses_progress_step(client):
+    app = client._app
+    create = await client.post("/api/v1/dev-works", json=_payload(app))
+    assert create.status_code == 201, create.text
+    dev_id = create.json()["id"]
+    await _wait_for_terminal(client, dev_id)
+    progress = {
+        "step": "STEP4_DEVELOP",
+        "round": 1,
+        "elapsed_s": 12,
+        "last_heartbeat_at": "2026-04-23T00:00:00Z",
+    }
+    await app.state.db.execute(
+        "UPDATE dev_works SET current_step='CANCELLED', completed_at=NULL, "
+        "escalated_at=NULL, current_progress_json=?, gates_json=NULL "
+        "WHERE id=?",
+        (json.dumps(progress), dev_id),
+    )
+
+    r = await client.post(f"/api/v1/dev-works/{dev_id}/rerun")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["current_step"] == "STEP4_DEVELOP"
+    assert r.json()["is_running"] is True
+
+
 async def test_delete_escalated_dev_work_cleans_files_worktrees_and_rows(client):
     app = client._app
     create = await client.post("/api/v1/dev-works", json=_payload(app))

@@ -615,6 +615,48 @@ async def test_rerun_cancelled_design_work_resumes_driver(client):
     assert final["current_state"] in {"COMPLETED", "ESCALATED"}
 
 
+async def test_rerun_legacy_cancelled_design_work_without_resume_metadata(client):
+    ws = await _create_workspace(client, slug="rerun-legacy-design")
+    app = client._app
+    dw_id = "desw-legacy0001"
+    input_rel = f"designs/.drafts/{dw_id}-input.md"
+    await app.state.registry.put_markdown(
+        workspace_row=ws,
+        relative_path=input_rel,
+        text="substantial requirement text for legacy rerun",
+        kind="design_input",
+    )
+    await app.state.db.execute(
+        """INSERT INTO design_works
+           (id, workspace_id, mode, needs_frontend_mockup, current_state,
+            loop, agent, user_input_path, title, sub_slug, version,
+            output_path, gates_json, created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            dw_id,
+            ws["id"],
+            "new",
+            0,
+            "CANCELLED",
+            0,
+            "codex",
+            input_rel,
+            "Legacy",
+            "legacy",
+            "1.0.0",
+            "designs/DES-legacy-1.0.0.md",
+            None,
+            "2026-04-23T00:00:00Z",
+            "2026-04-23T00:00:00Z",
+        ),
+    )
+
+    r = await client.post(f"/api/v1/design-works/{dw_id}/rerun")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["current_state"] != "CANCELLED"
+
+
 async def test_delete_cancelled_design_work_cleans_files_and_rows(client):
     ws = await _create_workspace(client, slug="delete-cancelled")
     app = client._app

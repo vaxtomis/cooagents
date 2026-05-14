@@ -305,6 +305,29 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         step = resume.get("back_to")
         return str(step) if step else None
 
+    @staticmethod
+    def _legacy_cancelled_rerun_step(dw: dict[str, Any]) -> DevWorkStep:
+        """Best-effort resume point for DevWorks cancelled before rerun metadata.
+
+        Older CANCELLED rows do not have ``cancelled_from_step``. If a live
+        heartbeat snapshot survived cancellation, retry that step; otherwise
+        restart through INIT, whose worktree setup path is idempotent.
+        """
+        progress_raw = dw.get("current_progress_json")
+        if progress_raw:
+            try:
+                progress = json.loads(progress_raw)
+            except (TypeError, ValueError):
+                progress = None
+            if isinstance(progress, dict):
+                try:
+                    step = DevWorkStep(progress.get("step"))
+                except ValueError:
+                    step = None
+                if step is not None and step not in _TERMINAL:
+                    return step
+        return DevWorkStep.INIT
+
     def _validate_max_rounds_override(self, max_rounds: int | None) -> None:
         configured_cap = self.config.devwork.max_rounds
         if max_rounds is not None and not 0 <= max_rounds <= configured_cap:
@@ -723,12 +746,16 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 current_stage=dw["current_step"],
             )
         gates = _decode_gates(dw.get("gates_json"))
-        try:
-            resume_step = DevWorkStep(gates[_CANCELLED_FROM_STEP_KEY])
-        except (KeyError, ValueError) as exc:
-            raise BadRequestError(
-                "cancelled DevWork has no resumable prior step"
-            ) from exc
+        resume_raw = gates.get(_CANCELLED_FROM_STEP_KEY)
+        if resume_raw is None:
+            resume_step = self._legacy_cancelled_rerun_step(dw)
+        else:
+            try:
+                resume_step = DevWorkStep(resume_raw)
+            except ValueError as exc:
+                raise BadRequestError(
+                    "cancelled DevWork has invalid resumable prior step"
+                ) from exc
         if resume_step in _TERMINAL:
             raise BadRequestError("cancelled DevWork prior step is terminal")
 

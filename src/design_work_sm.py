@@ -233,6 +233,15 @@ class DesignWorkStateMachine:
             return override
         return self.config.design.max_loops
 
+    @staticmethod
+    def _legacy_cancelled_rerun_state(dw: dict) -> DesignWorkState:
+        """Best-effort resume state for DesignWorks cancelled before metadata."""
+        gates = _decode_gates(dw.get("gates_json"))
+        prompt_path = gates.get("last_prompt_path")
+        if isinstance(prompt_path, str) and prompt_path:
+            return DesignWorkState.LLM_GENERATE
+        return DesignWorkState.INIT
+
     def _validate_max_loops_override(self, max_loops: int | None) -> None:
         cap = self.config.design.max_loops
         if max_loops is not None and not 0 <= max_loops <= cap:
@@ -484,12 +493,16 @@ class DesignWorkStateMachine:
                 current_stage=dw["current_state"],
             )
         gates = _decode_gates(dw.get("gates_json"))
-        try:
-            resume_state = DesignWorkState(gates[_CANCELLED_FROM_STATE_KEY])
-        except (KeyError, ValueError) as exc:
-            raise BadRequestError(
-                "cancelled DesignWork has no resumable prior state"
-            ) from exc
+        resume_raw = gates.get(_CANCELLED_FROM_STATE_KEY)
+        if resume_raw is None:
+            resume_state = self._legacy_cancelled_rerun_state(dw)
+        else:
+            try:
+                resume_state = DesignWorkState(resume_raw)
+            except ValueError as exc:
+                raise BadRequestError(
+                    "cancelled DesignWork has invalid resumable prior state"
+                ) from exc
         if resume_state in {
             DesignWorkState.COMPLETED,
             DesignWorkState.ESCALATED,
