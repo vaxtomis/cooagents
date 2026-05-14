@@ -84,6 +84,17 @@ def test_build_exec_cmd_with_prompt(executor):
     assert cmd[-3:] == ["codex", "exec", "hello world"]
 
 
+def test_build_codex_exec_cmd_uses_full_access_noninteractive_mode(executor):
+    cmd = executor._build_codex_exec_cmd("/tmp/worktree")
+    assert cmd[:2] == ["codex", "exec"]
+    assert "--json" in cmd
+    assert "--skip-git-repo-check" in cmd
+    assert cmd[cmd.index("--sandbox") + 1] == "danger-full-access"
+    assert cmd[cmd.index("--ask-for-approval") + 1] == "never"
+    assert cmd[cmd.index("--cd") + 1] == "/tmp/worktree"
+    assert cmd[-1] == "-"
+
+
 def test_build_exec_cmd_with_config(executor_with_config):
     cmd = executor_with_config._build_acpx_exec_cmd("claude", "/tmp/worktree", 60)
     assert "--json-strict" in cmd
@@ -130,7 +141,7 @@ async def test_run_once_spawns_subprocess(monkeypatch, executor):
 
 
 @pytest.mark.asyncio
-async def test_run_once_returns_nonzero_exit(monkeypatch, executor):
+async def test_run_once_returns_nonzero_exit(monkeypatch, executor, tmp_path):
     class FakeProc:
         def __init__(self):
             self.stdout = asyncio.StreamReader()
@@ -147,9 +158,60 @@ async def test_run_once_returns_nonzero_exit(monkeypatch, executor):
         return FakeProc()
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    stdout, rc = await executor.run_once("codex", "/tmp/wt", 10, prompt="p")
+    stdout, rc = await executor.run_once("codex", str(tmp_path), 10, prompt="p")
     assert rc == 7
     assert stdout == "boom"
+
+
+@pytest.mark.asyncio
+async def test_run_once_codex_direct_exec_feeds_prompt_on_stdin(
+    monkeypatch, executor, tmp_path,
+):
+    captured = {"args": None, "kwargs": None, "stdin": b""}
+
+    class FakeStdin:
+        def write(self, data):
+            captured["stdin"] += data
+
+        async def drain(self):
+            return None
+
+        def close(self):
+            return None
+
+    class FakeProc:
+        def __init__(self):
+            self.stdin = FakeStdin()
+            self.stdout = asyncio.StreamReader()
+            self.stderr = asyncio.StreamReader()
+            self.stdout.feed_data(b"done")
+            self.stdout.feed_eof()
+            self.stderr.feed_eof()
+            self.returncode = 0
+            self.pid = None
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = list(args)
+        captured["kwargs"] = kwargs
+        return FakeProc()
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+
+    stdout, rc = await executor.run_once(
+        "codex", str(tmp_path), 10, prompt="write the file"
+    )
+
+    assert (stdout, rc) == ("done", 0)
+    assert captured["args"][:2] == ["codex", "exec"]
+    sandbox_idx = captured["args"].index("--sandbox")
+    approval_idx = captured["args"].index("--ask-for-approval")
+    assert captured["args"][sandbox_idx + 1] == "danger-full-access"
+    assert captured["args"][approval_idx + 1] == "never"
+    assert captured["kwargs"]["stdin"] == asyncio.subprocess.PIPE
+    assert captured["stdin"] == b"write the file"
 
 
 @pytest.mark.asyncio

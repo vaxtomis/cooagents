@@ -52,6 +52,15 @@ $supplemental_materials
 
 $mockup_instruction
 
+## Repository inspection guidance
+
+If this DesignWork requires inspecting a code repository, focus on business
+source code and configuration that affects the requested behavior. Do not scan
+or summarize generated/vendor/runtime folders such as `node_modules/`,
+`devworks/`, `.git/`, `.coop/`, build outputs, caches, coverage reports, or
+other paths excluded by the repository's `.gitignore`. Prefer targeted file
+reads and bounded searches over broad recursive scans.
+
 ## 本轮补齐项（若非首轮）
 
 $missing_sections_hint

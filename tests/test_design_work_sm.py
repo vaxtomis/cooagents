@@ -320,6 +320,41 @@ async def test_recovers_existing_output_for_current_prompt(env):
     assert payload["recovered"] is True
 
 
+async def test_llm_executor_failure_escalates_without_content_loop(env):
+    class FailingExecutor:
+        def __init__(self):
+            self.call_count = 0
+
+        async def run_once(self, *_args, **_kwargs):
+            self.call_count += 1
+            return ("failed", 1)
+
+    stub = FailingExecutor()
+    sm = DesignWorkStateMachine(
+        db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
+        executor=stub, config=_build_config(max_loops=3),
+        registry=env["registry"],
+    )
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], title="T", sub_slug="exec-fail",
+        user_input="x" * 50, mode=DesignWorkMode.new, parent_version=None,
+        needs_frontend_mockup=False, agent="claude",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_state"] == "ESCALATED"
+    assert final["loop"] == 0
+    assert stub.call_count == 1
+    assert final["escalation_reason"] == "LLM call failed rc=1"
+    round_ev = await env["db"].fetchone(
+        "SELECT * FROM workspace_events "
+        "WHERE event_name='design_work.round_completed' AND correlation_id=?",
+        (dw["id"],),
+    )
+    assert round_ev is None
+
+
 async def test_escalate_on_max_loops(env):
     stub = StubExecutor(FIXTURES / "always_missing")
     sm = DesignWorkStateMachine(

@@ -651,9 +651,10 @@ class DesignWorkStateMachine:
         if rc != 0:
             # Executor reported failure; skip MOCKUP/POST_VALIDATE since
             # there's no useful artifact to inspect. D5 would just discover
-            # the missing file a moment later, wasting a round's work.
-            await self._loop_or_escalate(
-                dw, missing=[], reason=f"LLM call failed rc={rc}"
+            # the missing file a moment later. Treat this as infrastructure
+            # failure rather than consuming DesignWork content-refinement loops.
+            await self._escalate(
+                dw, reason=f"LLM call failed rc={rc}", missing=[]
             )
             return
         await self._advance_after_llm_success(dw)

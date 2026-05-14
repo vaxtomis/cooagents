@@ -54,6 +54,16 @@ def test_output_path_present():
     assert "将最终 markdown 写入" in rendered
 
 
+def test_repo_inspection_guidance_excludes_non_business_paths():
+    rendered = compose_prompt(_base())
+    assert "Repository inspection guidance" in rendered
+    assert "node_modules/" in rendered
+    assert "devworks/" in rendered
+    assert ".git/" in rendered
+    assert ".coop/" in rendered
+    assert ".gitignore" in rendered
+
+
 def test_parent_version_empty_when_none():
     rendered = compose_prompt(_base())
     assert "`parent_version`:" in rendered

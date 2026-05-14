@@ -37,7 +37,7 @@ async def test_local_host_runs_subprocess(executor_no_dispatcher, tmp_path, monk
     """``host_id='local'`` must hit _run_local, never the dispatcher."""
     captured = {}
 
-    async def fake_run_local(self, cmd, worktree):
+    async def fake_run_local(self, cmd, worktree, **_kwargs):
         captured["cmd"] = cmd
         captured["worktree"] = worktree
         return ("ok", 0)
@@ -55,7 +55,7 @@ async def test_local_default_host_id_branch(executor_no_dispatcher, tmp_path, mo
     """No host_id kwarg passed → still local branch (preserves old call sites)."""
     monkeypatch.setattr(
         AcpxExecutor, "_run_local",
-        lambda self, cmd, wt: _coro_return(("", 0)),
+        lambda self, cmd, wt, **_kwargs: _coro_return(("", 0)),
     )
     await executor_no_dispatcher.run_once("codex", str(tmp_path), 30, prompt="x")
 

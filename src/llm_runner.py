@@ -318,10 +318,7 @@ class LLMRunner:
         stdout_task = asyncio.create_task(_pump_stream(proc.stdout, stdout_chunks))
         stderr_task = asyncio.create_task(_pump_stream(proc.stderr, stderr_chunks))
         try:
-            if timeout is None:
-                await proc.wait()
-            else:
-                await asyncio.wait_for(proc.wait(), timeout=timeout)
+            await self._wait_for_direct_exit(proc, timeout)
             # Let the pump tasks drain bytes that arrived before process exit
             # before we cancel them. This is especially important for tests
             # and for uvloop, where exit notification can beat the reader task.
@@ -352,6 +349,31 @@ class LLMRunner:
             b"".join(stderr_chunks).decode("utf-8", errors="replace").strip(),
             proc.returncode,
         )
+
+    async def _wait_for_direct_exit(
+        self, proc: asyncio.subprocess.Process, timeout: float | None,
+    ) -> int:
+        """Return when the direct child exits, even if descendants hold pipes."""
+        wait_task = asyncio.create_task(proc.wait())
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+        try:
+            while True:
+                if proc.returncode is not None:
+                    return proc.returncode
+                if wait_task.done():
+                    return await wait_task
+                if deadline is not None:
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError
+                    await asyncio.sleep(min(0.05, remaining))
+                else:
+                    await asyncio.sleep(0.05)
+        finally:
+            if not wait_task.done():
+                wait_task.cancel()
+                await asyncio.gather(wait_task, return_exceptions=True)
 
     # ---- one-shot --------------------------------------------------------
 
