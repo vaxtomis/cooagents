@@ -93,32 +93,6 @@ class AcpxExecutor:
             cmd.append(prompt)
         return cmd
 
-    def _build_codex_exec_cmd(self, worktree: str) -> list[str]:
-        """Build the direct Codex CLI command for local one-shot runs.
-
-        ``acpx codex exec`` does not expose Codex's sandbox flags, so local
-        DesignWork would inherit a read-only default on untrusted worktrees.
-        Direct ``codex exec`` lets us enforce the non-interactive full-access
-        mode required for background artifact generation.
-        """
-        cfg = self._acpx_cfg()
-        cmd = [
-            "codex",
-            "--sandbox",
-            "danger-full-access",
-            "--ask-for-approval",
-            "never",
-            "--cd",
-            worktree,
-            "exec",
-            "--json",
-            "--skip-git-repo-check",
-        ]
-        if cfg and getattr(cfg, "model", None):
-            cmd += ["--model", cfg.model]
-        cmd.append("-")
-        return cmd
-
     # ------------------------------------------------------------------
     # Public API — the single call path every workspace SM uses
     # ------------------------------------------------------------------
@@ -150,16 +124,11 @@ class AcpxExecutor:
         if host_id == LOCAL_HOST_ID:
             if self._resolve_agent(agent_type) == "codex":
                 self._ensure_worktree_writable(worktree)
-                stdin_text = self._load_prompt_text(normalized_task_file, prompt)
-                return await self._run_local(
-                    self._build_codex_exec_cmd(worktree),
-                    worktree,
-                    stdin_text=stdin_text,
-                    timeout_sec=timeout_sec,
-                    cleanup_process_group=True,
-                )
             return await self._run_local(
-                cmd, worktree, cleanup_process_group=True
+                cmd,
+                worktree,
+                timeout_sec=timeout_sec,
+                cleanup_process_group=True,
             )
         if self.ssh_dispatcher is None:
             raise RuntimeError(
@@ -197,14 +166,8 @@ class AcpxExecutor:
         return rel.replace(os.sep, "/")
 
     @staticmethod
-    def _load_prompt_text(task_file: str | None, prompt: str | None) -> str:
-        if task_file:
-            return Path(task_file).read_text(encoding="utf-8")
-        return prompt or ""
-
-    @staticmethod
     def _ensure_worktree_writable(worktree: str) -> None:
-        """Create/repair local write access before launching Codex.
+        """Create/repair local write access before launching acpx.
 
         This is intentionally limited to the execution cwd. It does not
         broaden permissions outside the workspace.

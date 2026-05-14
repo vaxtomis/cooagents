@@ -84,18 +84,6 @@ def test_build_exec_cmd_with_prompt(executor):
     assert cmd[-3:] == ["codex", "exec", "hello world"]
 
 
-def test_build_codex_exec_cmd_uses_full_access_noninteractive_mode(executor):
-    cmd = executor._build_codex_exec_cmd("/tmp/worktree")
-    assert cmd[:1] == ["codex"]
-    assert "--json" in cmd
-    assert "--skip-git-repo-check" in cmd
-    assert cmd[cmd.index("--sandbox") + 1] == "danger-full-access"
-    assert cmd[cmd.index("--ask-for-approval") + 1] == "never"
-    assert cmd[cmd.index("--cd") + 1] == "/tmp/worktree"
-    assert cmd.index("--ask-for-approval") < cmd.index("exec")
-    assert cmd[-1] == "-"
-
-
 def test_build_exec_cmd_with_config(executor_with_config):
     cmd = executor_with_config._build_acpx_exec_cmd("claude", "/tmp/worktree", 60)
     assert "--json-strict" in cmd
@@ -165,24 +153,13 @@ async def test_run_once_returns_nonzero_exit(monkeypatch, executor, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_once_codex_direct_exec_feeds_prompt_on_stdin(
+async def test_run_once_codex_uses_acpx_exec_command(
     monkeypatch, executor, tmp_path,
 ):
-    captured = {"args": None, "kwargs": None, "stdin": b""}
-
-    class FakeStdin:
-        def write(self, data):
-            captured["stdin"] += data
-
-        async def drain(self):
-            return None
-
-        def close(self):
-            return None
+    captured = {"args": None, "kwargs": None}
 
     class FakeProc:
         def __init__(self):
-            self.stdin = FakeStdin()
             self.stdout = asyncio.StreamReader()
             self.stderr = asyncio.StreamReader()
             self.stdout.feed_data(b"done")
@@ -206,14 +183,12 @@ async def test_run_once_codex_direct_exec_feeds_prompt_on_stdin(
     )
 
     assert (stdout, rc) == ("done", 0)
-    assert captured["args"][0] == "codex"
-    sandbox_idx = captured["args"].index("--sandbox")
-    approval_idx = captured["args"].index("--ask-for-approval")
-    assert captured["args"][sandbox_idx + 1] == "danger-full-access"
-    assert captured["args"][approval_idx + 1] == "never"
-    assert approval_idx < captured["args"].index("exec")
-    assert captured["kwargs"]["stdin"] == asyncio.subprocess.PIPE
-    assert captured["stdin"] == b"write the file"
+    assert captured["args"][0] == "acpx"
+    assert "codex" in captured["args"]
+    assert captured["args"][-3:] == ["codex", "exec", "write the file"]
+    assert "--ask-for-approval" not in captured["args"]
+    assert "--sandbox" not in captured["args"]
+    assert captured["kwargs"]["stdin"] == asyncio.subprocess.DEVNULL
 
 
 @pytest.mark.asyncio
