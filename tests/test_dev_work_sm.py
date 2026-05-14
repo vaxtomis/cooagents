@@ -148,6 +148,7 @@ def step2_append_h2(step_tag, round_n, prompt, worktree):
         "\n实现登录闭环。\n"
         "\n## 开发计划\n"
         "\n- [ ] DW-01: 加表单\n- [ ] DW-02: 加校验\n"
+        "  - [ ] DW-02.1: 校验空邮箱\n"
         "- [ ] DW-03: 补充失败态\n"
         "\n## 用例清单\n"
         "\n| 用例 | 输入 | 预期 | 对应设计章节 |\n"
@@ -172,6 +173,7 @@ def step2_append_h2_with_tech_stack(step_tag, round_n, prompt, worktree):
         "\n- React 18\n- FastAPI\n"
         "\n## 开发计划\n"
         "\n- [ ] DW-01: 加表单\n- [ ] DW-02: 加校验\n"
+        "  - [ ] DW-02.1: 校验空邮箱\n"
         "- [ ] DW-03: 补充失败态\n"
         "\n## 用例清单\n"
         "\n| 用例 | 输入 | 预期 | 对应设计章节 |\n"
@@ -428,6 +430,7 @@ def test_plan_verification_checkbox_patch_only_checks_verified_done_items():
         "## 开发计划\n\n"
         "- [ ] DW-01: 加表单\n"
         "- [ ] DW-02: 加校验\n"
+        "  - [ ] DW-02.1: 校验空邮箱\n"
         "- [ ] DW-03: 补充失败态\n\n"
         "## 用例清单\n\n"
         "- [ ] 非计划 checkbox 不应改变\n"
@@ -435,12 +438,14 @@ def test_plan_verification_checkbox_patch_only_checks_verified_done_items():
 
     updated = _apply_plan_verification_checkboxes(body, [
         {"id": "DW-01", "status": "done", "verified": True},
+        {"id": "DW-02.1", "status": "done", "verified": True},
         {"id": "DW-02", "status": "deferred", "verified": True},
         {"id": "DW-03", "status": "done", "verified": False},
     ])
 
     assert "- [x] DW-01: 加表单" in updated
     assert "- [ ] DW-02: 加校验" in updated
+    assert "  - [x] DW-02.1: 校验空邮箱" in updated
     assert "- [ ] DW-03: 补充失败态" in updated
     assert "- [ ] 非计划 checkbox 不应改变" in updated
 
@@ -1572,6 +1577,7 @@ async def test_step5_plan_verification_checks_iteration_plan_items(env):
         },
         "plan_verification": [
             {"id": "DW-01", "status": "done", "verified": True},
+            {"id": "DW-02.1", "status": "done", "verified": True},
             {"id": "DW-02", "status": "deferred", "verified": True},
             {"id": "DW-03", "status": "done", "verified": False},
         ],
@@ -1599,6 +1605,7 @@ async def test_step5_plan_verification_checks_iteration_plan_items(env):
         relative_path=f"devworks/{dw['id']}/iteration-round-1.md",
     )
     assert "- [x] DW-01: 加表单" in note_body
+    assert "  - [x] DW-02.1: 校验空邮箱" in note_body
     assert "- [ ] DW-02: 加校验" in note_body
     assert "- [ ] DW-03: 补充失败态" in note_body
 

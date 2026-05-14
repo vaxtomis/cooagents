@@ -56,7 +56,7 @@ _REQUIRED_H2 = ("本轮目标", "开发计划", "用例清单")
 _RECOMMENDED_TECH_STACK_H2 = "推荐技术栈"
 _PLAN_CHECKBOX_RE = re.compile(
     r"^(\s*[-*]\s+\[)([ xX])(\]\s+)"
-    r"([A-Za-z][A-Za-z0-9_-]*-\d+)(\s*[:：].*)$"
+    r"([A-Za-z][A-Za-z0-9_-]*-\d+(?:\.\d+)*)(\s*[:：].*)$"
 )
 
 
