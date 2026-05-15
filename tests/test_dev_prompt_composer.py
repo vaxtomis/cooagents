@@ -9,6 +9,7 @@ from src.dev_prompt_composer import (
     Step4Inputs,
     Step5Inputs,
     _BOUNDARY_CHECK_RUBRIC,
+    _CONTEXT_COMPLETENESS_GUIDE,
     _NEXT_ROUND_HINTS_GUIDE,
     _PLAN_VERIFICATION_GUIDE,
     _STEP_WALL_STEP2,
@@ -86,7 +87,7 @@ def test_step2_round1_prefers_coarse_main_plan_framework():
         previous_review_path=None,
         output_path="/ws/foo/devworks/dev-x/iteration-round-1.md",
     ))
-    assert "Round 1 优先按设计文档拆粗粒度主 PLAN" in out
+    assert "Round 1 优先按设计文档与上下文发现拆粗粒度主 PLAN" in out
     assert "只写顶层 DW-xx" in out
     assert "覆盖需求/流程/验收面" in out
     assert "默认不展开大量子 PLAN" in out
@@ -135,7 +136,7 @@ def test_step2_includes_recommended_tech_stack_when_provided():
     assert "`## 推荐技术栈`" in out
     assert "尽量包含这些组件" in out
     assert "不是排他约束" in out
-    assert "以下 四 个 H2" in out
+    assert "以下 五 个 H2" in out
 
 
 def test_step2_omits_recommended_tech_stack_section_by_default():
@@ -148,7 +149,8 @@ def test_step2_omits_recommended_tech_stack_section_by_default():
     ))
     assert "`## 推荐技术栈`" not in out
     assert "人工推荐技术栈" not in out
-    assert "以下 三 个 H2" in out
+    assert "以下 四 个 H2" in out
+    assert "`## 上下文发现`" in out
 
 
 def test_step2_prompt_does_not_embed_design_body():
@@ -169,7 +171,7 @@ def test_step2_prompt_does_not_embed_design_body():
             "iteration-round-3.md"
         ),
     ))
-    assert len(out.encode("utf-8")) <= 4 * 1024
+    assert len(out.encode("utf-8")) <= 32 * 1024
     # The composer must reference the design doc by path, never by body.
     assert design_path in out
     # Markers that would only appear if the design body got inlined.
@@ -221,6 +223,27 @@ def _two_mount_entries() -> tuple[MountTableEntry, ...]:
     )
 
 
+def test_step2_prompt_includes_readonly_worktree_and_mount_table():
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-1", round=1,
+        design_doc_path="/ws/foo/designs/d.md",
+        user_prompt="P",
+        previous_review_path=None,
+        output_path="/tmp/x.md",
+        worktree_path="/wt-primary",
+        mount_table_entries=_two_mount_entries(),
+    ))
+    assert "默认只读探查 worktree：`/wt-primary`" in out
+    assert "## 多仓改动表" in out
+    assert "| `backend` |" in out
+    assert "| `frontend` |" in out
+    assert "只读扫描 worktree" in out
+    assert "不写代码、不修改任何文件" in out
+    assert "不扫代码" not in out
+    assert "接口/类型" in out
+    assert "验证命令候选" in out
+
+
 def test_step3_prompt_includes_paths():
     out = compose_step3(Step3Inputs(
         worktree_path="/wt", design_doc_path="/d.md",
@@ -253,7 +276,7 @@ def test_step4_prompt_includes_findings_path():
     assert "不要 `git commit` / `git push`" in out
     assert "退出前检查" in out
     assert "不要只把 JSON 打印到 stdout" in out
-    assert "建议开展项目既有的 lint / typecheck / 单元测试" in out
+    assert "建议探测包管理器和既有 lint / typecheck / 单元测试脚本" in out
     assert "未运行建议测试时" in out
 
 
@@ -464,6 +487,9 @@ def test_step3_prompt_carries_step_wall():
     assert out.index("## 本步职责墙") < out.index("## 必读路径")
     assert "path/to/file.py:123-145" in out
     assert "推荐做法" in out
+    assert "模式镜像" in out
+    assert "执行地图" in out
+    assert "`## 疑点与风险` ——" not in out
 
 
 def test_step4_prompt_carries_step_wall():
@@ -478,6 +504,9 @@ def test_step4_prompt_carries_step_wall():
     assert "不修改 ctx 文件" in out
     assert "plan_execution" in out
     assert "任务过大" in out
+    assert ".gitignore" in out
+    assert "node_modules/" in out
+    assert "gitignore_maintenance" in out
 
 
 def test_step5_prompt_carries_step_wall():
@@ -499,6 +528,19 @@ def test_step5_prompt_carries_boundary_check_rubric():
     assert "\"kind\": \"boundary_violation\"" in out
     assert "\"step\": \"step4\"" in out
     assert "擅自勾选开发计划 checkbox" in out
+    assert "只读" in out
+    assert ".gitignore" in out
+    assert "缺少 `## 疑点与风险` 不算缺节" in out
+
+
+def test_step5_prompt_carries_context_completeness_check():
+    out = compose_step5(_step5_minimal())
+    assert _CONTEXT_COMPLETENESS_GUIDE in out
+    assert "## 上下文完整性检查" in out
+    assert "No Prior Knowledge Test" in out
+    assert "降低 `plan_score_a`" in out
+    assert out.index("## 上下文完整性检查") > out.index("## 越界检查")
+    assert out.index("## 上下文完整性检查") < out.index("## 计划执行核验")
 
 
 def test_step5_prompt_carries_score_formula():
@@ -597,7 +639,7 @@ def test_step2_rendered_size_budget():
         output_path="/ws/foo/devworks/dev-x/iterations/iteration-round-1.md",
     ))
     # Wall + path-based skeleton + cumulative-plan instructions.
-    assert len(out.encode("utf-8")) <= 4 * 1024
+    assert len(out.encode("utf-8")) <= 32 * 1024
 
 
 def test_step3_rendered_size_budget():
@@ -606,7 +648,7 @@ def test_step3_rendered_size_budget():
         iteration_note_path="/n.md", output_path="/o.md",
         mount_table_entries=(),
     ))
-    assert len(out.encode("utf-8")) <= 1700
+    assert len(out.encode("utf-8")) <= 32 * 1024
 
 
 def test_step4_rendered_size_budget():
@@ -615,14 +657,14 @@ def test_step4_rendered_size_budget():
         context_path="/c.md", findings_output_path="/f.json",
         mount_table_entries=(),
     ))
-    assert len(out.encode("utf-8")) <= 4 * 1024
+    assert len(out.encode("utf-8")) <= 24 * 1024
 
 
 def test_step5_rendered_size_budget():
     out = compose_step5(_step5_minimal())
     # Budget covers wall + boundary check + next-round-hints guide +
     # aggregation/scoring rules + tail JSON schema + field rules.
-    assert len(out.encode("utf-8")) <= 12 * 1024
+    assert len(out.encode("utf-8")) <= 48 * 1024
 
 
 def test_step3_dropped_reference_paths_heading():

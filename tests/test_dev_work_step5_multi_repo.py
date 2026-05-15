@@ -134,6 +134,7 @@ def step2_append_h2(step_tag, round_n, prompt, worktree):
     path = Path(m.group(1))
     addition = (
         "\n## 本轮目标\n实现登录闭环。\n"
+        "\n## 上下文发现\n- `src/login.py:1-20`：登录入口。\n"
         "\n## 开发计划\n1. 加表单\n2. 加校验\n"
         "\n## 用例清单\n"
         "| 用例 | 输入 | 预期 | 对应设计章节 |\n"
@@ -152,7 +153,11 @@ def step3_write_ctx(step_tag, round_n, prompt, worktree):
     out = Path(m.group(1))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
-        "## 浓缩上下文\n\n- foo\n\n## 疑点与风险\n\n- bar\n",
+        "## 浓缩上下文\n\n- foo\n\n"
+        "## 模式镜像\n\n- mirror\n\n"
+        "## 执行地图\n\n| DW ID | 目标文件 | 动作 | 模式来源 | 验证命令 |\n"
+        "|---|---|---|---|---|\n"
+        "| DW-01 | src/login.py | update | src/app.py:1 | pytest |\n",
         encoding="utf-8",
     )
     return ("ok", 0)

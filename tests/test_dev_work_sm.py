@@ -142,7 +142,7 @@ def _detect_round(prompt: str) -> int:
 # ---------------------------------------------------------------------------
 
 def step2_append_h2(step_tag, round_n, prompt, worktree):
-    """Append the three required H2 sections to the iteration note."""
+    """Append the required H2 sections to the iteration note."""
     m = re.search(r"在 `([^`]+\.md)` 现有文件末尾", prompt)
     if not m:
         return ("", 1)
@@ -150,6 +150,8 @@ def step2_append_h2(step_tag, round_n, prompt, worktree):
     addition = (
         "\n## 本轮目标\n"
         "\n实现登录闭环。\n"
+        "\n## 上下文发现\n"
+        "\n- `src/login.py:1-20`：登录入口与验证命令候选。\n"
         "\n## 开发计划\n"
         "\n- [ ] DW-01: 加表单\n- [ ] DW-02: 加校验\n"
         "  - [ ] DW-02.1: 校验空邮箱\n"
@@ -175,6 +177,8 @@ def step2_append_h2_with_tech_stack(step_tag, round_n, prompt, worktree):
         "\n实现登录闭环。\n"
         "\n## 推荐技术栈\n"
         "\n- React 18\n- FastAPI\n"
+        "\n## 上下文发现\n"
+        "\n- `src/login.py:1-20`：登录入口与验证命令候选。\n"
         "\n## 开发计划\n"
         "\n- [ ] DW-01: 加表单\n- [ ] DW-02: 加校验\n"
         "  - [ ] DW-02.1: 校验空邮箱\n"
@@ -210,7 +214,14 @@ def step3_write_ctx(step_tag, round_n, prompt, worktree):
         return ("", 1)
     out = Path(m.group(1))
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("## 浓缩上下文\n\n- foo\n\n## 疑点与风险\n\n- bar\n", encoding="utf-8")
+    out.write_text(
+        "## 浓缩上下文\n\n- foo\n\n"
+        "## 模式镜像\n\n- mirror\n\n"
+        "## 执行地图\n\n| DW ID | 目标文件 | 动作 | 模式来源 | 验证命令 |\n"
+        "|---|---|---|---|---|\n"
+        "| DW-01 | src/login.py | update | src/app.py:1 | pytest |\n",
+        encoding="utf-8",
+    )
     return ("ok", 0)
 
 
@@ -1115,8 +1126,8 @@ async def test_step2_feedback_low_plan_score_encourages_plan_expansion(env):
     assert "主动补齐遗漏主 PLAN" in body
 
 
-async def test_step2_prompt_artifact_under_4kib(env):
-    """Phase 4 size guard: persisted Step2 prompt must stay ≤ 4 KiB."""
+async def test_step2_prompt_artifact_under_32kib(env):
+    """Persisted Step2 prompt has a generous budget for richer guidance."""
     script = [
         step2_append_h2, step3_write_ctx, step4_write_findings,
         _step5_writer({"score": 95, "issues": [], "problem_category": None}),
@@ -1136,8 +1147,8 @@ async def test_step2_prompt_artifact_under_4kib(env):
         workspace_slug=env["ws"]["slug"],
         relative_path=f"devworks/{dw['id']}/prompts/step2-round1.md",
     )
-    assert len(prompt_bytes) <= 4 * 1024, (
-        f"step2 prompt grew past 4 KiB: {len(prompt_bytes)} bytes"
+    assert len(prompt_bytes) <= 32 * 1024, (
+        f"step2 prompt grew past 32 KiB: {len(prompt_bytes)} bytes"
     )
 
 

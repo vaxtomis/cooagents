@@ -3,6 +3,7 @@ import { RotateCw, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import useSWR from "swr";
 import { ApiError } from "../api/client";
+import { getDevWorkContextContent } from "../api/devContexts";
 import {
   cancelDevWork,
   continueDevWork,
@@ -119,6 +120,8 @@ type NoteContentState =
   | { kind: "missing" }
   | { kind: "error"; message: string };
 
+type RoundArtifactView = "iteration" | "context";
+
 function IterationNoteList({
   notes,
   selectedId,
@@ -180,6 +183,7 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
   const detailPolling = useWorkspaceDetailPolling<DevWork>((latest) => Boolean(latest?.is_running));
   const [tab, setTab] = useState<TabId>("overview");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [roundArtifactView, setRoundArtifactView] = useState<RoundArtifactView>("iteration");
   const [actionPending, setActionPending] = useState<
     "cancel" | "continue" | "delete" | "push" | "rerun" | "resume" | null
   >(null);
@@ -245,6 +249,14 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
     { shouldRetryOnError: false, revalidateOnFocus: false },
   );
 
+  const contextContentQuery = useSWR(
+    selectedNote && roundArtifactView === "context"
+      ? ["dev-work-context-content", dvId, selectedNote.round]
+      : null,
+    () => getDevWorkContextContent(dvId, selectedNote!.round),
+    { shouldRetryOnError: false, revalidateOnFocus: false },
+  );
+
   const noteContent = useMemo<NoteContentState>(() => {
     if (!effectiveNoteId) return { kind: "idle" };
     if (noteContentQuery.error) {
@@ -258,6 +270,23 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
     if (!noteContentQuery.data) return { kind: "loading" };
     return { kind: "ok", content: noteContentQuery.data };
   }, [effectiveNoteId, noteContentQuery.error, noteContentQuery.data]);
+
+  const contextContent = useMemo<NoteContentState>(() => {
+    if (!selectedNote) return { kind: "idle" };
+    if (contextContentQuery.error) {
+      const err = contextContentQuery.error;
+      if (err instanceof ApiError) {
+        if (err.status === 404) return { kind: "missing" };
+        if (err.status === 410) {
+          return { kind: "error", message: "Step3 执行地图源文件已缺失。" };
+        }
+        return { kind: "error", message: err.message };
+      }
+      return { kind: "error", message: "Step3 执行地图加载失败" };
+    }
+    if (!contextContentQuery.data) return { kind: "loading" };
+    return { kind: "ok", content: contextContentQuery.data };
+  }, [selectedNote, contextContentQuery.error, contextContentQuery.data]);
 
   if (dvQuery.error) {
     return (
@@ -772,28 +801,86 @@ function DevWorkContent({ wsId, dvId }: { wsId: string; dvId: string }) {
               )}
             </div>
             <div>
-              {noteContent.kind === "idle" ? (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="inline-flex rounded-xl border border-border bg-panel-strong/70 p-1">
+                  <button
+                    aria-pressed={roundArtifactView === "iteration"}
+                    className={[
+                      "rounded-lg px-3 py-1.5 text-xs font-medium transition",
+                      roundArtifactView === "iteration"
+                        ? "bg-accent/18 text-copy"
+                        : "text-muted hover:text-copy",
+                    ].join(" ")}
+                    onClick={() => setRoundArtifactView("iteration")}
+                    type="button"
+                  >
+                    迭代设计
+                  </button>
+                  <button
+                    aria-pressed={roundArtifactView === "context"}
+                    className={[
+                      "rounded-lg px-3 py-1.5 text-xs font-medium transition",
+                      roundArtifactView === "context"
+                        ? "bg-accent/18 text-copy"
+                        : "text-muted hover:text-copy",
+                    ].join(" ")}
+                    onClick={() => setRoundArtifactView("context")}
+                    type="button"
+                  >
+                    Step3 执行地图
+                  </button>
+                </div>
+                {selectedNote ? (
+                  <span className="font-mono text-[11px] text-muted">
+                    round {selectedNote.round}
+                  </span>
+                ) : null}
+              </div>
+
+              {roundArtifactView === "iteration" ? (
+                noteContent.kind === "idle" ? (
+                  <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+                    选择一个迭代设计文件查看内容。
+                  </p>
+                ) : noteContent.kind === "loading" ? (
+                  <div className="h-40 animate-pulse rounded-2xl border border-border bg-panel-strong/70" />
+                ) : noteContent.kind === "missing" ? (
+                  <p className="rounded-2xl border border-warning/25 bg-warning/10 px-4 py-4 text-sm text-warning">
+                    源文件已缺失，请运行 <code className="font-mono">POST /workspaces/sync</code> 后刷新。
+                  </p>
+                ) : noteContent.kind === "error" ? (
+                  <p className="rounded-2xl border border-danger/25 bg-danger/10 px-4 py-4 text-sm text-danger">
+                    {noteContent.message}
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    <PlanChecklistPanel
+                      content={noteContent.content}
+                      planVerification={selectedPlanVerification}
+                    />
+                    <MarkdownPanel content={noteContent.content} reader />
+                  </div>
+                )
+              ) : contextContent.kind === "idle" ? (
                 <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
-                  选择一个迭代设计文件查看内容。
+                  选择一个迭代轮次查看 Step3 执行地图。
                 </p>
-              ) : noteContent.kind === "loading" ? (
+              ) : contextContent.kind === "loading" ? (
                 <div className="h-40 animate-pulse rounded-2xl border border-border bg-panel-strong/70" />
-              ) : noteContent.kind === "missing" ? (
-                <p className="rounded-2xl border border-warning/25 bg-warning/10 px-4 py-4 text-sm text-warning">
-                  源文件已缺失，请运行 <code className="font-mono">POST /workspaces/sync</code> 后刷新。
+              ) : contextContent.kind === "missing" ? (
+                <p className="rounded-2xl border border-dashed border-border bg-panel-strong/40 px-4 py-6 text-sm text-muted">
+                  本轮尚无 Step3 执行地图。
                 </p>
-              ) : noteContent.kind === "error" ? (
+              ) : contextContent.kind === "error" ? (
                 <p className="rounded-2xl border border-danger/25 bg-danger/10 px-4 py-4 text-sm text-danger">
-                  {noteContent.message}
+                  {contextContent.message}
                 </p>
               ) : (
-                <div className="space-y-4">
-                  <PlanChecklistPanel
-                    content={noteContent.content}
-                    planVerification={selectedPlanVerification}
-                  />
-                  <MarkdownPanel content={noteContent.content} reader />
-                </div>
+                <MarkdownPanel
+                  content={contextContent.content}
+                  emptyText="暂无 Step3 执行地图。"
+                  reader
+                />
               )}
             </div>
           </div>

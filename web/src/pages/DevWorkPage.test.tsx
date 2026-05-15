@@ -26,6 +26,9 @@ vi.mock("../api/devIterationNotes", () => ({
   listIterationNotes: vi.fn(),
   getIterationNoteContent: vi.fn(),
 }));
+vi.mock("../api/devContexts", () => ({
+  getDevWorkContextContent: vi.fn(),
+}));
 vi.mock("../api/reviews", () => ({
   listReviews: vi.fn(),
 }));
@@ -45,6 +48,7 @@ import {
   rerunDevWork,
   resumeDevWorkStep,
 } from "../api/devWorks";
+import { getDevWorkContextContent } from "../api/devContexts";
 import { getIterationNoteContent, listIterationNotes } from "../api/devIterationNotes";
 import { listReviews } from "../api/reviews";
 import { getGate } from "../api/gates";
@@ -53,6 +57,7 @@ import { listWorkspaceEvents } from "../api/workspaceEvents";
 beforeEach(() => {
   vi.mocked(listWorkspaceEvents).mockResolvedValue(emptyEvents);
   vi.mocked(getIterationNoteContent).mockResolvedValue("");
+  vi.mocked(getDevWorkContextContent).mockResolvedValue("");
 });
 
 afterEach(() => {
@@ -250,6 +255,79 @@ describe("DevWorkPage", () => {
     expect(within(panel).getByText("已延期，不阻断")).toBeInTheDocument();
     expect(within(panel).getByText("空邮箱提示")).toBeInTheDocument();
     expect(within(panel).getByText("已取消入口")).toHaveClass("line-through");
+  });
+
+  it("shows the selected round Step3 execution map beside the iteration design", async () => {
+    vi.mocked(getDevWork).mockResolvedValue(devWork);
+    vi.mocked(listIterationNotes).mockResolvedValue([
+      {
+        id: "note-1",
+        dev_work_id: "dv-1",
+        round: 1,
+        markdown_path: "devworks/dv-1/iteration-round-1.md",
+        score_history: [85],
+        created_at: "2026-04-23T00:00:01Z",
+      },
+    ]);
+    vi.mocked(getIterationNoteContent).mockResolvedValue("# 迭代设计\n\n## 开发计划\n");
+    vi.mocked(getDevWorkContextContent).mockResolvedValue(
+      [
+        "## 浓缩上下文",
+        "",
+        "- `src/login.ts:10` 登录入口",
+        "",
+        "## 模式镜像",
+        "",
+        "- 表单错误处理沿用 `src/errors.ts:1`",
+        "",
+        "## 执行地图",
+        "",
+        "| DW ID | 目标文件 | 动作 | 模式来源 | 验证命令 |",
+        "|---|---|---|---|---|",
+        "| DW-01 | src/login.ts | update | src/app.ts:1 | npm test |",
+      ].join("\n"),
+    );
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "迭代设计文件" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Step3 执行地图" }));
+
+    await waitFor(() => {
+      expect(getDevWorkContextContent).toHaveBeenCalledWith("dv-1", 1);
+    });
+    expect(await screen.findByText("src/login.ts")).toBeInTheDocument();
+    expect(screen.getByText("模式镜像")).toBeInTheDocument();
+    expect(screen.getByText("执行地图")).toBeInTheDocument();
+  });
+
+  it("shows an empty Step3 execution map state when the context artifact is missing", async () => {
+    vi.mocked(getDevWork).mockResolvedValue(devWork);
+    vi.mocked(listIterationNotes).mockResolvedValue([
+      {
+        id: "note-1",
+        dev_work_id: "dv-1",
+        round: 1,
+        markdown_path: "devworks/dv-1/iteration-round-1.md",
+        score_history: [85],
+        created_at: "2026-04-23T00:00:01Z",
+      },
+    ]);
+    vi.mocked(getIterationNoteContent).mockResolvedValue("# 迭代设计\n");
+    vi.mocked(getDevWorkContextContent).mockRejectedValue(
+      new ApiError(404, "context not found", null),
+    );
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(getGate).mockRejectedValue(new ApiError(404, "gate not found", null));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "迭代设计文件" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Step3 执行地图" }));
+
+    expect(await screen.findByText("本轮尚无 Step3 执行地图。")).toBeInTheDocument();
   });
 
   it("requires confirmation before cancelling a DevWork", async () => {

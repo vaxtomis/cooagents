@@ -60,7 +60,7 @@ from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
 
-_REQUIRED_H2 = ("本轮目标", "开发计划", "用例清单")
+_REQUIRED_H2 = ("本轮目标", "上下文发现", "开发计划", "用例清单")
 _RECOMMENDED_TECH_STACK_H2 = "推荐技术栈"
 
 
@@ -957,7 +957,10 @@ class DevWorkStepHandlersMixin:
         elif not recommended_tech_stack.strip():
             recommended_tech_stack = None
 
-        # 3) Compose Step2 prompt and run the LLM.
+        # 3) Compose Step2 prompt and run the LLM. Step2 now receives the
+        #    mount table for read-only repo/docs/interface inspection before
+        #    it commits to the round's implementation plan.
+        mount_entries = await self._load_mount_table_entries(dw)
         prompt_text = compose_step2(
             Step2Inputs(
                 dev_work_id=dw["id"],
@@ -967,6 +970,8 @@ class DevWorkStepHandlersMixin:
                 previous_review_path=prev_review_abs,
                 previous_iteration_note_path=prev_note_abs,
                 recommended_tech_stack=recommended_tech_stack,
+                worktree_path=dw.get("worktree_path"),
+                mount_table_entries=mount_entries,
                 output_path=note_abs,
             )
         )

@@ -5,6 +5,8 @@ Endpoints:
         — list notes for a DevWork; 404 if DevWork unknown.
     GET /api/v1/dev-iteration-notes/{note_id}/content
         — stream the markdown body of a single iteration note.
+    GET /api/v1/dev-works/{dev_id}/context/{round_n}/content
+        — stream the Step3 context markdown for a DevWork round.
 
 Read-only by contract.
 """
@@ -76,6 +78,17 @@ async def _workspace_slug_for_note(db, note_id: str) -> str | None:
     return row["slug"] if row else None
 
 
+async def _workspace_for_dev_work(db, dev_id: str) -> dict | None:
+    return await db.fetchone(
+        "SELECT d.id AS dev_work_id, d.workspace_id AS workspace_id, "
+        "w.slug AS slug "
+        "FROM dev_works d "
+        "JOIN workspaces w ON w.id = d.workspace_id "
+        "WHERE d.id=?",
+        (dev_id,),
+    )
+
+
 @router.get("/dev-works/{dev_id}/iteration-notes")
 async def list_iteration_notes(
     dev_id: str, request: Request
@@ -119,6 +132,47 @@ async def get_iteration_note_content(note_id: str, request: Request):
         raise HTTPException(
             status_code=410,
             detail=f"dev_iteration_note {note_id!r} file is missing on disk",
+        )
+    return FileResponse(
+        path=str(resolved),
+        media_type="text/markdown; charset=utf-8",
+    )
+
+
+@router.get("/dev-works/{dev_id}/context/{round_n}/content")
+async def get_dev_work_context_content(
+    dev_id: str, round_n: int, request: Request,
+):
+    if round_n < 1:
+        raise BadRequestError("round_n must be >= 1")
+
+    db = request.app.state.db
+    dev_row = await _workspace_for_dev_work(db, dev_id)
+    if dev_row is None:
+        raise NotFoundError(f"dev_work {dev_id!r} not found")
+
+    rel_path = f"devworks/{dev_id}/context/ctx-round-{round_n}.md"
+    file_row = await db.fetchone(
+        "SELECT relative_path FROM workspace_files "
+        "WHERE workspace_id=? AND relative_path=? AND kind='context'",
+        (dev_row["workspace_id"], rel_path),
+    )
+    if file_row is None:
+        raise NotFoundError(
+            f"Step3 context for dev_work {dev_id!r} round {round_n} not found"
+        )
+
+    workspaces_root = request.app.state.settings.security.resolved_workspace_root()
+    resolved = _safe_resolve_under_root(
+        file_row["relative_path"], workspaces_root, dev_row["slug"],
+    )
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                f"Step3 context for dev_work {dev_id!r} round {round_n} "
+                "is missing on disk"
+            ),
         )
     return FileResponse(
         path=str(resolved),

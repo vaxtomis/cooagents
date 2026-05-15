@@ -943,6 +943,11 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 "DELETE FROM dev_work_repos WHERE dev_work_id=?", (dev_id,),
             )
             await self.db.execute(
+                "DELETE FROM agent_executions "
+                "WHERE correlation_kind='dev_work' AND correlation_id=?",
+                (dev_id,),
+            )
+            await self.db.execute(
                 "DELETE FROM agent_dispatches "
                 "WHERE correlation_kind='dev_work' AND correlation_id=?",
                 (dev_id,),

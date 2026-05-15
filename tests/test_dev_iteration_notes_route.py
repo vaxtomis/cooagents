@@ -111,6 +111,45 @@ async def _seed_note(
     return target
 
 
+async def _seed_context(
+    db: Database,
+    ws_root: Path,
+    *,
+    dev_work_id: str = "dev-aaa",
+    round_n: int = 1,
+    write_file: bool = True,
+):
+    rel_path = f"devworks/{dev_work_id}/context/ctx-round-{round_n}.md"
+    target = ws_root / "demo" / rel_path
+    if write_file:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "## 浓缩上下文\n\n- foo\n\n"
+            "## 模式镜像\n\n- bar\n\n"
+            "## 执行地图\n\n| DW ID | 目标文件 | 动作 | 模式来源 | 验证命令 |\n"
+            "|---|---|---|---|---|\n"
+            "| DW-01 | src/login.py | update | src/app.py:1 | pytest |\n",
+            encoding="utf-8",
+        )
+    await db.execute(
+        "INSERT INTO workspace_files(id,workspace_id,relative_path,kind,"
+        "content_hash,byte_size,local_mtime_ns,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        (
+            f"wf-ctx-{round_n}",
+            "ws-aaa",
+            rel_path,
+            "context",
+            None,
+            target.stat().st_size if target.exists() else None,
+            None,
+            _now(),
+            _now(),
+        ),
+    )
+    return target
+
+
 async def test_list_returns_notes_ordered_asc(client):
     db = client.db
     ws_root = client.ws_root
@@ -186,4 +225,46 @@ async def test_content_file_missing_410(client):
         db, ws_root, note_id="note-gone", round_n=9, write_file=False,
     )
     r = await client.get("/api/v1/dev-iteration-notes/note-gone/content")
+    assert r.status_code == 410
+
+
+async def test_context_content_returns_step3_markdown(client):
+    db = client.db
+    ws_root = client.ws_root
+    await _seed_full(db, ws_root)
+    await _seed_context(db, ws_root, round_n=2)
+    r = await client.get("/api/v1/dev-works/dev-aaa/context/2/content")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/markdown")
+    assert "## 执行地图" in r.text
+    assert "DW-01" in r.text
+
+
+async def test_context_unknown_devwork_404(client):
+    r = await client.get("/api/v1/dev-works/dev-nope/context/1/content")
+    assert r.status_code == 404
+
+
+async def test_context_missing_row_404(client):
+    db = client.db
+    ws_root = client.ws_root
+    await _seed_full(db, ws_root)
+    r = await client.get("/api/v1/dev-works/dev-aaa/context/1/content")
+    assert r.status_code == 404
+
+
+async def test_context_invalid_round_400(client):
+    db = client.db
+    ws_root = client.ws_root
+    await _seed_full(db, ws_root)
+    r = await client.get("/api/v1/dev-works/dev-aaa/context/0/content")
+    assert r.status_code == 400
+
+
+async def test_context_file_missing_410(client):
+    db = client.db
+    ws_root = client.ws_root
+    await _seed_full(db, ws_root)
+    await _seed_context(db, ws_root, round_n=3, write_file=False)
+    r = await client.get("/api/v1/dev-works/dev-aaa/context/3/content")
     assert r.status_code == 410

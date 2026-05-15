@@ -600,6 +600,11 @@ class DesignWorkStateMachine:
                 "DELETE FROM design_work_repos WHERE design_work_id=?", (dw_id,),
             )
             await self.db.execute(
+                "DELETE FROM agent_executions "
+                "WHERE correlation_kind='design_work' AND correlation_id=?",
+                (dw_id,),
+            )
+            await self.db.execute(
                 "DELETE FROM agent_dispatches "
                 "WHERE correlation_kind='design_work' AND correlation_id=?",
                 (dw_id,),

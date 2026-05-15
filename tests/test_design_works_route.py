@@ -714,6 +714,42 @@ async def test_delete_cancelled_design_work_cleans_files_and_rows(client):
         ("evt-delete-design", "design_work.cancelled", ws["id"], dw_id,
          "2026-04-23T00:00:02Z"),
     )
+    await app.state.db.execute(
+        "INSERT INTO agent_dispatches(id, host_id, workspace_id, correlation_id, "
+        "correlation_kind, state, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "ad-delete-design",
+            "local",
+            ws["id"],
+            dw_id,
+            "design_work",
+            "succeeded",
+            "2026-04-23T00:00:03Z",
+            "2026-04-23T00:00:03Z",
+        ),
+    )
+    await app.state.db.execute(
+        "INSERT INTO agent_executions(id, dispatch_id, host_id, agent, "
+        "execution_mode, correlation_kind, correlation_id, run_token, cwd, "
+        "state, lease_expires_at, started_at, created_at, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "aex-delete-design",
+            "ad-delete-design",
+            "local",
+            "codex",
+            "local",
+            "design_work",
+            dw_id,
+            "rt-delete-design",
+            str(Path.cwd()),
+            "exited",
+            "2026-04-23T00:05:00Z",
+            "2026-04-23T00:00:03Z",
+            "2026-04-23T00:00:03Z",
+            "2026-04-23T00:00:03Z",
+        ),
+    )
 
     r = await client.delete(f"/api/v1/design-works/{dw_id}")
 
@@ -733,6 +769,12 @@ async def test_delete_cancelled_design_work_cleans_files_and_rows(client):
     ) is None
     assert await app.state.db.fetchone(
         "SELECT id FROM workspace_events WHERE event_id='evt-delete-design'",
+    ) is None
+    assert await app.state.db.fetchone(
+        "SELECT id FROM agent_executions WHERE id='aex-delete-design'",
+    ) is None
+    assert await app.state.db.fetchone(
+        "SELECT id FROM agent_dispatches WHERE id='ad-delete-design'",
     ) is None
 
 

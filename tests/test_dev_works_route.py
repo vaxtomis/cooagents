@@ -68,6 +68,7 @@ class ScriptedExecutor:
             with open(p, "a", encoding="utf-8") as fh:
                 fh.write(
                     "\n## 本轮目标\n\nX\n"
+                    "\n## 上下文发现\n\n- `src/login.py:1`：入口。\n"
                     "\n## 开发计划\n\n1. a\n"
                     "\n## 用例清单\n\n| u | i | e | s |\n|---|---|---|---|\n| a | b | c | d |\n"
                 )
@@ -76,7 +77,15 @@ class ScriptedExecutor:
         if m:
             p = Path(m.group(1))
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text("## 浓缩上下文\n- x\n\n## 疑点与风险\n- y\n", encoding="utf-8")
+            p.write_text(
+                "## 浓缩上下文\n- x\n\n"
+                "## 模式镜像\n- y\n\n"
+                "## 执行地图\n"
+                "| DW ID | 目标文件 | 动作 | 模式来源 | 验证命令 |\n"
+                "|---|---|---|---|---|\n"
+                "| DW-01 | src/login.py | update | src/app.py:1 | pytest |\n",
+                encoding="utf-8",
+            )
             return ("ok", 0)
         m = re.search(r"将自审结果写入 `([^`]+\.json)`", text)
         if m:
@@ -775,6 +784,42 @@ async def test_delete_escalated_dev_work_cleans_files_worktrees_and_rows(client)
         ("evt-delete-dev", "dev_work.escalated", app.state._ws["id"], dev_id,
          "2026-04-23T00:00:01Z"),
     )
+    await app.state.db.execute(
+        "INSERT INTO agent_dispatches(id, host_id, workspace_id, correlation_id, "
+        "correlation_kind, state, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "ad-delete-dev",
+            "local",
+            app.state._ws["id"],
+            dev_id,
+            "dev_work",
+            "succeeded",
+            "2026-04-23T00:00:02Z",
+            "2026-04-23T00:00:02Z",
+        ),
+    )
+    await app.state.db.execute(
+        "INSERT INTO agent_executions(id, dispatch_id, host_id, agent, "
+        "execution_mode, correlation_kind, correlation_id, run_token, cwd, "
+        "state, lease_expires_at, started_at, created_at, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "aex-delete-dev",
+            "ad-delete-dev",
+            "local",
+            "codex",
+            "local",
+            "dev_work",
+            dev_id,
+            "rt-delete-dev",
+            str(worktree_path),
+            "exited",
+            "2026-04-23T00:05:00Z",
+            "2026-04-23T00:00:02Z",
+            "2026-04-23T00:00:02Z",
+            "2026-04-23T00:00:02Z",
+        ),
+    )
 
     r = await client.delete(f"/api/v1/dev-works/{dev_id}")
 
@@ -794,6 +839,12 @@ async def test_delete_escalated_dev_work_cleans_files_worktrees_and_rows(client)
     ) is None
     assert await app.state.db.fetchone(
         "SELECT id FROM workspace_events WHERE event_id='evt-delete-dev'",
+    ) is None
+    assert await app.state.db.fetchone(
+        "SELECT id FROM agent_executions WHERE id='aex-delete-dev'",
+    ) is None
+    assert await app.state.db.fetchone(
+        "SELECT id FROM agent_dispatches WHERE id='ad-delete-dev'",
     ) is None
 
 

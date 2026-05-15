@@ -87,12 +87,15 @@ def _render_step4_execution_strategy(previous_actual_score_b: int | None) -> str
 _STEP_WALL_STEP2 = (
     "## 本步职责墙\n"
     "\n"
-    "**单一职责**：基于设计文档 + 上轮反馈，决定计划层级与验收。\n"
+    "**单一职责**：基于设计文档 + 上轮反馈 + repo/docs/interface "
+    "只读探查，决定计划层级、实现上下文与验收。\n"
     "**唯一输出**：在 iteration-round-N.md 末尾追加 H2"
-    "（本轮目标 / 推荐技术栈 / 开发计划 / 用例清单）；"
+    "（本轮目标 / 推荐技术栈 / 上下文发现 / 开发计划 / 用例清单）；"
     "开发计划用稳定 DW-xx checkbox checklist。\n"
-    "**明确禁止**：不扫代码、不写代码、不决定文件级实现路径、"
-    "不修改 front-matter、不写入其它文件。\n"
+    "**明确允许**：只读扫描 worktree、仓库文档、接口/类型、配置、"
+    "相似实现和相邻测试；可记录文件级证据与验证命令候选。\n"
+    "**明确禁止**：不写代码、不修改任何文件、不执行破坏性命令、"
+    "不 `git commit` / `git push`、不修改 front-matter、不写入其它文件。\n"
     "**越界即失败**：违反任何上述禁止，本轮 Step5 将以 "
     "`kind=\"boundary_violation\"` 记录并影响打分。"
 )
@@ -100,15 +103,15 @@ _STEP_WALL_STEP2 = (
 _STEP_WALL_STEP3 = (
     "## 本步职责墙\n"
     "\n"
-    "**单一职责**：基于本轮迭代规划，扫 worktree 决定「在哪里改、"
-    "有什么坑」，并探查与本轮改动可能关联的代码"
-    "（调用方、相似实现、依赖链、相邻测试）。\n"
-    "**唯一输出**：在 ctx-round-N.md 写入两段 H2"
-    "（浓缩上下文 / 疑点风险）。\n"
+    "**单一职责**：基于本轮迭代规划和 Step2 上下文发现，复核"
+    "「在哪里改、照什么模式改、如何验证」。\n"
+    "**唯一输出**：在 ctx-round-N.md 写入三段 H2"
+    "（浓缩上下文 / 模式镜像 / 执行地图）。\n"
     "**推荐做法**：可用一两句话简述相关代码逻辑；**强烈推荐**"
     "为每个相关位置附代码引用 `path/to/file.py:123-145`，"
     "Step4 据此精确定位。\n"
     "**明确禁止**：不写代码、不改设计文档、不重写迭代规划、"
+    "不输出独立 `## 疑点与风险` 章节、"
     "不拷贝整段源代码到输出、不写入其它文件。\n"
     "**越界即失败**：违反任何上述禁止，本轮 Step5 将以 "
     "`kind=\"boundary_violation\"` 记录并影响打分。"
@@ -117,11 +120,14 @@ _STEP_WALL_STEP3 = (
 _STEP_WALL_STEP4 = (
     "## 本步职责墙\n"
     "\n"
-    "**单一职责**：基于规划+上下文，写代码 + 跑既有 lint/typecheck/"
-    "unit + 自审。\n"
-    "**唯一输出**：worktree 源码改动（保留为未提交变更）+ "
+    "**单一职责**：基于规划+上下文，维护必要 `.gitignore`，写代码 + "
+    "跑既有 lint/typecheck/unit + 自审。\n"
+    "**唯一输出**：worktree 源码/测试/必要 `.gitignore` 改动"
+    "（保留为未提交变更）+ "
     "step4-findings-roundN.json，其中 `plan_execution` 申报已执行、"
     "延期或阻塞的计划项。\n"
+    "**明确允许**：补充 `.gitignore`、清理生成/依赖/缓存路径，"
+    "或从 index/status 移除误纳入的生成物；不得删除业务源码、测试或 lockfile。\n"
     "**明确禁止**：不修改 iteration_note 文件、不勾选开发计划 checkbox、"
     "不修改 ctx 文件、"
     "不重新规划、不 `git commit` / `git push`、不写入 `.coop/` 之外的诊断文件。\n"
@@ -150,16 +156,19 @@ _BOUNDARY_CHECK_RUBRIC = (
     "除了基于设计文档 rubric 的内容质量评分外，**额外**检查本轮各 step "
     "是否守住了职责墙：\n"
     "\n"
-    "1. **Step2 是否越界**：iteration-round-N.md 是否只追加了三段必需 H2"
+    "1. **Step2 是否越界**：iteration-round-N.md 是否只追加了四段必需 H2"
     "（有人工推荐时可额外追加 `## 推荐技术栈`）、"
-    "front-matter 与 H1 未被改动？是否包含了不该有的代码块或文件级"
-    "实现路径？\n"
-    "2. **Step3 是否越界**：ctx-round-N.md 是否只有两段 H2"
-    "（浓缩上下文 / 疑点风险）？是否拷贝了整段源代码而非摘要？"
-    "是否反向修改了设计文档或 iteration-round-N.md？\n"
+    "front-matter 与 H1 未被改动？Step2 的 repo/docs/interface 探查是否"
+    "保持只读，未写代码、未改文件、未执行破坏性命令？\n"
+    "2. **Step3 是否越界**：ctx-round-N.md 是否只有三段 H2"
+    "（浓缩上下文 / 模式镜像 / 执行地图）？是否拷贝了整段源代码而非摘要？"
+    "是否反向修改了设计文档或 iteration-round-N.md？"
+    "缺少 `## 疑点与风险` 不算缺节，不要要求该章节。\n"
     "3. **Step4 是否越界**：iteration-round-N.md / ctx-round-N.md "
     "是否被 Step4 改动（包括擅自勾选开发计划 checkbox）？"
     "是否产生了 `.coop/` 之外的诊断文件？"
+    "Step4 修改 `.gitignore`、清理生成/依赖/缓存路径、从 index/status "
+    "移除误纳入生成物不算越界；但不得借此删除业务源码、测试或 lockfile。"
     "是否擅自 `git commit`？\n"
     "\n"
     "对每一条**越界**事实，向 `issues` 数组追加一条对象，**必须**带 "
@@ -195,6 +204,17 @@ _PLAN_VERIFICATION_GUIDE = (
     "`watch_unfinished` 做常态化轻量核验，确认是否仍未完成或本轮已补齐；"
     "`carry_forward` 可继承上一轮 `done+verified` 结论，但仍必须在"
     " `plan_verification` 输出该 ID，并带 `verification_mode=\"carried_forward\"`。"
+)
+
+_CONTEXT_COMPLETENESS_GUIDE = (
+    "## 上下文完整性检查（No Prior Knowledge Test）\n"
+    "\n"
+    "额外评估 Step2 `## 上下文发现` 与 Step3 ctx 是否足够支撑 Step4 "
+    "精准开发。一个不熟悉代码库的开发者应能主要依赖这些产物找到入口、"
+    "模式、接口/类型、测试位置和验证命令；如果仍必须重新广泛搜索代码库，"
+    "说明计划上下文不足，应降低 `plan_score_a`。若上下文不足导致开发计划"
+    "缺关键实现路径、接口约束或测试策略，优先归为 `req_gap`；只缺少少量"
+    "证据引用时，可在 `issues` 或 `next_round_hints` 中记录并轻微扣分。"
 )
 
 # Forward-looking hints written to next_round_hints[] for Round N+1's
@@ -288,6 +308,10 @@ class Step2Inputs:
     previous_review_path: str | None
     # Absolute path the LLM should append to.
     output_path: str
+    # Primary worktree used for read-only repo/docs/interface inspection in
+    # Step2. Older tests may omit it; production callers pass the real path.
+    worktree_path: str | None = None
+    mount_table_entries: tuple[MountTableEntry, ...] = ()
     # Absolute POSIX path to the previous round's iteration design. None on
     # round 1. Round N uses this to carry forward cumulative plan items.
     previous_iteration_note_path: str | None = None
@@ -321,13 +345,18 @@ def compose_step2(inputs: Step2Inputs) -> str:
                 inputs.recommended_tech_stack
             )
         ),
-        h2_count="四" if has_tech_stack else "三",
-        development_plan_requirement_number=(
+        h2_count="五" if has_tech_stack else "四",
+        context_discovery_requirement_number=(
             "3" if has_tech_stack else "2"
         ),
-        use_case_requirement_number=(
+        development_plan_requirement_number=(
             "4" if has_tech_stack else "3"
         ),
+        use_case_requirement_number=(
+            "5" if has_tech_stack else "4"
+        ),
+        worktree_path=inputs.worktree_path or "_(no primary worktree)_",
+        mount_table=_render_mount_table(inputs.mount_table_entries),
         output_path=inputs.output_path,
         step_wall=_STEP_WALL_STEP2,
     )
@@ -552,6 +581,7 @@ def compose_step5(inputs: Step5Inputs) -> str:
         output_json_path=inputs.output_json_path,
         step_wall=_STEP_WALL_STEP5,
         boundary_check=_BOUNDARY_CHECK_RUBRIC,
+        context_completeness_check=_CONTEXT_COMPLETENESS_GUIDE,
         plan_verification_guide=_PLAN_VERIFICATION_GUIDE,
         plan_audit_targets=(
             inputs.plan_audit_targets
