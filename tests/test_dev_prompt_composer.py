@@ -489,6 +489,11 @@ def test_step3_prompt_carries_step_wall():
     assert "推荐做法" in out
     assert "模式镜像" in out
     assert "执行地图" in out
+    assert "MIRROR" in out
+    assert "ADAPT" in out
+    assert "AVOID" in out
+    assert "不要把旧代码、过时实现或 MVP 临时写法默认当成最佳实践" in out
+    assert "模式决策/边界" in out
     assert "`## 疑点与风险` ——" not in out
 
 
@@ -507,6 +512,9 @@ def test_step4_prompt_carries_step_wall():
     assert ".gitignore" in out
     assert "node_modules/" in out
     assert "gitignore_maintenance" in out
+    assert "ADAPT" in out
+    assert "AVOID" in out
+    assert "WHAT/WHY/边界" in out
 
 
 def test_step5_prompt_carries_step_wall():
@@ -539,6 +547,9 @@ def test_step5_prompt_carries_context_completeness_check():
     assert "## 上下文完整性检查" in out
     assert "No Prior Knowledge Test" in out
     assert "降低 `plan_score_a`" in out
+    assert "模式健康度判断" in out
+    assert "坏模式" in out
+    assert "降低 `actual_score_b`" in out
     assert out.index("## 上下文完整性检查") > out.index("## 越界检查")
     assert out.index("## 上下文完整性检查") < out.index("## 计划执行核验")
 

@@ -146,6 +146,15 @@ def test_build_prompt_cmd_with_file(runner):
     assert cmd[-6:] == ["codex", "prompt", "--session", "n", "--file", "/abs/task.md"]
 
 
+def test_build_prompt_cmd_can_omit_timeout(runner):
+    s = Session(name="n", anchor_cwd="/A", agent="codex", created_at=FIXED_CLOCK)
+    cmd = runner._build_prompt_cmd(
+        s, text=None, task_file="/abs/task.md", timeout_sec=None,
+    )
+    assert "--timeout" not in cmd
+    assert cmd[-6:] == ["codex", "prompt", "--session", "n", "--file", "/abs/task.md"]
+
+
 def test_build_prompt_cmd_rejects_both_text_and_file(runner):
     s = Session(name="n", anchor_cwd="/A", agent="claude", created_at=FIXED_CLOCK)
     with pytest.raises(AssertionError):
@@ -329,6 +338,24 @@ async def test_status_session_parses_kv_body(monkeypatch, runner):
     s = Session(name="n", anchor_cwd="/A", agent="claude", created_at=FIXED_CLOCK)
     parsed = await runner.status_session(s)
     assert parsed == {"session": "-", "status": "no-session"}
+
+
+@pytest.mark.asyncio
+async def test_status_session_parses_json_body(monkeypatch, runner):
+    _capture_subprocess(
+        monkeypatch,
+        stdout=json.dumps({
+            "action": "status_snapshot",
+            "status": "alive",
+            "summary": "queue owner healthy",
+            "pid": 123,
+        }).encode("utf-8"),
+        rc=0,
+    )
+    s = Session(name="n", anchor_cwd="/A", agent="claude", created_at=FIXED_CLOCK)
+    parsed = await runner.status_session(s)
+    assert parsed["status"] == "alive"
+    assert parsed["pid"] == 123
 
 
 @pytest.mark.asyncio
@@ -522,8 +549,8 @@ async def test_orphan_sweep_skips_when_list_rc_nonzero(monkeypatch, runner):
 
 
 @pytest.mark.asyncio
-async def test_prompt_session_with_progress_delegates_to_run_with_progress():
-    """Phase 9: session-mode dispatch fires the same heartbeat machinery."""
+async def test_prompt_session_with_progress_polls_session_activity():
+    """Session-mode dispatch uses session activity instead of acpx timeout."""
 
     class _FakeExecutor:
         def _resolve_agent(self, t):
@@ -539,17 +566,27 @@ async def test_prompt_session_with_progress_delegates_to_run_with_progress():
 
     async def _fake_rwp(
         *, cmd, cwd, heartbeat, heartbeat_interval_s,
-        idle_timeout_s, step_tag,
+        idle_timeout_s, step_tag, advance_probe,
     ):
         captured["cmd"] = list(cmd)
         captured["cwd"] = cwd
         captured["step_tag"] = step_tag
         captured["heartbeat_interval_s"] = heartbeat_interval_s
         captured["idle_timeout_s"] = idle_timeout_s
+        captured["advanced"] = await advance_probe()
         await heartbeat(ProgressTick(ts=FIXED_CLOCK, elapsed_s=1))
         return "ok", 0, [ProgressTick(ts=FIXED_CLOCK, elapsed_s=1)]
 
     runner.run_with_progress = _fake_rwp  # type: ignore[method-assign]
+    activity = [
+        {"name": "dw-x-r1-plan", "cwd": "/anchor", "lastSeq": 1},
+        {"name": "dw-x-r1-plan", "cwd": "/anchor", "lastSeq": 2},
+    ]
+
+    async def _fake_session_record(_session):
+        return activity.pop(0)
+
+    runner._session_record = _fake_session_record  # type: ignore[method-assign]
 
     ticks: list[ProgressTick] = []
 
@@ -570,6 +607,7 @@ async def test_prompt_session_with_progress_delegates_to_run_with_progress():
     assert len(log) == 1
     assert len(ticks) == 1
     assert "prompt" in captured["cmd"]
+    assert "--timeout" not in captured["cmd"]
     assert "--session" in captured["cmd"]
     assert "dw-x-r1-plan" in captured["cmd"]
     assert "--file" in captured["cmd"]
@@ -577,6 +615,7 @@ async def test_prompt_session_with_progress_delegates_to_run_with_progress():
     assert captured["step_tag"] == "STEP2_ITERATION"
     assert captured["heartbeat_interval_s"] == 0.5
     assert captured["idle_timeout_s"] == 10.0
+    assert captured["advanced"] is True
 
 
 # ---- run_with_progress (Phase 3) ----------------------------------------

@@ -102,6 +102,7 @@ class ProgressTick:
 
 
 HeartbeatCallback = Callable[[ProgressTick], Awaitable[None]]
+AdvanceProbe = Callable[[], Awaitable[bool]]
 
 
 class SessionLifecycleError(RuntimeError):
@@ -225,15 +226,15 @@ class LLMRunner:
         *,
         text: str | None,
         task_file: str | None,
-        timeout_sec: int,
+        timeout_sec: int | None,
     ) -> list[str]:
         assert (text is None) != (task_file is None), (
             "prompt_session requires exactly one of text or task_file"
         )
-        cmd = self._common_flags(session.anchor_cwd) + [
-            "--timeout", str(timeout_sec),
-            session.agent, "prompt", "--session", session.name,
-        ]
+        cmd = self._common_flags(session.anchor_cwd)
+        if timeout_sec is not None:
+            cmd += ["--timeout", str(timeout_sec)]
+        cmd += [session.agent, "prompt", "--session", session.name]
         if task_file is not None:
             cmd += ["--file", task_file]
         else:
@@ -531,6 +532,7 @@ class LLMRunner:
         dispatch_id: str | None = None,
         host_id: str | None = None,
         session_name: str | None = None,
+        advance_probe: AdvanceProbe | None = None,
     ) -> tuple[str, int, list[ProgressTick]]:
         """Spawn ``cmd`` and call ``heartbeat`` on every interval tick.
 
@@ -621,9 +623,20 @@ class LLMRunner:
                             execution_id,
                             exc_info=True,
                         )
-                # Phase 3 oneshot: process-alive == advance. Phase 4 swaps
-                # this for a status_session-derived predicate.
-                if proc.returncode is None:
+                if advance_probe is None:
+                    # Phase 3 oneshot: process-alive == advance.
+                    advanced = proc.returncode is None
+                else:
+                    try:
+                        advanced = await advance_probe()
+                    except Exception:
+                        advanced = False
+                        logger.warning(
+                            "llm_runner: advance probe failed at step=%r",
+                            step_tag,
+                            exc_info=True,
+                        )
+                if advanced:
                     last_advance = now
                 if (now - last_advance) >= idle_timeout_s:
                     logger.warning(
@@ -780,12 +793,14 @@ class LLMRunner:
 
         Phase 9: the SM-level wrapper that turns "session-mode dispatch"
         into a drop-in replacement for the oneshot heartbeat path.
-        Builds the same ``prompt --session`` cmd as :meth:`prompt_session`
-        then delegates to :meth:`run_with_progress` so heartbeat /
-        idle-timeout semantics stay identical to oneshot.
+        Builds the same ``prompt --session`` cmd as :meth:`prompt_session`,
+        but intentionally omits ``acpx --timeout``. DevWork session turns can
+        keep writing after the acpx transport times out; completion must come
+        from the prompt command naturally finishing, while idle detection uses
+        session-record progress instead of direct process liveness.
         """
         cmd = self._build_prompt_cmd(
-            session, text=text, task_file=task_file, timeout_sec=timeout_sec,
+            session, text=text, task_file=task_file, timeout_sec=None,
         )
         execution_kwargs: dict[str, str] = {}
         if execution_id:
@@ -798,6 +813,18 @@ class LLMRunner:
             execution_kwargs["host_id"] = host_id
         if execution_kwargs:
             execution_kwargs["session_name"] = session.name
+        last_activity = await self._session_activity_token(session)
+
+        async def advance_probe() -> bool:
+            nonlocal last_activity
+            current = await self._session_activity_token(session)
+            if current is None:
+                return False
+            if current != last_activity:
+                last_activity = current
+                return True
+            return False
+
         return await self.run_with_progress(
             cmd=cmd,
             cwd=session.anchor_cwd,
@@ -805,11 +832,12 @@ class LLMRunner:
             heartbeat_interval_s=heartbeat_interval_s,
             idle_timeout_s=idle_timeout_s,
             step_tag=step_tag,
+            advance_probe=advance_probe,
             **execution_kwargs,
         )
 
-    async def status_session(self, session: Session) -> dict[str, str]:
-        """Parse ``status --session`` ``key: value`` lines into a dict.
+    async def status_session(self, session: Session) -> dict[str, Any]:
+        """Parse ``status --session`` JSON or ``key: value`` lines.
 
         Returns ``{}`` if rc != 0. ``{"session": "-", "status": "no-session"}``
         for an unknown session is rc=0 and is returned as-is (spike Q(b)).
@@ -820,6 +848,12 @@ class LLMRunner:
         )
         if rc != 0:
             return {}
+        try:
+            parsed_json = json.loads(stdout)
+        except json.JSONDecodeError:
+            parsed_json = None
+        if isinstance(parsed_json, dict):
+            return parsed_json
         parsed: dict[str, str] = {}
         for line in stdout.splitlines():
             if ":" not in line:
@@ -827,6 +861,57 @@ class LLMRunner:
             key, _, value = line.partition(":")
             parsed[key.strip()] = value.strip()
         return parsed
+
+    async def _session_record(self, session: Session) -> dict[str, Any] | None:
+        cmd = self._build_list_cmd(session.agent, session.anchor_cwd)
+        stdout, _stderr, rc = await self._run_local(
+            cmd, session.anchor_cwd, timeout=30.0,
+        )
+        if rc != 0:
+            return None
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, list):
+            return None
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            if item.get("name") != session.name:
+                continue
+            if item.get("cwd") not in (None, session.anchor_cwd):
+                continue
+            return item
+        return None
+
+    async def _session_activity_token(
+        self, session: Session,
+    ) -> tuple[Any, ...] | None:
+        record = await self._session_record(session)
+        if record is None:
+            return None
+        messages = record.get("messages")
+        message_count = len(messages) if isinstance(messages, list) else None
+        event_log = record.get("eventLog")
+        if not isinstance(event_log, dict):
+            event_log = {}
+        return (
+            record.get("lastSeq") or record.get("last_seq"),
+            record.get("lastUsedAt") or record.get("last_used_at"),
+            record.get("updated_at"),
+            record.get("lastPromptAt") or record.get("last_prompt_at"),
+            record.get("lastAgentExitAt") or record.get("last_agent_exit_at"),
+            record.get("lastAgentExitCode")
+            if "lastAgentExitCode" in record
+            else record.get("last_agent_exit_code"),
+            record.get("lastAgentExitSignal")
+            if "lastAgentExitSignal" in record
+            else record.get("last_agent_exit_signal"),
+            record.get("closed"),
+            message_count,
+            event_log.get("last_write_error"),
+        )
 
     async def cancel_session(self, session: Session) -> None:
         """Best-effort cancel; logs warning on rc != 0 but does not raise.
