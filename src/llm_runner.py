@@ -797,7 +797,7 @@ class LLMRunner:
         but intentionally omits ``acpx --timeout``. DevWork session turns can
         keep writing after the acpx transport times out; completion must come
         from the prompt command naturally finishing, while idle detection uses
-        session-record progress instead of direct process liveness.
+        ``status --session`` liveness instead of direct process liveness.
         """
         cmd = self._build_prompt_cmd(
             session, text=text, task_file=task_file, timeout_sec=None,
@@ -813,15 +813,10 @@ class LLMRunner:
             execution_kwargs["host_id"] = host_id
         if execution_kwargs:
             execution_kwargs["session_name"] = session.name
-        last_activity = await self._session_activity_token(session)
-
         async def advance_probe() -> bool:
-            nonlocal last_activity
-            current = await self._session_activity_token(session)
-            if current is None:
-                return False
-            if current != last_activity:
-                last_activity = current
+            status = await self.status_session(session)
+            state = str(status.get("status") or "").lower()
+            if state in {"alive", "running", "busy"}:
                 return True
             return False
 
@@ -861,57 +856,6 @@ class LLMRunner:
             key, _, value = line.partition(":")
             parsed[key.strip()] = value.strip()
         return parsed
-
-    async def _session_record(self, session: Session) -> dict[str, Any] | None:
-        cmd = self._build_list_cmd(session.agent, session.anchor_cwd)
-        stdout, _stderr, rc = await self._run_local(
-            cmd, session.anchor_cwd, timeout=30.0,
-        )
-        if rc != 0:
-            return None
-        try:
-            payload = json.loads(stdout)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(payload, list):
-            return None
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            if item.get("name") != session.name:
-                continue
-            if item.get("cwd") not in (None, session.anchor_cwd):
-                continue
-            return item
-        return None
-
-    async def _session_activity_token(
-        self, session: Session,
-    ) -> tuple[Any, ...] | None:
-        record = await self._session_record(session)
-        if record is None:
-            return None
-        messages = record.get("messages")
-        message_count = len(messages) if isinstance(messages, list) else None
-        event_log = record.get("eventLog")
-        if not isinstance(event_log, dict):
-            event_log = {}
-        return (
-            record.get("lastSeq") or record.get("last_seq"),
-            record.get("lastUsedAt") or record.get("last_used_at"),
-            record.get("updated_at"),
-            record.get("lastPromptAt") or record.get("last_prompt_at"),
-            record.get("lastAgentExitAt") or record.get("last_agent_exit_at"),
-            record.get("lastAgentExitCode")
-            if "lastAgentExitCode" in record
-            else record.get("last_agent_exit_code"),
-            record.get("lastAgentExitSignal")
-            if "lastAgentExitSignal" in record
-            else record.get("last_agent_exit_signal"),
-            record.get("closed"),
-            message_count,
-            event_log.get("last_write_error"),
-        )
 
     async def cancel_session(self, session: Session) -> None:
         """Best-effort cancel; logs warning on rc != 0 but does not raise.

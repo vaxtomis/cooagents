@@ -14,7 +14,8 @@ The mixin expects the concrete class to provide:
   * ``self.db`` / ``self.workspaces`` / ``self.iteration_notes`` / ``self.registry``
   * ``self.config.devwork`` — step timeouts + max_rounds
   * ``self._now()`` / ``self._run_llm`` / ``self._gates`` /
-    ``self._update_gates_field`` / ``self._transition`` /
+    ``self._update_gates_field`` / ``self._store_step_failure_resume`` /
+    ``self._transition`` /
     ``self._record_review`` / ``self._resolve_rubric_threshold`` /
     ``self._load_mount_table_entries`` /
     ``self._escalate`` / ``self._loop_or_escalate`` / ``self._abs_for``
@@ -344,6 +345,35 @@ def _apply_plan_verification_checkboxes(
 
 class DevWorkStepHandlersMixin:
     """Mixin providing Step2–Step5 handlers for DevWorkStateMachine."""
+
+    async def _retry_step2_same_round_or_escalate(
+        self,
+        dw: dict[str, Any],
+        *,
+        round_n: int,
+        reason: str,
+        problem_category: ProblemCategory,
+    ) -> None:
+        retry_key = f"step2_retry_round{round_n}"
+        gates = await self._gates(dw["id"])
+        attempt_raw = gates.get(retry_key, 0)
+        attempt = attempt_raw if isinstance(attempt_raw, int) else 0
+        if attempt < 1:
+            await self._update_gates_field(dw["id"], retry_key, attempt + 1)
+            return
+
+        escalated_reason = f"{reason} after Step2 retry"
+        await self._store_step_failure_resume(
+            dw,
+            back_to=DevWorkStep.STEP2_ITERATION,
+            reason=escalated_reason,
+            problem_category=problem_category,
+        )
+        await self._escalate(
+            dw,
+            reason=escalated_reason,
+            problem_category=problem_category,
+        )
 
     async def _index_step4_findings_with_wait(
         self,
@@ -993,9 +1023,9 @@ class DevWorkStepHandlersMixin:
             session_role="plan",
         )
         if rc != 0:
-            await self._loop_or_escalate(
+            await self._retry_step2_same_round_or_escalate(
                 dw,
-                back_to=DevWorkStep.STEP2_ITERATION,
+                round_n=round_n,
                 reason=f"Step2 LLM rc={rc}",
                 problem_category=ProblemCategory.req_gap,
             )

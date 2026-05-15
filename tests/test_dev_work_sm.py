@@ -208,6 +208,10 @@ def step2_rc1(step_tag, round_n, prompt, worktree):
     return ("", 1)
 
 
+def step2_rc124(step_tag, round_n, prompt, worktree):
+    return ("", 124)
+
+
 def step3_write_ctx(step_tag, round_n, prompt, worktree):
     m = re.search(r"在 `([^`]+\.md)` 写入", prompt)
     if not m:
@@ -1338,6 +1342,60 @@ async def test_step2_missing_h2_loops_as_req_gap(env):
     )
     assert "System validation feedback" in feedback
     assert "Step2 missing H2" in feedback
+
+
+async def test_step2_nonzero_rc_retries_same_round_without_round_progress(env):
+    script = [
+        step2_rc124,
+        step2_append_h2,
+        step3_write_ctx,
+        step4_write_findings,
+        _step5_writer({"score": 90, "issues": [], "problem_category": None}),
+    ]
+    executor = ScriptedExecutor(script)
+    sm = _make_sm(env, executor)
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "COMPLETED"
+    assert final["iteration_rounds"] == 0
+    step2_calls = [call for call in executor.calls if call["step"] == "STEP2"]
+    assert step2_calls
+    assert {call["round"] for call in step2_calls} == {1}
+    rows = await env["db"].fetchall(
+        "SELECT round, markdown_path FROM dev_iteration_notes "
+        "WHERE dev_work_id=? ORDER BY round",
+        (dw["id"],),
+    )
+    assert [(r["round"], r["markdown_path"]) for r in rows] == [
+        (1, f"devworks/{dw['id']}/iteration-round-1.md")
+    ]
+    dev_root = env["ws_root"] / env["ws"]["slug"] / "devworks" / dw["id"]
+    assert not (dev_root / "iteration-round-2.md").exists()
+
+
+async def test_step2_nonzero_rc_twice_escalates_without_round_progress(env):
+    sm = _make_sm(env, ScriptedExecutor([step2_rc124, step2_rc124]))
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"],
+        design_doc_id=env["dd"]["id"],
+        repo_refs=_refs_arg(env),
+        prompt="build login",
+    )
+
+    final = await sm.run_to_completion(dw["id"])
+
+    assert final["current_step"] == "ESCALATED"
+    assert final["iteration_rounds"] == 0
+    assert final["last_problem_category"] == ProblemCategory.req_gap.value
+    assert sm.can_resume_step_after_escalation(final) is True
+    assert sm.resume_step_for_escalation(final) == "STEP2_ITERATION"
 
 
 async def test_step4_format_error_is_visible_in_retry_prompt(env):

@@ -549,8 +549,8 @@ async def test_orphan_sweep_skips_when_list_rc_nonzero(monkeypatch, runner):
 
 
 @pytest.mark.asyncio
-async def test_prompt_session_with_progress_polls_session_activity():
-    """Session-mode dispatch uses session activity instead of acpx timeout."""
+async def test_prompt_session_with_progress_polls_session_status():
+    """Session-mode dispatch uses session status instead of acpx timeout."""
 
     class _FakeExecutor:
         def _resolve_agent(self, t):
@@ -578,15 +578,11 @@ async def test_prompt_session_with_progress_polls_session_activity():
         return "ok", 0, [ProgressTick(ts=FIXED_CLOCK, elapsed_s=1)]
 
     runner.run_with_progress = _fake_rwp  # type: ignore[method-assign]
-    activity = [
-        {"name": "dw-x-r1-plan", "cwd": "/anchor", "lastSeq": 1},
-        {"name": "dw-x-r1-plan", "cwd": "/anchor", "lastSeq": 2},
-    ]
 
-    async def _fake_session_record(_session):
-        return activity.pop(0)
+    async def _fake_status_session(_session):
+        return {"status": "alive", "summary": "queue owner healthy"}
 
-    runner._session_record = _fake_session_record  # type: ignore[method-assign]
+    runner.status_session = _fake_status_session  # type: ignore[method-assign]
 
     ticks: list[ProgressTick] = []
 
