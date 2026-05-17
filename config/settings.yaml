@@ -61,8 +61,8 @@ scoring:
 devwork:
   max_rounds: 10
 
-preferred_design_agent: "claude"
-preferred_dev_agent: "claude"
+preferred_design_agent: "codex"
+preferred_dev_agent: "codex"
 
 openclaw:
   deploy_skills: true
