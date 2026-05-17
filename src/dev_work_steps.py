@@ -61,7 +61,7 @@ from src.workspace_events import emit_and_deliver
 
 logger = logging.getLogger(__name__)
 
-_REQUIRED_H2 = ("本轮目标", "上下文发现", "开发计划", "用例清单")
+_REQUIRED_H2 = ("本轮目标", "上下文发现", "开发计划", "验收映射")
 _RECOMMENDED_TECH_STACK_H2 = "推荐技术栈"
 
 

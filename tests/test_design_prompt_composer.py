@@ -31,10 +31,27 @@ def test_later_round_lists_missing():
 
 def test_prompt_mentions_new_contract_sections():
     rendered = compose_prompt(_base())
+    assert "## 问题与目标" in rendered
     assert "## 场景案例" in rendered
+    assert "## 范围与非目标" in rendered
+    assert "## 技术约束与集成边界" in rendered
+    assert "## 交付切片" in rendered
+    assert "## 决策记录" in rendered
     assert "### SC-xx <标题>" in rendered
     assert "- [ ] AC-xx: ..." in rendered
+    assert "PH-xx" in rendered
     assert "维度 | 权重 | 判定标准" in rendered
+
+
+def test_prompt_marks_design_devwork_boundary():
+    rendered = compose_prompt(_base())
+    assert "需求与验收契约" in rendered
+    assert "不得输出 `DW-xx`" in rendered
+    assert "不得输出 checkbox 开发任务" in rendered
+    assert "不得写文件级修改计划" in rendered
+    assert "TBD - needs research" in rendered
+    assert "Assumption - needs validation" in rendered
+    assert "DevWork Step2" in rendered
 
 
 def test_mockup_true_includes_instruction():

@@ -51,7 +51,7 @@ function renderPage() {
     return <div data-testid="location-probe">{location.pathname}</div>;
   }
 
-  render(
+  return render(
     <SWRConfig value={{ dedupingInterval: 0, provider: () => new Map(), revalidateOnFocus: false }}>
       <MemoryRouter initialEntries={["/workspaces/ws-1/design-works/dw-1"]}>
         <LocationProbe />
@@ -88,6 +88,72 @@ const eventsEnvelope: WorkspaceEventsEnvelope = {
   events: [],
   pagination: { limit: 8, offset: 0, total: 0, has_more: false },
 };
+
+const designDocV2 = `---
+title: Checkout flow
+goal: Let buyers complete payment
+version: 2.0.0
+rubric_threshold: 90
+needs_frontend_mockup: false
+---
+
+# Checkout flow
+
+## 问题与目标
+
+- 问题: Buyers cannot complete payment.
+- 证据: Support tickets mention abandoned checkout.
+- 关键假设: Assumption - needs validation: Card payment is first.
+- 成功信号: Paid orders are visible.
+
+## 用户故事
+
+As a buyer, I want to pay for my cart.
+
+## 场景案例
+
+### SC-01 Successful payment
+
+- Actor: Buyer
+- Expected Result: The order is paid.
+
+## 范围与非目标
+
+| 优先级 | 范围项 | 说明 |
+|---|---|---|
+| Must | Card checkout | Complete the primary payment path |
+
+## 详细操作流程
+
+1. Buyer submits payment.
+
+## 验收标准
+
+- [ ] AC-01: Valid payment creates a paid order.
+
+## 技术约束与集成边界
+
+- 依赖系统: Payment API.
+
+## 交付切片
+
+| PH ID | 能力 | 依赖 | 可并行性 | 完成信号 |
+|---|---|---|---|---|
+| PH-01 | Successful card payment | Payment API | - | AC-01 passes |
+
+## 决策记录
+
+| 决策 | 选择 | 备选 | 理由 |
+|---|---|---|---|
+| Payment method | Card first | Wallet | Lowest launch risk |
+
+## 打分 rubric
+
+| 维度 | 权重 | 判定标准 |
+|---|---:|---|
+| 完整性 | 40 | Required sections are present |
+| 对齐度 | 60 | Acceptance maps to delivery |
+`;
 
 describe("DesignWorkPage", () => {
   it("renders escalated banner and missing_sections chips when state=ESCALATED", async () => {
@@ -131,6 +197,36 @@ describe("DesignWorkPage", () => {
     expect(
       await screen.findByRole("img", { name: "DesignWork 实际执行轮次 2/4，已记录" }),
     ).toBeInTheDocument();
+  });
+
+  it("renders DesignDoc delivery as structured view with Markdown fallback", async () => {
+    vi.mocked(getDesignWork).mockResolvedValue({
+      ...baseDesignWork,
+      current_state: "COMPLETED",
+      output_design_doc_id: "doc-1",
+    });
+    vi.mocked(listReviews).mockResolvedValue([]);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(getDesignDocContent).mockResolvedValue(designDocV2);
+
+    const view = renderPage();
+    let deliveryTab: HTMLButtonElement | null = null;
+    await waitFor(() => {
+      deliveryTab = view.container.querySelector<HTMLButtonElement>("#designwork-tab-delivery");
+      expect(deliveryTab).not.toBeNull();
+    });
+    fireEvent.click(deliveryTab!);
+
+    expect(await screen.findByRole("heading", { name: "Checkout flow" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "结构化" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("AC-01")).toBeInTheDocument();
+    expect(screen.getByText("PH-01")).toBeInTheDocument();
+    expect(screen.getByText("Payment method")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Markdown" }));
+
+    expect(screen.getByRole("heading", { name: "问题与目标", level: 2 })).toBeInTheDocument();
+    expect(screen.queryByText("验收项")).not.toBeInTheDocument();
   });
 
   it("requires confirmation before cancelling a DesignWork", async () => {

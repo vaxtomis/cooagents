@@ -13,4 +13,4 @@ needs_frontend_mockup: false
 
 Story.
 
-<!-- intentionally missing 4 of 5 required sections -->
+<!-- intentionally missing most required v2 sections -->

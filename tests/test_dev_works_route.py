@@ -32,7 +32,9 @@ def _build_settings(workspace_root: Path | None = None):
     return SimpleNamespace(
         design=SimpleNamespace(
             required_sections=[
-                "用户故事", "场景案例", "详细操作流程", "验收标准", "打分 rubric",
+                "问题与目标", "用户故事", "场景案例", "范围与非目标",
+                "详细操作流程", "验收标准", "技术约束与集成边界",
+                "交付切片", "决策记录", "打分 rubric",
             ],
             mockup_sections=["页面结构"],
             allow_optimize_mode=False,
@@ -70,7 +72,7 @@ class ScriptedExecutor:
                     "\n## 本轮目标\n\nX\n"
                     "\n## 上下文发现\n\n- `src/login.py:1`：入口。\n"
                     "\n## 开发计划\n\n1. a\n"
-                    "\n## 用例清单\n\n| u | i | e | s |\n|---|---|---|---|\n| a | b | c | d |\n"
+                    "\n## 验收映射\n\n| AC ID | 场景/输入 | 预期 | 本轮 DW ID | 验证方式 |\n|---|---|---|---|---|\n| AC-01 | a | b | DW-01 | c |\n"
                 )
             return ("ok", 0)
         m = re.search(r"在 `([^`]+\.md)` 写入", text)

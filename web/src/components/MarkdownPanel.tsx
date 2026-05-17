@@ -9,6 +9,14 @@ type Props = {
   reader?: boolean;
 };
 
+export function MarkdownBody({ content }: { content: string }) {
+  return (
+    <Markdown rehypePlugins={[rehypeSanitize]} remarkPlugins={[remarkGfm]}>
+      {content}
+    </Markdown>
+  );
+}
+
 export function MarkdownPanel({
   content,
   emptyText = "暂无内容。",
@@ -31,9 +39,7 @@ export function MarkdownPanel({
     <div
       className={`md-prose ${readingAreaClass} overflow-y-auto rounded-[24px] border border-border bg-panel-deep/86 p-5 shadow-panel ${className}`.trim()}
     >
-      <Markdown rehypePlugins={[rehypeSanitize]} remarkPlugins={[remarkGfm]}>
-        {content}
-      </Markdown>
+      <MarkdownBody content={content} />
     </div>
   );
 }

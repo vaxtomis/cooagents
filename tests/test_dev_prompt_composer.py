@@ -151,6 +151,9 @@ def test_step2_omits_recommended_tech_stack_section_by_default():
     assert "人工推荐技术栈" not in out
     assert "以下 四 个 H2" in out
     assert "`## 上下文发现`" in out
+    assert "`## 验收映射`" in out
+    assert "不复述用户故事" in out
+    assert "| AC ID | 场景/输入 | 预期 | 本轮 DW ID | 验证方式 |" in out
 
 
 def test_step2_prompt_does_not_embed_design_body():
@@ -251,6 +254,7 @@ def test_step3_prompt_includes_paths():
         mount_table_entries=(),
     ))
     assert "/wt" in out and "/d.md" in out and "/n.md" in out and "/o.md" in out
+    assert "开发计划/验收映射" in out
 
 
 def test_step3_prompt_includes_mount_table():
@@ -362,6 +366,8 @@ def test_step5_renders_paths_only():
     # No embedded content from the previous embed-everything layout.
     assert "## 设计文档" not in out
     assert "## 本轮 diff" not in out
+    assert "开发计划 / 验收映射" in out
+    assert "DesignDoc `AC-xx`" in out
 
 
 def test_step5_no_btrack_limitation_note():

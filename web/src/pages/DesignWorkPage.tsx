@@ -15,9 +15,9 @@ import { getDesignDocContent } from "../api/designDocs";
 import { listReviews } from "../api/reviews";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
 import { AppDialog } from "../components/AppDialog";
+import { DesignDocStructuredViewer } from "../components/DesignDocStructuredViewer";
 import { DesignWorkStateProgress } from "../components/DesignWorkStateProgress";
 import { LoopSegmentRing } from "../components/LoopSegmentRing";
-import { MarkdownPanel } from "../components/MarkdownPanel";
 import { RepoRefsEditor, type RepoRefsEditorRow } from "../components/RepoRefsEditor";
 import { ReviewRow } from "../components/ReviewHistory";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
@@ -766,7 +766,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
                 {docState.message}
               </p>
             ) : (
-              <MarkdownPanel content={docState.content} reader />
+              <DesignDocStructuredViewer content={docState.content} />
             )}
           </div>
         ) : null}

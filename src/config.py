@@ -98,10 +98,15 @@ class DesignConfig(BaseModel):
     # corresponding section is absent from this list.
     required_sections: list[str] = Field(
         default_factory=lambda: [
+            "问题与目标",
             "用户故事",
             "场景案例",
+            "范围与非目标",
             "详细操作流程",
             "验收标准",
+            "技术约束与集成边界",
+            "交付切片",
+            "决策记录",
             "打分 rubric",
         ]
     )

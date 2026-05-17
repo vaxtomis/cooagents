@@ -40,8 +40,9 @@ def _build_config(max_rounds: int = 5, default_threshold: int = 80):
     return SimpleNamespace(
         design=SimpleNamespace(
             required_sections=[
-                "用户故事", "场景案例", "详细操作流程", "验收标准",
-                "打分 rubric",
+                "问题与目标", "用户故事", "场景案例", "范围与非目标",
+                "详细操作流程", "验收标准", "技术约束与集成边界",
+                "交付切片", "决策记录", "打分 rubric",
             ],
             mockup_sections=["页面结构"],
             allow_optimize_mode=False,
@@ -136,10 +137,10 @@ def step2_append_h2(step_tag, round_n, prompt, worktree):
         "\n## 本轮目标\n实现登录闭环。\n"
         "\n## 上下文发现\n- `src/login.py:1-20`：登录入口。\n"
         "\n## 开发计划\n1. 加表单\n2. 加校验\n"
-        "\n## 用例清单\n"
-        "| 用例 | 输入 | 预期 | 对应设计章节 |\n"
-        "|---|---|---|---|\n"
-        "| 登录成功 | 正确邮箱密码 | 跳首页 | 用户故事 |\n"
+        "\n## 验收映射\n"
+        "| AC ID | 场景/输入 | 预期 | 本轮 DW ID | 验证方式 |\n"
+        "|---|---|---|---|---|\n"
+        "| AC-01 | 正确邮箱密码 | 跳首页 | DW-01 | pytest |\n"
     )
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(addition)
@@ -156,7 +157,7 @@ def step3_write_ctx(step_tag, round_n, prompt, worktree):
         "## 浓缩上下文\n\n- foo\n\n"
         "## 模式镜像\n\n- mirror\n\n"
         "## 执行地图\n\n| DW ID | 目标文件 | 动作 | 模式来源 | 验证命令 |\n"
-        "|---|---|---|---|---|\n"
+        "|---|---|---|---|---|---|\n"
         "| DW-01 | src/login.py | update | src/app.py:1 | pytest |\n",
         encoding="utf-8",
     )

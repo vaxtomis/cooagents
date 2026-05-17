@@ -9,7 +9,7 @@ $retry_feedback
 ## 必读顺序
 
 1. **设计文档**：`$design_doc_path` —— 抽取 `## 打分 rubric` 段
-2. **本轮迭代设计**：`$iteration_note_path` —— Step2 写的「本轮目标 / 上下文发现 / 开发计划 / 用例清单」，其中「开发计划」应是带稳定 ID 的 checkbox checklist
+2. **本轮迭代设计**：`$iteration_note_path` —— Step2 写的「本轮目标 / 上下文发现 / 开发计划 / 验收映射」，其中「开发计划」应是带稳定 ID 的 checkbox checklist；「验收映射」应把本轮 `DW-xx` 映射到 DesignDoc `AC-xx`
 3. **Step4 自审 findings**：`$step4_findings_path` —— Step4 写的本轮 lint/typecheck/unittest 结果与 `plan_execution`
 4. **Step3 上下文、模式与执行地图**：`$context_path` —— 校验 Step4 是否遵循 Step3 的定位、模式评估（`MIRROR` / `ADAPT` / `AVOID`）与验证建议，且没有复制 Step3 已标记为 `AVOID` 的坏模式
 

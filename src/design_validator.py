@@ -7,13 +7,15 @@ automation to consume.
 Rules:
   * Front-matter must include:
       title, goal, version, rubric_threshold, needs_frontend_mockup
-  * Markdown H2 sections must include:
-      用户故事, 场景案例, 详细操作流程, 验收标准, 打分 rubric
+  * Markdown H2 sections must include the v2 DesignDoc contract:
+      问题与目标, 用户故事, 场景案例, 范围与非目标, 详细操作流程,
+      验收标准, 技术约束与集成边界, 交付切片, 决策记录, 打分 rubric
   * If ``needs_frontend_mockup: true``:
       页面结构 + a ``设计图链接或路径:`` line are also required
   * ``场景案例`` must contain at least one ``### SC-xx <title>`` case with:
       Actor, Main Flow, Expected Result
   * ``验收标准`` must contain checklist items with ``AC-xx`` numbering
+  * ``交付切片`` must contain a table keyed by ``PH-xx`` capability slices
   * ``打分 rubric`` must be a markdown table with at least:
       维度 | 权重 | 判定标准
     and every ``权重`` cell must be integer-like
@@ -31,8 +33,13 @@ _REQUIRED_FRONT_MATTER = (
     "needs_frontend_mockup",
 )
 _MOCKUP_FIELD_KEY = "设计图链接或路径"
+_PROBLEM_SECTION = "问题与目标"
 _SCENARIO_SECTION = "场景案例"
+_SCOPE_SECTION = "范围与非目标"
 _ACCEPTANCE_SECTION = "验收标准"
+_TECH_BOUNDARY_SECTION = "技术约束与集成边界"
+_DELIVERY_SECTION = "交付切片"
+_DECISIONS_SECTION = "决策记录"
 _RUBRIC_SECTION = "打分 rubric"
 
 _H2_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
@@ -58,6 +65,8 @@ _SCENARIO_FIELD_RE = {
     ),
 }
 _AC_ITEM_RE = re.compile(r"^\s*-\s*\[[ xX]?\]\s*AC-\d{2,}\s*:\s*\S.+$", re.MULTILINE)
+_PH_ID_RE = re.compile(r"^PH-\d{2,}$")
+_FORBIDDEN_DEV_PLAN_RE = re.compile(r"\bDW-\d{2,}\b")
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$")
 _INT_RE = re.compile(r"^\d+$")
 
@@ -167,6 +176,14 @@ def _validate_acceptance_section(section_body: str) -> list[str]:
     ]
 
 
+def _has_label(section_body: str, label: str) -> bool:
+    pattern = re.compile(
+        rf"^(?:[-*]\s*)?(?:\*\*)?{re.escape(label)}(?:\*\*)?\s*[:：]",
+        re.MULTILINE,
+    )
+    return bool(pattern.search(section_body))
+
+
 def _split_table_row(line: str) -> list[str]:
     raw = line.strip().strip("|")
     return [cell.strip() for cell in raw.split("|")]
@@ -187,6 +204,91 @@ def _extract_first_table(section_body: str) -> tuple[list[str], list[list[str]]]
             cursor += 1
         return header, rows
     return None
+
+
+def _validate_required_labels(
+    section_name: str, section_body: str, labels: tuple[str, ...]
+) -> list[str]:
+    missing = [label for label in labels if not _has_label(section_body, label)]
+    if not missing:
+        return []
+    return [f"{section_name} missing required labels: {missing}"]
+
+
+def _validate_table_columns(
+    section_name: str,
+    section_body: str,
+    required_columns: tuple[str, ...],
+) -> tuple[list[str], list[list[str]] | None]:
+    table = _extract_first_table(section_body)
+    if table is None:
+        return [f"{section_name} must contain a markdown table"], None
+    header, rows = table
+    missing_columns = [col for col in required_columns if col not in header]
+    if missing_columns:
+        return [f"{section_name} table missing required columns: {missing_columns}"], rows
+    if not rows:
+        return [f"{section_name} table must contain at least one data row"], rows
+    return [], rows
+
+
+def _validate_problem_section(section_body: str) -> list[str]:
+    return _validate_required_labels(
+        _PROBLEM_SECTION,
+        section_body,
+        ("问题", "证据", "关键假设", "成功信号"),
+    )
+
+
+def _validate_scope_section(section_body: str) -> list[str]:
+    errors, _rows = _validate_table_columns(
+        _SCOPE_SECTION,
+        section_body,
+        ("优先级", "范围项", "说明"),
+    )
+    if not _has_label(section_body, "非目标"):
+        errors.append("范围与非目标 missing required label: 非目标")
+    return errors
+
+
+def _validate_tech_boundary_section(section_body: str) -> list[str]:
+    return _validate_required_labels(
+        _TECH_BOUNDARY_SECTION,
+        section_body,
+        ("依赖系统", "权限/数据/兼容约束", "不可破坏行为", "建议验证入口"),
+    )
+
+
+def _validate_delivery_section(section_body: str) -> list[str]:
+    errors, rows = _validate_table_columns(
+        _DELIVERY_SECTION,
+        section_body,
+        ("PH ID", "能力", "依赖", "可并行性", "完成信号"),
+    )
+    if errors or rows is None:
+        return errors
+    table = _extract_first_table(section_body)
+    if table is None:
+        return errors
+    header, rows = table
+    ph_index = header.index("PH ID")
+    for row in rows:
+        if len(row) <= ph_index:
+            errors.append("交付切片 row missing `PH ID` cell")
+            continue
+        ph_id = row[ph_index].strip()
+        if not _PH_ID_RE.match(ph_id):
+            errors.append(f"交付切片 PH ID must match `PH-xx`; got {ph_id!r}")
+    return errors
+
+
+def _validate_decisions_section(section_body: str) -> list[str]:
+    errors, _rows = _validate_table_columns(
+        _DECISIONS_SECTION,
+        section_body,
+        ("决策", "选择", "备选", "理由"),
+    )
+    return errors
 
 
 def _validate_rubric_section(section_body: str) -> list[str]:
@@ -243,6 +345,9 @@ def validate_design_markdown(
     if mockup_requested and _MOCKUP_FIELD_KEY not in body:
         errors.append(f"mockup required but '{_MOCKUP_FIELD_KEY}' line missing")
 
+    if _FORBIDDEN_DEV_PLAN_RE.search(body):
+        errors.append("DesignDoc must not contain DevWork task ids like `DW-xx`")
+
     if "rubric_threshold" in fm:
         try:
             value = int(fm["rubric_threshold"])
@@ -251,10 +356,20 @@ def validate_design_markdown(
         except ValueError:
             errors.append("rubric_threshold must be an integer")
 
+    if _PROBLEM_SECTION in sections_found:
+        errors.extend(_validate_problem_section(_extract_section_body(body, _PROBLEM_SECTION) or ""))
     if _SCENARIO_SECTION in sections_found:
         errors.extend(_validate_scenario_section(_extract_section_body(body, _SCENARIO_SECTION) or ""))
+    if _SCOPE_SECTION in sections_found:
+        errors.extend(_validate_scope_section(_extract_section_body(body, _SCOPE_SECTION) or ""))
     if _ACCEPTANCE_SECTION in sections_found:
         errors.extend(_validate_acceptance_section(_extract_section_body(body, _ACCEPTANCE_SECTION) or ""))
+    if _TECH_BOUNDARY_SECTION in sections_found:
+        errors.extend(_validate_tech_boundary_section(_extract_section_body(body, _TECH_BOUNDARY_SECTION) or ""))
+    if _DELIVERY_SECTION in sections_found:
+        errors.extend(_validate_delivery_section(_extract_section_body(body, _DELIVERY_SECTION) or ""))
+    if _DECISIONS_SECTION in sections_found:
+        errors.extend(_validate_decisions_section(_extract_section_body(body, _DECISIONS_SECTION) or ""))
     if _RUBRIC_SECTION in sections_found:
         errors.extend(_validate_rubric_section(_extract_section_body(body, _RUBRIC_SECTION) or ""))
 

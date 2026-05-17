@@ -197,7 +197,7 @@ describe("DevWorkPage", () => {
         "  - [ ] DW-02.1: [P2] 空邮箱提示",
         "- [ ] ~~DW-03: [P2] 已取消入口~~",
         "",
-        "## 用例清单",
+        "## 验收映射",
       ].join("\n"),
     );
     vi.mocked(listReviews).mockResolvedValue([

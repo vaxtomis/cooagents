@@ -90,7 +90,7 @@ _STEP_WALL_STEP2 = (
     "**单一职责**：基于设计文档 + 上轮反馈 + repo/docs/interface "
     "只读探查，决定计划层级、实现上下文与验收。\n"
     "**唯一输出**：在 iteration-round-N.md 末尾追加 H2"
-    "（本轮目标 / 推荐技术栈 / 上下文发现 / 开发计划 / 用例清单）；"
+    "（本轮目标 / 推荐技术栈 / 上下文发现 / 开发计划 / 验收映射）；"
     "开发计划用稳定 DW-xx checkbox checklist。\n"
     "**明确允许**：只读扫描 worktree、仓库文档、接口/类型、配置、"
     "相似实现和相邻测试；可记录文件级证据与验证命令候选。\n"
@@ -358,7 +358,7 @@ def compose_step2(inputs: Step2Inputs) -> str:
         development_plan_requirement_number=(
             "4" if has_tech_stack else "3"
         ),
-        use_case_requirement_number=(
+        acceptance_mapping_requirement_number=(
             "5" if has_tech_stack else "4"
         ),
         worktree_path=inputs.worktree_path or "_(no primary worktree)_",
@@ -481,7 +481,7 @@ _AGGREGATION_RULE = """\
 按以下优先级聚合，**最严重的 category 取胜**：
 
 1. **设计文档本身缺乏可评估内容**支撑本次多仓任务 → `problem_category="design_hollow"`
-2. 否则**任一仓**的迭代设计/开发计划/用例清单与设计文档或用户诉求有缺口 → `problem_category="req_gap"`
+2. 否则**任一仓**的迭代设计/开发计划/验收映射与设计文档或用户诉求有缺口 → `problem_category="req_gap"`
 3. 否则**任一仓**存在实现/测试/代码回归（lint 失败、测试失败、代码与计划不符） → `problem_category="impl_gap"`
 4. 否则最终准出分通过阈值 → `problem_category=null` 且 `score >= $rubric_threshold`
 
