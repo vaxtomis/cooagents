@@ -12,6 +12,8 @@ $step_wall
 
 $mount_table
 
+$workspace_file_refs
+
 ## 产出要求
 
 使用 file 工具读取上述设计文档与迭代设计，复核 Step2 `## 上下文发现`，并在 worktree 内扫描与本轮「开发计划/验收映射」相关的源文件（import 链、相似命名、相邻测试等）。

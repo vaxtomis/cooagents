@@ -21,7 +21,7 @@ from fastapi import APIRouter, Header, Request, Response, UploadFile, File, Form
 from slowapi import Limiter
 
 from src.design_attachments import sanitize_attachment_stem
-from src.exceptions import BadRequestError, NotFoundError
+from src.exceptions import BadRequestError, ConflictError, NotFoundError
 from src.file_converter import (
     CONVERTIBLE_UPLOAD_EXTENSIONS,
     ORIGINAL_UPLOAD_EXTENSIONS,
@@ -35,6 +35,12 @@ from src.models import (
     WorkspaceSyncReport,
 )
 from src.request_utils import client_ip
+from src.storage.base import normalize_key
+from src.workspace_file_refs import (
+    is_protected_workspace_file_kind,
+    is_selectable_workspace_file_kind,
+    list_references_to_workspace_file,
+)
 
 limiter = Limiter(key_func=client_ip)
 
@@ -199,41 +205,19 @@ def _collect_converted_images(images_dir: Path) -> list[Path]:
     return image_files
 
 
-@router.post(
-    "/workspaces/{workspace_id}/attachments",
-    status_code=201,
-    response_model=WorkspaceAttachment,
-)
-@limiter.limit("30/minute")
-async def upload_workspace_attachment(
-    workspace_id: str,
-    request: Request,
-    response: Response,
-    file: UploadFile = File(...),
+async def _store_workspace_upload(
+    *,
+    ws: dict,
+    filename: str,
+    ext: str,
+    data: bytes,
+    registry,
 ) -> WorkspaceAttachment:
-    """Upload a DesignWork supplemental attachment."""
-    wm = request.app.state.workspaces
-    ws = await wm.get(workspace_id)
-    if not ws:
-        raise NotFoundError(f"workspace {workspace_id!r} not found")
-    if ws.get("status") != "active":
-        raise BadRequestError(
-            f"workspace {workspace_id!r} is not active "
-            f"(status={ws.get('status')!r}); uploads are rejected"
-        )
-
-    filename = Path(file.filename or "attachment.md").name
-    ext = validate_upload(filename)
-    data = await _read_upload_bytes(
-        request, file, limit=MAX_ATTACHMENT_UPLOAD_BYTES,
-    )
-
     stem = sanitize_attachment_stem(filename)
     unique = uuid.uuid4().hex[:8]
     markdown_name = f"{stem}-{unique}.md"
     markdown_rel = f"attachments/{markdown_name}"
     image_paths: list[str] = []
-    registry = request.app.state.registry
 
     if ext == "md":
         try:
@@ -290,10 +274,6 @@ async def upload_workspace_attachment(
     else:
         raise BadRequestError(f"unsupported attachment type '.{ext}'")
 
-    response.headers["Location"] = (
-        f"/api/v1/workspaces/{workspace_id}/attachments?"
-        f"attachment_path={quote(row['relative_path'], safe='/')}"
-    )
     return WorkspaceAttachment(
         filename=filename,
         attachment_path=row["relative_path"],
@@ -303,6 +283,94 @@ async def upload_workspace_attachment(
         converted_from=ext,
         image_paths=image_paths,
     )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/attachments",
+    status_code=201,
+    response_model=WorkspaceAttachment,
+)
+@limiter.limit("30/minute")
+async def upload_workspace_attachment(
+    workspace_id: str,
+    request: Request,
+    response: Response,
+    file: UploadFile = File(...),
+) -> WorkspaceAttachment:
+    """Upload a DesignWork supplemental attachment."""
+    wm = request.app.state.workspaces
+    ws = await wm.get(workspace_id)
+    if not ws:
+        raise NotFoundError(f"workspace {workspace_id!r} not found")
+    if ws.get("status") != "active":
+        raise BadRequestError(
+            f"workspace {workspace_id!r} is not active "
+            f"(status={ws.get('status')!r}); uploads are rejected"
+        )
+
+    filename = Path(file.filename or "attachment.md").name
+    ext = validate_upload(filename)
+    data = await _read_upload_bytes(
+        request, file, limit=MAX_ATTACHMENT_UPLOAD_BYTES,
+    )
+
+    registry = request.app.state.registry
+    attachment = await _store_workspace_upload(
+        ws=dict(ws), filename=filename, ext=ext, data=data, registry=registry,
+    )
+
+    response.headers["Location"] = (
+        f"/api/v1/workspaces/{workspace_id}/attachments?"
+        f"attachment_path={quote(attachment.attachment_path, safe='/')}"
+    )
+    return attachment
+
+
+@router.post(
+    "/workspaces/{workspace_id}/files/upload",
+    status_code=201,
+    response_model=WorkspaceAttachment,
+)
+@limiter.limit("30/minute")
+async def upload_workspace_file(
+    workspace_id: str,
+    request: Request,
+    response: Response,
+    file: UploadFile = File(...),
+) -> WorkspaceAttachment:
+    """Human-facing Workspace file upload.
+
+    The first implementation intentionally reuses the DesignWork supplemental
+    upload policy: documents land under ``attachments/`` and converted images
+    are indexed as ``image`` workspace files.
+    """
+    wm = request.app.state.workspaces
+    ws = await wm.get(workspace_id)
+    if not ws:
+        raise NotFoundError(f"workspace {workspace_id!r} not found")
+    if ws.get("status") != "active":
+        raise BadRequestError(
+            f"workspace {workspace_id!r} is not active "
+            f"(status={ws.get('status')!r}); uploads are rejected"
+        )
+
+    filename = Path(file.filename or "attachment.md").name
+    ext = validate_upload(filename)
+    data = await _read_upload_bytes(
+        request, file, limit=MAX_ATTACHMENT_UPLOAD_BYTES,
+    )
+    attachment = await _store_workspace_upload(
+        ws=dict(ws),
+        filename=filename,
+        ext=ext,
+        data=data,
+        registry=request.app.state.registry,
+    )
+    response.headers["Location"] = (
+        f"/api/v1/workspaces/{workspace_id}/files?"
+        f"relative_path={quote(attachment.attachment_path, safe='/')}"
+    )
+    return attachment
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +383,15 @@ async def upload_workspace_attachment(
 
 
 @router.get("/workspaces/{workspace_id}/files")
-async def list_workspace_files(workspace_id: str, request: Request):
+async def list_workspace_files(
+    workspace_id: str,
+    request: Request,
+    kind: str | None = None,
+    query: str | None = None,
+    selectable: bool | None = None,
+    limit: int = Query(500, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
     """Return the workspace_files index for *workspace_id*.
 
     Used by the agent worker's materialize step: HEAD per row, GET on
@@ -328,12 +404,99 @@ async def list_workspace_files(workspace_id: str, request: Request):
         raise NotFoundError(f"workspace {workspace_id!r} not found")
     repo = request.app.state.registry.repo
     rows = await repo.list_for_workspace(workspace_id)
+    if kind:
+        rows = [row for row in rows if row.get("kind") == kind]
+    if query:
+        q = query.strip().lower()
+        if q:
+            rows = [
+                row for row in rows
+                if q in row.get("relative_path", "").lower()
+                or q in row.get("kind", "").lower()
+            ]
+    if selectable is not None:
+        rows = [
+            row for row in rows
+            if is_selectable_workspace_file_kind(row.get("kind", "")) is selectable
+        ]
+    total = len(rows)
+    page_rows = rows[offset:offset + limit]
+    ref_counts: dict[str, int] = {}
+    if page_rows:
+        paths = [row["relative_path"] for row in page_rows]
+        placeholders = ",".join("?" for _ in paths)
+        count_rows = await request.app.state.db.fetchall(
+            "SELECT relative_path, COUNT(*) AS c FROM workspace_file_refs "
+            f"WHERE workspace_id=? AND relative_path IN ({placeholders}) "
+            "GROUP BY relative_path",
+            (workspace_id, *paths),
+        )
+        ref_counts = {
+            row["relative_path"]: int(row["c"])
+            for row in count_rows
+        }
+    projected = []
+    for row in page_rows:
+        item = dict(row)
+        item["selectable"] = is_selectable_workspace_file_kind(item.get("kind", ""))
+        item["reference_count"] = ref_counts.get(item["relative_path"], 0)
+        projected.append(item)
     return {
         "workspace_id": workspace_id,
         "slug": ws["slug"],
         "status": ws.get("status"),
-        "files": [dict(r) for r in rows],
+        "files": projected,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "has_more": (offset + limit) < total,
+        },
     }
+
+
+@router.delete("/workspaces/{workspace_id}/files", status_code=204)
+@limiter.limit("60/minute")
+async def delete_workspace_file(
+    workspace_id: str,
+    request: Request,
+    relative_path: str = Query(...),
+) -> Response:
+    wm = request.app.state.workspaces
+    ws = await wm.get(workspace_id)
+    if not ws:
+        raise NotFoundError(f"workspace {workspace_id!r} not found")
+    if ws.get("status") != "active":
+        raise BadRequestError(
+            f"workspace {workspace_id!r} is not active "
+            f"(status={ws.get('status')!r}); deletes are rejected"
+        )
+    rel = normalize_key(relative_path).as_posix()
+    row = await request.app.state.registry.repo.get(workspace_id, rel)
+    if row is None:
+        raise NotFoundError(f"workspace file {rel!r} not found")
+    if is_protected_workspace_file_kind(row["kind"]):
+        raise BadRequestError(
+            f"workspace file {rel!r} has protected kind {row['kind']!r}"
+        )
+    refs = await list_references_to_workspace_file(
+        request.app.state.db,
+        workspace_id=workspace_id,
+        relative_path=rel,
+    )
+    if refs:
+        ref_text = ", ".join(
+            f"{ref['referrer_kind']}:{ref['referrer_id']}"
+            for ref in refs
+        )
+        raise ConflictError(
+            f"workspace file {rel!r} is still referenced by {ref_text}"
+        )
+    await request.app.state.registry.delete(
+        workspace_row=dict(ws),
+        relative_path=rel,
+    )
+    return Response(status_code=204)
 
 
 @router.post("/workspaces/{workspace_id}/files", status_code=201)

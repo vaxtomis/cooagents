@@ -117,6 +117,67 @@ async def test_workspace_files_indexes_present(db):
         assert expected in names, f"missing index {expected}"
 
 
+async def test_workspace_file_refs_table_and_indexes_exist(db):
+    row = await db.fetchone(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='workspace_file_refs'"
+    )
+    assert row is not None
+
+    cols = await db.fetchall("PRAGMA table_info(workspace_file_refs)")
+    assert {c["name"] for c in cols} == {
+        "id",
+        "workspace_id",
+        "relative_path",
+        "referrer_kind",
+        "referrer_id",
+        "created_at",
+    }
+
+    indexes = await db.fetchall(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='index' AND tbl_name='workspace_file_refs'"
+    )
+    names = {r["name"] for r in indexes}
+    assert "idx_workspace_file_refs_file" in names
+    assert "idx_workspace_file_refs_referrer" in names
+
+
+async def test_workspace_file_refs_fk_restricts_file_delete(db):
+    await _seed_workspace(db, "ws-ref", "ref")
+    await db.execute(
+        "INSERT INTO workspace_files(id,workspace_id,relative_path,kind,"
+        "created_at,updated_at) VALUES(?,?,?,?,?,?)",
+        (
+            "wf-ref",
+            "ws-ref",
+            "attachments/brief.md",
+            "attachment",
+            "2026-04-24T00:00:00Z",
+            "2026-04-24T00:00:00Z",
+        ),
+    )
+    await db.execute(
+        "INSERT INTO workspace_file_refs(id,workspace_id,relative_path,"
+        "referrer_kind,referrer_id,created_at) VALUES(?,?,?,?,?,?)",
+        (
+            "wfr-ref",
+            "ws-ref",
+            "attachments/brief.md",
+            "design_work",
+            "desw-1",
+            "2026-04-24T00:00:00Z",
+        ),
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        await db.execute(
+            "DELETE FROM workspace_files "
+            "WHERE workspace_id=? AND relative_path=?",
+            ("ws-ref", "attachments/brief.md"),
+        )
+
+
 async def _seed_workspace(db, ws_id: str, slug: str) -> None:
     await db.execute(
         "INSERT INTO workspaces(id,title,slug,status,root_path,created_at,updated_at) "

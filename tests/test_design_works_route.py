@@ -256,6 +256,63 @@ async def test_create_accepts_uploaded_attachment_paths(client):
     assert projected.json()["attachment_paths"] == [attachment_path]
 
 
+async def test_create_accepts_workspace_file_refs_and_prompts_them(client):
+    ws = await _create_workspace(client, slug="file-ref-route")
+    upload = await client.post(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        data={"relative_path": "notes/brief.md", "kind": "other"},
+        files={"file": ("brief.md", b"# Brief\n\nSpecific detail", "text/markdown")},
+        headers={"X-Expected-Prior-Hash": "none"},
+    )
+    assert upload.status_code == 201, upload.text
+
+    r = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "File Ref",
+            "slug": "file-ref",
+            "user_input": "some substantial user input text",
+            "workspace_file_refs": ["notes/brief.md"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["workspace_file_refs"] == ["notes/brief.md"]
+    assert body["attachment_paths"] == []
+
+    rows = await client._app.state.db.fetchall(
+        "SELECT * FROM workspace_file_refs WHERE referrer_id=?",
+        (body["id"],),
+    )
+    assert [row["relative_path"] for row in rows] == ["notes/brief.md"]
+
+    final = await _wait_for_terminal(client, body["id"])
+    assert final["workspace_file_refs"] == ["notes/brief.md"]
+    prompt = await client._app.state.registry.read_text(
+        workspace_slug=ws["slug"],
+        relative_path=f"designs/.drafts/{body['id']}-prompt-loop0.md",
+    )
+    assert "Workspace-relative path: `notes/brief.md`" in prompt
+    assert "Specific detail" in prompt
+
+
+async def test_create_rejects_protected_workspace_file_ref(client):
+    ws = await _create_workspace(client, slug="file-ref-protected")
+    r = await client.post(
+        "/api/v1/design-works",
+        json={
+            "workspace_id": ws["id"],
+            "title": "Protected",
+            "slug": "protected",
+            "user_input": "some substantial user input text",
+            "workspace_file_refs": ["workspace.md"],
+        },
+    )
+    assert r.status_code == 400, r.text
+    assert "selectable workspace files" in r.json()["message"]
+
+
 async def test_list_requires_workspace_id(client):
     r = await client.get("/api/v1/design-works")
     assert r.status_code == 422  # missing required query param

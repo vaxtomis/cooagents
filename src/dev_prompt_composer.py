@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from string import Template
 
+from src.workspace_file_refs import WorkspacePromptFile
+
 _TPL_DIR = Path(__file__).resolve().parents[1] / "templates"
 _STEP2_TPL = _TPL_DIR / "STEP2-iteration.md.tpl"
 _STEP3_TPL = _TPL_DIR / "STEP3-context.md.tpl"
@@ -301,6 +303,37 @@ def _render_recommended_tech_stack_output_requirement(stack: str | None) -> str:
         "但需简述原因。\n"
     )
 
+def _render_workspace_file_refs(
+    refs: tuple[WorkspacePromptFile, ...],
+) -> str:
+    if not refs:
+        return ""
+    parts = [
+        "## Workspace File References",
+        "",
+        "These Workspace files were selected for this DevWork. Use them as "
+        "additional source material where relevant.",
+    ]
+    for ref in refs:
+        parts.extend([
+            "",
+            f"### `{ref.relative_path}`",
+            "",
+            f"- kind: `{ref.kind}`",
+            f"- size: {ref.byte_size if ref.byte_size is not None else 'unknown'} bytes",
+            f"- absolute path: `{ref.absolute_path}`",
+        ])
+        if ref.content is None:
+            parts.append("- content: not inlined; inspect the path if needed")
+        else:
+            parts.extend(["", "```text", ref.content, "```"])
+            if ref.truncated:
+                parts.append(
+                    f"[Truncated from {ref.original_chars} characters.]"
+                )
+    return "\n".join(parts) + "\n"
+
+
 @dataclass(frozen=True)
 class Step2Inputs:
     dev_work_id: str
@@ -322,6 +355,7 @@ class Step2Inputs:
     # round 1. Round N uses this to carry forward cumulative plan items.
     previous_iteration_note_path: str | None = None
     recommended_tech_stack: str | None = None
+    workspace_file_refs: tuple[WorkspacePromptFile, ...] = ()
 
 
 def compose_step2(inputs: Step2Inputs) -> str:
@@ -364,6 +398,9 @@ def compose_step2(inputs: Step2Inputs) -> str:
         worktree_path=inputs.worktree_path or "_(no primary worktree)_",
         mount_table=_render_mount_table(inputs.mount_table_entries),
         output_path=inputs.output_path,
+        workspace_file_refs=_render_workspace_file_refs(
+            inputs.workspace_file_refs
+        ),
         step_wall=_STEP_WALL_STEP2,
     )
 
@@ -423,6 +460,7 @@ class Step3Inputs:
     # (it may scan non-primary mounts for context, even though it only
     # writes ctx-round-N.md against the primary worktree).
     mount_table_entries: tuple[MountTableEntry, ...]
+    workspace_file_refs: tuple[WorkspacePromptFile, ...] = ()
 
 
 def compose_step3(inputs: Step3Inputs) -> str:
@@ -432,6 +470,9 @@ def compose_step3(inputs: Step3Inputs) -> str:
         iteration_note_path=inputs.iteration_note_path,
         output_path=inputs.output_path,
         mount_table=_render_mount_table(inputs.mount_table_entries),
+        workspace_file_refs=_render_workspace_file_refs(
+            inputs.workspace_file_refs
+        ),
         step_wall=_STEP_WALL_STEP3,
     )
 
@@ -452,6 +493,7 @@ class Step4Inputs:
     mount_table_entries: tuple[MountTableEntry, ...]
     retry_feedback: str | None = None
     previous_actual_score_b: int | None = None
+    workspace_file_refs: tuple[WorkspacePromptFile, ...] = ()
 
 
 def compose_step4(inputs: Step4Inputs) -> str:
@@ -465,6 +507,9 @@ def compose_step4(inputs: Step4Inputs) -> str:
         retry_feedback=_render_retry_feedback(inputs.retry_feedback),
         execution_strategy=_render_step4_execution_strategy(
             inputs.previous_actual_score_b
+        ),
+        workspace_file_refs=_render_workspace_file_refs(
+            inputs.workspace_file_refs
         ),
     )
 

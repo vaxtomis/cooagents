@@ -49,6 +49,10 @@ from src.models import (
     WorkerRepoHandoff,
 )
 from src.request_utils import client_ip
+from src.workspace_file_refs import (
+    list_workspace_file_ref_paths,
+    list_workspace_file_ref_paths_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +185,7 @@ def _row_to_progress(
     row: dict,
     repo_refs: list[DevRepoRefView] | None = None,
     repos: list[WorkerRepoHandoff] | None = None,
+    workspace_file_refs: list[str] | None = None,
     *,
     is_running: bool = False,
     max_rounds: int | None = None,
@@ -210,6 +215,7 @@ def _row_to_progress(
         progress=_decode_progress(row.get("current_progress_json")),
         repo_refs=repo_refs or [],
         repos=repos or [],
+        workspace_file_refs=workspace_file_refs or [],
     )
 
 
@@ -252,6 +258,7 @@ async def create_dev_work(
             rubric_threshold=req.rubric_threshold,
             max_rounds=req.max_rounds,
             recommended_tech_stack=req.recommended_tech_stack,
+            workspace_file_refs=req.workspace_file_refs,
         )
     except sqlite3.IntegrityError as exc:
         # Partial UNIQUE index on dev_works(design_doc_id) WHERE step not in
@@ -266,10 +273,14 @@ async def create_dev_work(
     state_repo = request.app.state.dev_work_repo_state
     repos = await _load_worker_repos(state_repo, dw["id"])
     refs = [_handoff_to_repo_ref(h) for h in repos]
+    file_refs = await list_workspace_file_ref_paths(
+        db, referrer_kind="dev_work", referrer_id=dw["id"],
+    )
     return _row_to_progress(
         dw,
         refs,
         repos,
+        file_refs,
         is_running=sm.is_running(dw["id"]),
         max_rounds=sm._resolve_max_rounds(dw),
     )
@@ -322,12 +333,16 @@ async def list_dev_works(
         )
         dev_ids = [r["id"] for r in rows]
         repos_by_id = await _load_worker_repos_batch(state_repo, dev_ids)
+        file_refs_by_id = await list_workspace_file_ref_paths_batch(
+            db, referrer_kind="dev_work", referrer_ids=dev_ids,
+        )
         return DevWorkPage(
             items=[
                 _row_to_progress(
                     r,
                     [_handoff_to_repo_ref(h) for h in repos_by_id.get(r["id"], [])],
                     repos_by_id.get(r["id"], []),
+                    file_refs_by_id.get(r["id"], []),
                     is_running=sm.is_running(r["id"]),
                     max_rounds=sm._resolve_max_rounds(r),
                 )
@@ -343,11 +358,15 @@ async def list_dev_works(
     rows = await db.fetchall(sql, tuple(params))
     dev_ids = [r["id"] for r in rows]
     repos_by_id = await _load_worker_repos_batch(state_repo, dev_ids)
+    file_refs_by_id = await list_workspace_file_ref_paths_batch(
+        db, referrer_kind="dev_work", referrer_ids=dev_ids,
+    )
     return [
         _row_to_progress(
             r,
             [_handoff_to_repo_ref(h) for h in repos_by_id.get(r["id"], [])],
             repos_by_id.get(r["id"], []),
+            file_refs_by_id.get(r["id"], []),
             is_running=sm.is_running(r["id"]),
             max_rounds=sm._resolve_max_rounds(r),
         )
@@ -364,11 +383,15 @@ async def get_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
         raise NotFoundError(f"dev_work {dev_id!r} not found")
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
+    file_refs = await list_workspace_file_ref_paths(
+        db, referrer_kind="dev_work", referrer_id=dev_id,
+    )
     sm = request.app.state.dev_work_sm
     return _row_to_progress(
         row,
         refs,
         repos,
+        file_refs,
         is_running=sm.is_running(dev_id),
         max_rounds=sm._resolve_max_rounds(row),
     )
@@ -382,10 +405,14 @@ async def tick_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
     dw = await sm.tick(dev_id)
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
+    file_refs = await list_workspace_file_ref_paths(
+        request.app.state.db, referrer_kind="dev_work", referrer_id=dev_id,
+    )
     return _row_to_progress(
         dw,
         refs,
         repos,
+        file_refs,
         is_running=sm.is_running(dev_id),
         max_rounds=sm._resolve_max_rounds(dw),
     )
@@ -408,10 +435,14 @@ async def continue_dev_work(
     sm.schedule_driver(dev_id)
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
+    file_refs = await list_workspace_file_ref_paths(
+        request.app.state.db, referrer_kind="dev_work", referrer_id=dev_id,
+    )
     return _row_to_progress(
         dw,
         refs,
         repos,
+        file_refs,
         is_running=sm.is_running(dev_id),
         max_rounds=sm._resolve_max_rounds(dw),
     )
@@ -429,10 +460,14 @@ async def resume_dev_work_step(
     sm.schedule_driver(dev_id)
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
+    file_refs = await list_workspace_file_ref_paths(
+        request.app.state.db, referrer_kind="dev_work", referrer_id=dev_id,
+    )
     return _row_to_progress(
         dw,
         refs,
         repos,
+        file_refs,
         is_running=sm.is_running(dev_id),
         max_rounds=sm._resolve_max_rounds(dw),
     )
@@ -455,10 +490,14 @@ async def rerun_dev_work(dev_id: str, request: Request) -> DevWorkProgress:
     sm.schedule_driver(dev_id)
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
+    file_refs = await list_workspace_file_ref_paths(
+        request.app.state.db, referrer_kind="dev_work", referrer_id=dev_id,
+    )
     return _row_to_progress(
         dw,
         refs,
         repos,
+        file_refs,
         is_running=sm.is_running(dev_id),
         max_rounds=sm._resolve_max_rounds(dw),
     )
@@ -503,10 +542,14 @@ async def push_dev_work_branches(
     state_repo = request.app.state.dev_work_repo_state
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
+    file_refs = await list_workspace_file_ref_paths(
+        db, referrer_kind="dev_work", referrer_id=dev_id,
+    )
     return _row_to_progress(
         refreshed,
         refs,
         repos,
+        file_refs,
         is_running=sm.is_running(dev_id),
         max_rounds=sm._resolve_max_rounds(refreshed),
     )
@@ -545,11 +588,15 @@ async def update_repo_push_state(
     )
     repos = await _load_worker_repos(state_repo, dev_id)
     refs = [_handoff_to_repo_ref(h) for h in repos]
+    file_refs = await list_workspace_file_ref_paths(
+        db, referrer_kind="dev_work", referrer_id=dev_id,
+    )
     sm = request.app.state.dev_work_sm
     return _row_to_progress(
         dw,
         refs,
         repos,
+        file_refs,
         is_running=sm.is_running(dev_id),
         max_rounds=sm._resolve_max_rounds(dw),
     )

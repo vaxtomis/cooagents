@@ -94,6 +94,28 @@ export interface Workspace {
 
 export type WorkspacePage = PaginatedResult<Workspace>;
 
+export interface WorkspaceFile {
+  id: string;
+  workspace_id: string;
+  relative_path: string;
+  kind: string;
+  content_hash: string | null;
+  byte_size: number | null;
+  local_mtime_ns: number | null;
+  created_at: string;
+  updated_at: string;
+  selectable: boolean;
+  reference_count: number;
+}
+
+export interface WorkspaceFilesEnvelope {
+  workspace_id: string;
+  slug: string;
+  status: WorkspaceStatus;
+  files: WorkspaceFile[];
+  pagination: Pagination;
+}
+
 export interface DesignWork {
   id: string;
   workspace_id: string;
@@ -113,6 +135,7 @@ export interface DesignWork {
   is_running: boolean;
   // Phase 4 (repo-registry): persisted refs from design_work_repos.
   repo_refs: DesignRepoRefView[];
+  workspace_file_refs: string[];
   attachment_paths: string[];
 }
 
@@ -125,6 +148,7 @@ export interface DesignWorkRetrySource {
   needs_frontend_mockup: boolean;
   agent: AgentKind | null;
   repo_refs: RepoRef[];
+  workspace_file_refs: string[];
   attachment_paths: string[];
 }
 
@@ -176,6 +200,7 @@ export interface DevWork {
   // Phase 5 (repo-registry): worker-facing handoff. Same row source as
   // repo_refs, additive url / ssh_key_path / push_err.
   repos: WorkerRepoHandoff[];
+  workspace_file_refs: string[];
 }
 
 export type DevWorkPage = PaginatedResult<DevWork>;
@@ -348,7 +373,9 @@ export interface CreateDesignWorkPayload {
   // Phase 4 (repo-registry): optional repo binding. Empty list keeps
   // pure-doc DesignWorks creatable; omit (or send `[]`) when none.
   repo_refs?: RepoRef[];
-  // Workspace-relative paths returned by the attachment upload API.
+  // Workspace-relative paths selected from the Workspace file library.
+  workspace_file_refs?: string[];
+  // Compatibility alias for legacy attachment-only clients.
   attachment_paths?: string[];
 }
 
@@ -359,6 +386,7 @@ export interface RetryDesignWorkPayload {
   needs_frontend_mockup?: boolean;
   agent?: AgentKind | null;
   repo_refs?: RepoRef[];
+  workspace_file_refs?: string[];
   attachment_paths?: string[];
 }
 
@@ -374,6 +402,7 @@ export interface CreateDevWorkPayload {
   recommended_tech_stack?: string;
   rubric_threshold?: number;
   max_rounds?: number;
+  workspace_file_refs?: string[];
 }
 
 // ---------------------------------------------------------------------------

@@ -18,6 +18,8 @@ $execution_strategy
 
 $mount_table
 
+$workspace_file_refs
+
 如本轮需要修改非 primary mount，请直接 `cd <mount.worktree_path>` 后落盘；所有 mount 均为本机 git worktree，可独立 `git status` / `git diff`。
 
 ## 产出要求

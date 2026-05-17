@@ -306,6 +306,23 @@ CREATE TABLE IF NOT EXISTS workspace_files (
   UNIQUE(workspace_id, relative_path)
 );
 
+-- 9. workspace_file_refs — explicit references from work items to
+--    selectable workspace files. The workspace_files row remains the
+--    authoritative file index; this table records workflow usage so delete
+--    operations can reject referenced files.
+CREATE TABLE IF NOT EXISTS workspace_file_refs (
+  id                TEXT PRIMARY KEY,              -- 'wfr-<hex12>'
+  workspace_id      TEXT NOT NULL REFERENCES workspaces(id),
+  relative_path     TEXT NOT NULL,
+  referrer_kind     TEXT NOT NULL CHECK(referrer_kind IN ('design_work','dev_work')),
+  referrer_id       TEXT NOT NULL,
+  created_at        TEXT NOT NULL,
+  UNIQUE(referrer_kind, referrer_id, relative_path),
+  FOREIGN KEY(workspace_id, relative_path)
+    REFERENCES workspace_files(workspace_id, relative_path)
+    ON DELETE RESTRICT
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_workspaces_status           ON workspaces(status);
 CREATE INDEX IF NOT EXISTS idx_design_works_workspace      ON design_works(workspace_id);
@@ -330,6 +347,10 @@ CREATE INDEX IF NOT EXISTS idx_workspace_events_workspace  ON workspace_events(w
 CREATE INDEX IF NOT EXISTS idx_workspace_events_ts         ON workspace_events(ts);
 CREATE INDEX IF NOT EXISTS idx_workspace_files_workspace   ON workspace_files(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_files_kind        ON workspace_files(kind);
+CREATE INDEX IF NOT EXISTS idx_workspace_file_refs_file
+  ON workspace_file_refs(workspace_id, relative_path);
+CREATE INDEX IF NOT EXISTS idx_workspace_file_refs_referrer
+  ON workspace_file_refs(referrer_kind, referrer_id);
 CREATE INDEX IF NOT EXISTS idx_agent_hosts_health          ON agent_hosts(health_status);
 CREATE INDEX IF NOT EXISTS idx_agent_dispatches_correlation
   ON agent_dispatches(correlation_kind, correlation_id);

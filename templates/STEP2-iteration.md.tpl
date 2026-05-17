@@ -18,6 +18,8 @@ $recommended_tech_stack_read_item
 
 $mount_table
 
+$workspace_file_refs
+
 ## 产出要求
 
 在 `$output_path` 现有文件末尾**追加**以下 $h2_count 个 H2 章节（保留 front-matter 与 H1）：

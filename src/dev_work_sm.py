@@ -40,6 +40,13 @@ from src.models import (
 )
 from src.reviewer import ReviewOutcome
 from src.workspace_events import emit_and_deliver, emit_workspace_event
+from src.workspace_file_refs import (
+    delete_workspace_file_refs_for_referrer,
+    insert_workspace_file_refs,
+    list_workspace_file_ref_rows,
+    load_workspace_prompt_files,
+    validate_workspace_file_refs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +134,22 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
     def _abs_for(self, ws: dict[str, Any], relative_path: str) -> str:
         """Compose an absolute POSIX path under ``<root>/<slug>/`` for LLM use."""
         return (self.workspaces_root / ws["slug"] / relative_path).as_posix()
+
+    async def _load_workspace_prompt_files(
+        self, dw: dict[str, Any], ws: dict[str, Any]
+    ) -> tuple[Any, ...]:
+        rows = await list_workspace_file_ref_rows(
+            self.db, referrer_kind="dev_work", referrer_id=dw["id"],
+        )
+        files = await load_workspace_prompt_files(
+            registry=self.registry,
+            workspace_row=ws,
+            file_rows=rows,
+            abs_for=self._abs_for,
+            max_each_chars=20_000,
+            max_total_chars=80_000,
+        )
+        return tuple(files)
 
     # ---- driver ----
 
@@ -510,6 +533,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         rubric_threshold: int | None = None,
         max_rounds: int | None = None,
         recommended_tech_stack: str | None = None,
+        workspace_file_refs: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a DevWork plus its ``dev_work_repos`` rows atomically.
 
@@ -543,6 +567,12 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                 f"{dd['workspace_id']!r}, not {workspace_id!r}"
             )
         self._validate_max_rounds_override(max_rounds)
+        workspace_file_rows = await validate_workspace_file_refs(
+            self.db, workspace_id=workspace_id, paths=workspace_file_refs,
+        )
+        workspace_file_refs = [
+            row["relative_path"] for row in workspace_file_rows
+        ]
 
         if not repo_refs:
             raise BadRequestError(
@@ -569,6 +599,7 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             for key, value in (
                 ("rubric_threshold_override", rubric_threshold),
                 ("max_rounds_override", max_rounds),
+                ("workspace_file_refs", workspace_file_refs or None),
             )
             if value is not None
         }
@@ -626,6 +657,14 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
                         now,
                     ),
                 )
+            await insert_workspace_file_refs(
+                self.db,
+                workspace_id=workspace_id,
+                referrer_kind="dev_work",
+                referrer_id=dev_id,
+                relative_paths=workspace_file_refs,
+                created_at=now,
+            )
 
         await emit_and_deliver(
             self.db,
@@ -894,6 +933,9 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
         ws = await self.workspaces.get(dw["workspace_id"])
         if ws is None:
             raise NotFoundError(f"workspace {dw['workspace_id']!r} not found")
+        await delete_workspace_file_refs_for_referrer(
+            self.db, referrer_kind="dev_work", referrer_id=dev_id,
+        )
 
         prefix = f"devworks/{dev_id}/"
         file_rows = await self.registry.repo.list_for_workspace(ws["id"])
@@ -941,6 +983,11 @@ class DevWorkStateMachine(DevWorkStepHandlersMixin):
             )
             await self.db.execute(
                 "DELETE FROM dev_work_repos WHERE dev_work_id=?", (dev_id,),
+            )
+            await delete_workspace_file_refs_for_referrer(
+                self.db,
+                referrer_kind="dev_work",
+                referrer_id=dev_id,
             )
             await self.db.execute(
                 "DELETE FROM agent_executions "

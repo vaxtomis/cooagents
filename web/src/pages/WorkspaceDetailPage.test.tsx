@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { SWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   DesignDoc,
   DesignWork,
@@ -12,13 +12,16 @@ import type {
   RepoBranches,
   Workspace,
   WorkspaceEventsEnvelope,
+  WorkspaceFilesEnvelope,
 } from "../types";
 import { WorkspaceDetailPage } from "./WorkspaceDetailPage";
 
 vi.mock("../api/workspaces", () => ({
   getWorkspace: vi.fn(),
   archiveWorkspace: vi.fn(),
-  uploadWorkspaceAttachment: vi.fn(),
+  listWorkspaceFiles: vi.fn(),
+  uploadWorkspaceFile: vi.fn(),
+  deleteWorkspaceFile: vi.fn(),
 }));
 vi.mock("../api/designWorks", () => ({
   listDesignWorks: vi.fn(),
@@ -52,7 +55,12 @@ vi.mock("../api/repos", () => ({
   repoLogPage: vi.fn(),
 }));
 
-import { getWorkspace, uploadWorkspaceAttachment } from "../api/workspaces";
+import {
+  deleteWorkspaceFile,
+  getWorkspace,
+  listWorkspaceFiles,
+  uploadWorkspaceFile,
+} from "../api/workspaces";
 import { createDesignWork, listDesignWorkPage } from "../api/designWorks";
 import { listDesignDocs } from "../api/designDocs";
 import { createDevWork, listDevWorkPage } from "../api/devWorks";
@@ -61,6 +69,10 @@ import { listRepos, repoBranches } from "../api/repos";
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+beforeEach(() => {
+  vi.mocked(listWorkspaceFiles).mockResolvedValue(filesEnvelope);
 });
 
 const workspace: Workspace = {
@@ -91,6 +103,7 @@ const designWork: DesignWork = {
   updated_at: "2026-04-23T00:00:00Z",
   is_running: false,
   repo_refs: [],
+  workspace_file_refs: [],
   attachment_paths: [],
 };
 
@@ -116,6 +129,29 @@ const devWork: DevWork = {
   progress: null,
   repo_refs: [],
   repos: [],
+  workspace_file_refs: [],
+};
+
+const filesEnvelope: WorkspaceFilesEnvelope = {
+  workspace_id: "ws-1",
+  slug: "ws",
+  status: "active",
+  files: [
+    {
+      id: "wf-1",
+      workspace_id: "ws-1",
+      relative_path: "attachments/brief.md",
+      kind: "attachment",
+      content_hash: "hash",
+      byte_size: 7,
+      local_mtime_ns: null,
+      created_at: "2026-04-01T00:00:00Z",
+      updated_at: "2026-04-23T00:00:00Z",
+      selectable: true,
+      reference_count: 0,
+    },
+  ],
+  pagination: { limit: 20, offset: 0, total: 1, has_more: false },
 };
 
 const repoFrontend: Repo = {
@@ -262,11 +298,57 @@ describe("WorkspaceDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click((await screen.findAllByRole("tab"))[2]);
+    fireEvent.click((await screen.findAllByRole("tab"))[3]);
 
     expect(await screen.findByText("design_work.escalated")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-events-feed")).toBeInTheDocument();
     expect(document.querySelector('[data-pagination-tone="console"]')).not.toBeNull();
+  });
+
+  it("manages Workspace files with filtering upload and delete", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue(designPage);
+    vi.mocked(listDesignDocs).mockResolvedValue([designDoc]);
+    vi.mocked(listDevWorkPage).mockResolvedValue(devPage);
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(uploadWorkspaceFile).mockResolvedValue({
+      filename: "extra.md",
+      markdown_path: "attachments/extra.md",
+      content_hash: "hash2",
+      byte_size: 8,
+      converted_from: "md",
+      image_paths: [],
+    });
+    vi.mocked(deleteWorkspaceFile).mockRejectedValueOnce(
+      new Error("referenced by design_work dw-1"),
+    );
+
+    renderPage();
+
+    fireEvent.click((await screen.findAllByRole("tab"))[2]);
+    expect(await screen.findByText("Workspace Files")).toBeInTheDocument();
+    expect(screen.getByText("attachments/brief.md")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search workspace files"), {
+      target: { value: "brief" },
+    });
+    await waitFor(() => {
+      expect(listWorkspaceFiles).toHaveBeenLastCalledWith(
+        "ws-1",
+        expect.objectContaining({ query: "brief" }),
+      );
+    });
+
+    const file = new File(["# Extra"], "extra.md", { type: "text/markdown" });
+    fireEvent.change(screen.getByLabelText("Upload workspace files"), {
+      target: { files: [file] },
+    });
+    await waitFor(() => {
+      expect(uploadWorkspaceFile).toHaveBeenCalledWith("ws-1", file);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete attachments/brief.md" }));
+    expect(await screen.findByText("referenced by design_work dw-1")).toBeInTheDocument();
   });
 
   it("DevWork form rejects empty repo_refs and never calls createDevWork", async () => {
@@ -319,6 +401,7 @@ describe("WorkspaceDetailPage", () => {
     fireEvent.change(branchSelect, { target: { value: "main" } });
 
     fillDevWorkExecutionPrompt();
+    fireEvent.click(await screen.findByRole("button", { name: "Select attachments/brief.md" }));
 
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
@@ -335,6 +418,7 @@ describe("WorkspaceDetailPage", () => {
               mount_name: "frontend",
             }),
           ],
+          workspace_file_refs: ["attachments/brief.md"],
         }),
       );
       const args = vi.mocked(createDevWork).mock.calls[0][0];
@@ -595,7 +679,7 @@ describe("WorkspaceDetailPage", () => {
     vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
-    vi.mocked(uploadWorkspaceAttachment).mockResolvedValue({
+    vi.mocked(uploadWorkspaceFile).mockResolvedValue({
       filename: "brief.md",
       markdown_path: "attachments/brief.md",
       content_hash: "hash",
@@ -612,14 +696,14 @@ describe("WorkspaceDetailPage", () => {
     fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "feature-x" } });
     fireEvent.change(screen.getByLabelText("需求说明"), { target: { value: "do something" } });
     const file = new File(["# Brief"], "brief.md", { type: "text/markdown" });
-    fireEvent.change(screen.getByLabelText("选择附件"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("DesignWork Workspace files upload"), { target: { files: [file] } });
+    await waitFor(() => expect(uploadWorkspaceFile).toHaveBeenCalledWith("ws-1", file));
 
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
     await waitFor(() => {
-      expect(uploadWorkspaceAttachment).toHaveBeenCalledWith("ws-1", file);
       const args = vi.mocked(createDesignWork).mock.calls[0][0];
-      expect(args.attachment_paths).toEqual(["attachments/brief.md"]);
+      expect(args.workspace_file_refs).toEqual(["attachments/brief.md"]);
     });
   });
 
@@ -630,7 +714,7 @@ describe("WorkspaceDetailPage", () => {
     vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
     vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
     vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
-    vi.mocked(uploadWorkspaceAttachment).mockResolvedValue({
+    vi.mocked(uploadWorkspaceFile).mockResolvedValue({
       filename: "brief.pdf",
       attachment_path: "attachments/brief.pdf",
       markdown_path: "attachments/brief.pdf",
@@ -648,14 +732,14 @@ describe("WorkspaceDetailPage", () => {
     fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "feature-x" } });
     fireEvent.change(screen.getByLabelText("需求说明"), { target: { value: "do something" } });
     const file = new File(["%PDF"], "brief.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText("选择附件"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("DesignWork Workspace files upload"), { target: { files: [file] } });
+    await waitFor(() => expect(uploadWorkspaceFile).toHaveBeenCalledWith("ws-1", file));
 
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
 
     await waitFor(() => {
-      expect(uploadWorkspaceAttachment).toHaveBeenCalledWith("ws-1", file);
       const args = vi.mocked(createDesignWork).mock.calls[0][0];
-      expect(args.attachment_paths).toEqual(["attachments/brief.pdf"]);
+      expect(args.workspace_file_refs).toEqual(["attachments/brief.pdf"]);
     });
   });
 
@@ -678,11 +762,10 @@ describe("WorkspaceDetailPage", () => {
       { length: 11 },
       (_, index) => new File(["# Brief"], `brief-${index}.md`, { type: "text/markdown" }),
     );
-    fireEvent.change(screen.getByLabelText("选择附件"), { target: { files } });
-    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    fireEvent.change(screen.getByLabelText("DesignWork Workspace files upload"), { target: { files } });
 
-    expect(await screen.findByText(/最多只能上传 10 个附件/)).toBeInTheDocument();
-    expect(uploadWorkspaceAttachment).not.toHaveBeenCalled();
+    expect(await screen.findByText("Select at most 10 files.")).toBeInTheDocument();
+    expect(uploadWorkspaceFile).not.toHaveBeenCalled();
     expect(createDesignWork).not.toHaveBeenCalled();
   });
 

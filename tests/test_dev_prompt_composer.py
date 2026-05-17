@@ -23,6 +23,7 @@ from src.dev_prompt_composer import (
     compose_step5,
     extract_rubric_section,
 )
+from src.workspace_file_refs import WorkspacePromptFile
 
 
 def _step5_minimal() -> Step5Inputs:
@@ -32,6 +33,21 @@ def _step5_minimal() -> Step5Inputs:
         mount_table_entries=(),
         primary_worktree_path=None, rubric_threshold=85,
         output_json_path="/s",
+    )
+
+
+def _workspace_prompt_file(
+    *,
+    content: str | None = "# Dev notes\n\nUse this.",
+) -> WorkspacePromptFile:
+    return WorkspacePromptFile(
+        relative_path="notes/dev.md",
+        kind="other",
+        byte_size=22,
+        absolute_path="/ws/w1/notes/dev.md",
+        content=content,
+        truncated=False,
+        original_chars=len(content) if content is not None else None,
     )
 
 
@@ -182,6 +198,24 @@ def test_step2_prompt_does_not_embed_design_body():
     assert "---\nslug:" not in out
 
 
+def test_step2_prompt_includes_workspace_file_refs():
+    out = compose_step2(Step2Inputs(
+        dev_work_id="dev-abcdef", round=1,
+        design_doc_path="/ws/foo/designs/d.md",
+        user_prompt="P",
+        previous_review_path=None,
+        output_path="/ws/foo/devworks/dev-abcdef/iteration-round-1.md",
+        workspace_file_refs=(_workspace_prompt_file(),),
+    ))
+
+    assert "## Workspace File References" in out
+    assert "### `notes/dev.md`" in out
+    assert "- kind: `other`" in out
+    assert "- size: 22 bytes" in out
+    assert "- absolute path: `/ws/w1/notes/dev.md`" in out
+    assert "# Dev notes" in out
+
+
 def test_step2_preserves_literal_dollar_signs():
     # safe_substitute must not blow up on $ in user content.
     out = compose_step2(Step2Inputs(
@@ -257,6 +291,19 @@ def test_step3_prompt_includes_paths():
     assert "开发计划/验收映射" in out
 
 
+def test_step3_prompt_includes_workspace_file_refs():
+    out = compose_step3(Step3Inputs(
+        worktree_path="/wt", design_doc_path="/d.md",
+        iteration_note_path="/n.md", output_path="/o.md",
+        mount_table_entries=(),
+        workspace_file_refs=(_workspace_prompt_file(content=None),),
+    ))
+
+    assert "## Workspace File References" in out
+    assert "### `notes/dev.md`" in out
+    assert "content: not inlined" in out
+
+
 def test_step3_prompt_includes_mount_table():
     out = compose_step3(Step3Inputs(
         worktree_path="/wt", design_doc_path="/d.md",
@@ -282,6 +329,19 @@ def test_step4_prompt_includes_findings_path():
     assert "不要只把 JSON 打印到 stdout" in out
     assert "建议探测包管理器和既有 lint / typecheck / 单元测试脚本" in out
     assert "未运行建议测试时" in out
+
+
+def test_step4_prompt_includes_workspace_file_refs():
+    out = compose_step4(Step4Inputs(
+        worktree_path="/wt", iteration_note_path="/n.md",
+        context_path="/c.md", findings_output_path="/f.json",
+        mount_table_entries=(),
+        workspace_file_refs=(_workspace_prompt_file(),),
+    ))
+
+    assert "## Workspace File References" in out
+    assert "### `notes/dev.md`" in out
+    assert "# Dev notes" in out
 
 
 def test_step4_prompt_includes_high_b_execution_strategy():

@@ -15,7 +15,7 @@ from httpx import ASGITransport, AsyncClient
 from slowapi import Limiter
 
 from src.database import Database
-from src.exceptions import BadRequestError, EtagMismatch, NotFoundError
+from src.exceptions import BadRequestError, ConflictError, EtagMismatch, NotFoundError
 from src.request_utils import client_ip
 from src.storage import LocalFileStore
 from src.storage.registry import WorkspaceFileRegistry, WorkspaceFilesRepo
@@ -77,12 +77,20 @@ async def client(tmp_path: Path):
             content={"error": "bad_request", "message": str(exc)},
         )
 
+    @test_app.exception_handler(ConflictError)
+    async def _conflict(request, exc):
+        return JSONResponse(
+            status_code=409,
+            content={"error": "conflict", "message": str(exc)},
+        )
+
     from routes.workspaces import router as ws_router
     test_app.include_router(ws_router, prefix="/api/v1")
 
     async with AsyncClient(
         transport=ASGITransport(app=test_app), base_url="http://test"
     ) as ac:
+        ac.db = db  # type: ignore[attr-defined]
         yield ac, ws_root
 
     await db.close()
@@ -111,6 +119,131 @@ async def test_get_files_404_for_unknown_workspace(client):
     c, _ = client
     r = await c.get("/api/v1/workspaces/ws-doesnotexist/files")
     assert r.status_code == 404
+
+
+async def test_get_files_filters_paginates_and_marks_selectable(client):
+    c, _ = client
+    ws = await _create_workspace(c, slug="files-filter")
+    await c.post(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        data={"relative_path": "notes/a.md", "kind": "other"},
+        files={"file": ("a.md", b"a", "text/markdown")},
+        headers={"X-Expected-Prior-Hash": "none"},
+    )
+    await c.post(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        data={"relative_path": "ctx/b.md", "kind": "context"},
+        files={"file": ("b.md", b"b", "text/markdown")},
+        headers={"X-Expected-Prior-Hash": "none"},
+    )
+
+    r = await c.get(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        params={"selectable": "true", "query": "notes", "limit": 1},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["pagination"]["total"] == 1
+    assert body["files"][0]["relative_path"] == "notes/a.md"
+    assert body["files"][0]["selectable"] is True
+
+
+async def test_upload_workspace_file_alias_saves_file(client):
+    c, ws_root = client
+    ws = await _create_workspace(c, slug="file-upload")
+    r = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/files/upload",
+        files={"file": ("brief.md", b"# Brief", "text/markdown")},
+    )
+    assert r.status_code == 201, r.text
+    rel = r.json()["attachment_path"]
+    assert rel.startswith("attachments/brief-")
+    assert (ws_root / "file-upload" / rel).read_bytes() == b"# Brief"
+
+
+async def test_delete_workspace_file_removes_unreferenced_selectable_file(client):
+    c, ws_root = client
+    ws = await _create_workspace(c, slug="delete-ok")
+    upload = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        data={"relative_path": "notes/delete-me.md", "kind": "other"},
+        files={"file": ("delete-me.md", b"bye", "text/markdown")},
+        headers={"X-Expected-Prior-Hash": "none"},
+    )
+    assert upload.status_code == 201, upload.text
+
+    r = await c.delete(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        params={"relative_path": "notes/delete-me.md"},
+    )
+    assert r.status_code == 204, r.text
+    assert not (ws_root / "delete-ok" / "notes" / "delete-me.md").exists()
+    idx = await c.get(f"/api/v1/workspaces/{ws['id']}/files")
+    assert "notes/delete-me.md" not in {
+        row["relative_path"] for row in idx.json()["files"]
+    }
+
+
+async def test_delete_workspace_file_rejects_protected_kind(client):
+    c, _ = client
+    ws = await _create_workspace(c, slug="delete-protected")
+    r = await c.delete(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        params={"relative_path": "workspace.md"},
+    )
+    assert r.status_code == 400, r.text
+    assert "protected kind" in r.json()["message"]
+
+
+async def test_delete_workspace_file_rejects_referenced_file(client):
+    c, _ = client
+    ws = await _create_workspace(c, slug="delete-ref")
+    upload = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        data={"relative_path": "notes/keep.md", "kind": "other"},
+        files={"file": ("keep.md", b"keep", "text/markdown")},
+        headers={"X-Expected-Prior-Hash": "none"},
+    )
+    assert upload.status_code == 201, upload.text
+    await c.db.execute(  # type: ignore[attr-defined]
+        "INSERT INTO workspace_file_refs(id,workspace_id,relative_path,"
+        "referrer_kind,referrer_id,created_at) VALUES(?,?,?,?,?,?)",
+        (
+            "wfr-delete",
+            ws["id"],
+            "notes/keep.md",
+            "dev_work",
+            "dev-1",
+            "2026-04-24T00:00:00Z",
+        ),
+    )
+
+    r = await c.delete(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        params={"relative_path": "notes/keep.md"},
+    )
+    assert r.status_code == 409, r.text
+    assert "dev_work:dev-1" in r.json()["message"]
+
+
+async def test_delete_workspace_file_rejects_archived_workspace(client):
+    c, _ = client
+    ws = await _create_workspace(c, slug="delete-archived")
+    await c.post(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        data={"relative_path": "notes/a.md", "kind": "other"},
+        files={"file": ("a.md", b"a", "text/markdown")},
+        headers={"X-Expected-Prior-Hash": "none"},
+    )
+    archive = await c.delete(f"/api/v1/workspaces/{ws['id']}")
+    assert archive.status_code == 204, archive.text
+
+    r = await c.delete(
+        f"/api/v1/workspaces/{ws['id']}/files",
+        params={"relative_path": "notes/a.md"},
+    )
+    assert r.status_code == 400, r.text
+    assert "not active" in r.json()["message"]
 
 
 async def test_upload_markdown_attachment_saves_workspace_file(client):

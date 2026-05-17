@@ -35,6 +35,11 @@ from src.models import (
     RetryDesignWorkRequest,
 )
 from src.request_utils import client_ip
+from src.workspace_file_refs import (
+    list_workspace_file_ref_paths,
+    list_workspace_file_ref_paths_batch,
+    merge_workspace_file_ref_paths,
+)
 
 limiter = Limiter(key_func=client_ip)
 router = APIRouter(tags=["design-works"])
@@ -97,6 +102,7 @@ async def _load_repo_refs_batch(
 def _row_to_progress(
     row: dict,
     repo_refs: list[DesignRepoRefView] | None = None,
+    workspace_file_refs: list[str] | None = None,
     *,
     is_running: bool = False,
     max_loops: int | None = None,
@@ -109,7 +115,15 @@ def _row_to_progress(
                 missing = None
         except Exception:
             missing = None
-    attachment_paths = _decode_attachment_paths(row.get("gates_json"))
+    legacy_attachment_paths = _decode_attachment_paths(row.get("gates_json"))
+    workspace_file_refs = merge_workspace_file_ref_paths(
+        workspace_file_refs, _decode_workspace_file_refs(row.get("gates_json")),
+        legacy_attachment_paths,
+    )
+    attachment_paths = [
+        path for path in workspace_file_refs
+        if path.startswith("attachments/")
+    ]
     return DesignWorkProgress(
         id=row["id"],
         workspace_id=row["workspace_id"],
@@ -129,6 +143,7 @@ def _row_to_progress(
         is_running=is_running,
         repo_refs=repo_refs or [],
         attachment_paths=attachment_paths,
+        workspace_file_refs=workspace_file_refs,
     )
 
 
@@ -140,6 +155,19 @@ def _decode_attachment_paths(blob: str | None) -> list[str]:
     except Exception:
         return []
     paths = gates.get("attachment_paths") if isinstance(gates, dict) else None
+    if not isinstance(paths, list):
+        return []
+    return [p for p in paths if isinstance(p, str)]
+
+
+def _decode_workspace_file_refs(blob: str | None) -> list[str]:
+    if not blob:
+        return []
+    try:
+        gates = json.loads(blob)
+    except Exception:
+        return []
+    paths = gates.get("workspace_file_refs") if isinstance(gates, dict) else None
     if not isinstance(paths, list):
         return []
     return [p for p in paths if isinstance(p, str)]
@@ -201,15 +229,22 @@ async def create_design_work(
         max_loops=req.max_loops,
         repo_refs=validated,
         attachment_paths=req.attachment_paths,
+        workspace_file_refs=merge_workspace_file_ref_paths(
+            req.workspace_file_refs, req.attachment_paths,
+        ),
     )
     # Fire-and-forget background driver; errors are logged inside the SM,
     # and the SM clears its own task-tracking map via add_done_callback.
     sm.schedule_driver(dw["id"])
     response.headers["Location"] = f"/api/v1/design-works/{dw['id']}"
     refs = await _load_repo_refs(request.app.state.db, dw["id"])
+    file_refs = await list_workspace_file_ref_paths(
+        request.app.state.db, referrer_kind="design_work", referrer_id=dw["id"],
+    )
     return _row_to_progress(
         dw,
         refs,
+        file_refs,
         is_running=sm.is_running(dw["id"]),
         max_loops=sm._resolve_max_loops(dw),
     )
@@ -269,12 +304,17 @@ async def list_design_works(
             f"{sql} LIMIT ? OFFSET ?",
             tuple(page_params),
         )
-        refs_by_id = await _load_repo_refs_batch(db, [r["id"] for r in rows])
+        ids = [r["id"] for r in rows]
+        refs_by_id = await _load_repo_refs_batch(db, ids)
+        file_refs_by_id = await list_workspace_file_ref_paths_batch(
+            db, referrer_kind="design_work", referrer_ids=ids,
+        )
         return DesignWorkPage(
             items=[
                 _row_to_progress(
                     r,
                     refs_by_id.get(r["id"], []),
+                    file_refs_by_id.get(r["id"], []),
                     is_running=sm.is_running(r["id"]),
                     max_loops=sm._resolve_max_loops(r),
                 )
@@ -288,11 +328,16 @@ async def list_design_works(
             },
         )
     rows = await db.fetchall(sql, tuple(params))
-    refs_by_id = await _load_repo_refs_batch(db, [r["id"] for r in rows])
+    ids = [r["id"] for r in rows]
+    refs_by_id = await _load_repo_refs_batch(db, ids)
+    file_refs_by_id = await list_workspace_file_ref_paths_batch(
+        db, referrer_kind="design_work", referrer_ids=ids,
+    )
     return [
         _row_to_progress(
             r,
             refs_by_id.get(r["id"], []),
+            file_refs_by_id.get(r["id"], []),
             is_running=sm.is_running(r["id"]),
             max_loops=sm._resolve_max_loops(r),
         )
@@ -307,10 +352,14 @@ async def get_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
     if not row:
         raise NotFoundError(f"design_work {dw_id!r} not found")
     refs = await _load_repo_refs(db, dw_id)
+    file_refs = await list_workspace_file_ref_paths(
+        db, referrer_kind="design_work", referrer_id=dw_id,
+    )
     sm = request.app.state.design_work_sm
     return _row_to_progress(
         row,
         refs,
+        file_refs,
         is_running=sm.is_running(dw_id),
         max_loops=sm._resolve_max_loops(row),
     )
@@ -322,9 +371,13 @@ async def tick_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
     sm = request.app.state.design_work_sm
     dw = await sm.tick(dw_id)
     refs = await _load_repo_refs(request.app.state.db, dw_id)
+    file_refs = await list_workspace_file_ref_paths(
+        request.app.state.db, referrer_kind="design_work", referrer_id=dw_id,
+    )
     return _row_to_progress(
         dw,
         refs,
+        file_refs,
         is_running=sm.is_running(dw_id),
         max_loops=sm._resolve_max_loops(dw),
     )
@@ -341,6 +394,13 @@ async def get_design_work_retry_source(
     _ensure_retryable(source)
     user_input = await _read_source_user_input(request, source)
     refs = await _load_retry_repo_refs(db, dw_id)
+    file_refs = merge_workspace_file_ref_paths(
+        await list_workspace_file_ref_paths(
+            db, referrer_kind="design_work", referrer_id=dw_id,
+        ),
+        _decode_workspace_file_refs(source.get("gates_json")),
+        _decode_attachment_paths(source.get("gates_json")),
+    )
     return DesignWorkRetrySource(
         title=source.get("title") or source["id"],
         slug=source.get("sub_slug") or source["id"],
@@ -348,7 +408,10 @@ async def get_design_work_retry_source(
         needs_frontend_mockup=bool(source.get("needs_frontend_mockup")),
         agent=source.get("agent"),
         repo_refs=refs,
-        attachment_paths=_decode_attachment_paths(source.get("gates_json")),
+        attachment_paths=[
+            path for path in file_refs if path.startswith("attachments/")
+        ],
+        workspace_file_refs=file_refs,
     )
 
 
@@ -376,10 +439,25 @@ async def retry_design_work(
         if payload is not None and "repo_refs" in fields_set
         else await _load_retry_repo_refs(db, dw_id)
     )
+    source_file_refs = merge_workspace_file_ref_paths(
+        await list_workspace_file_ref_paths(
+            db, referrer_kind="design_work", referrer_id=dw_id,
+        ),
+        _decode_workspace_file_refs(source.get("gates_json")),
+        _decode_attachment_paths(source.get("gates_json")),
+    )
     attachment_paths = (
         payload.attachment_paths or []
         if payload is not None and "attachment_paths" in fields_set
         else _decode_attachment_paths(source.get("gates_json"))
+    )
+    workspace_file_refs = (
+        payload.workspace_file_refs or []
+        if payload is not None and "workspace_file_refs" in fields_set
+        else source_file_refs
+    )
+    workspace_file_refs = merge_workspace_file_ref_paths(
+        workspace_file_refs, attachment_paths,
     )
     validated = (
         await validate_design_repo_refs(
@@ -423,13 +501,18 @@ async def retry_design_work(
         agent=agent,
         repo_refs=validated,
         attachment_paths=attachment_paths,
+        workspace_file_refs=workspace_file_refs,
     )
     sm.schedule_driver(created["id"])
     response.headers["Location"] = f"/api/v1/design-works/{created['id']}"
     created_refs = await _load_repo_refs(db, created["id"])
+    created_file_refs = await list_workspace_file_ref_paths(
+        db, referrer_kind="design_work", referrer_id=created["id"],
+    )
     return _row_to_progress(
         created,
         created_refs,
+        created_file_refs,
         is_running=sm.is_running(created["id"]),
         max_loops=sm._resolve_max_loops(created),
     )
@@ -450,9 +533,13 @@ async def rerun_design_work(dw_id: str, request: Request) -> DesignWorkProgress:
     dw = await sm.rerun_cancelled(dw_id)
     sm.schedule_driver(dw_id)
     refs = await _load_repo_refs(request.app.state.db, dw_id)
+    file_refs = await list_workspace_file_ref_paths(
+        request.app.state.db, referrer_kind="design_work", referrer_id=dw_id,
+    )
     return _row_to_progress(
         dw,
         refs,
+        file_refs,
         is_running=sm.is_running(dw_id),
         max_loops=sm._resolve_max_loops(dw),
     )

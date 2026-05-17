@@ -229,6 +229,31 @@ class Database:
                 """
             )
 
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_file_refs (
+              id                TEXT PRIMARY KEY,
+              workspace_id      TEXT NOT NULL REFERENCES workspaces(id),
+              relative_path     TEXT NOT NULL,
+              referrer_kind     TEXT NOT NULL CHECK(referrer_kind IN ('design_work','dev_work')),
+              referrer_id       TEXT NOT NULL,
+              created_at        TEXT NOT NULL,
+              UNIQUE(referrer_kind, referrer_id, relative_path),
+              FOREIGN KEY(workspace_id, relative_path)
+                REFERENCES workspace_files(workspace_id, relative_path)
+                ON DELETE RESTRICT
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_file_refs_file "
+            "ON workspace_file_refs(workspace_id, relative_path)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_file_refs_referrer "
+            "ON workspace_file_refs(referrer_kind, referrer_id)"
+        )
+
         await conn.commit()
 
     async def close(self) -> None:

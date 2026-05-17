@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { SWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import type { DesignWork, WorkspaceEventsEnvelope } from "../types";
 import { DesignWorkPage } from "./DesignWorkPage";
@@ -23,6 +23,10 @@ vi.mock("../api/reviews", () => ({
 vi.mock("../api/workspaceEvents", () => ({
   listWorkspaceEvents: vi.fn(),
 }));
+vi.mock("../api/workspaces", () => ({
+  listWorkspaceFiles: vi.fn(),
+  uploadWorkspaceFile: vi.fn(),
+}));
 vi.mock("../api/repos", () => ({
   listRepos: vi.fn(),
   repoBranches: vi.fn(),
@@ -40,9 +44,20 @@ import { getDesignDocContent } from "../api/designDocs";
 import { listRepos } from "../api/repos";
 import { listReviews } from "../api/reviews";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
+import { listWorkspaceFiles } from "../api/workspaces";
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+beforeEach(() => {
+  vi.mocked(listWorkspaceFiles).mockResolvedValue({
+    workspace_id: "ws-1",
+    slug: "ws",
+    status: "active",
+    files: [],
+    pagination: { limit: 50, offset: 0, total: 0, has_more: false },
+  });
 });
 
 function renderPage() {
@@ -81,6 +96,7 @@ const baseDesignWork: DesignWork = {
   updated_at: "2026-04-23T00:00:00Z",
   is_running: false,
   repo_refs: [],
+  workspace_file_refs: [],
   attachment_paths: [],
 };
 
@@ -310,6 +326,7 @@ describe("DesignWorkPage", () => {
       needs_frontend_mockup: false,
       agent: "claude",
       repo_refs: [],
+      workspace_file_refs: [],
       attachment_paths: [],
     });
     vi.mocked(listRepos).mockResolvedValue([]);
@@ -360,6 +377,7 @@ describe("DesignWorkPage", () => {
       needs_frontend_mockup: false,
       agent: "claude",
       repo_refs: [],
+      workspace_file_refs: ["attachments/brief.md"],
       attachment_paths: ["attachments/brief.md"],
     });
     vi.mocked(listRepos).mockResolvedValue([]);
@@ -378,7 +396,7 @@ describe("DesignWorkPage", () => {
       expect(retryDesignWork).toHaveBeenCalledWith(
         "dw-1",
         expect.objectContaining({
-          attachment_paths: [],
+          workspace_file_refs: [],
         }),
       );
     });

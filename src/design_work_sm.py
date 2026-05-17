@@ -30,6 +30,14 @@ from src.models import DesignWorkMode, DesignWorkState, RepoRef
 from src.semver import next_version
 from src.storage.registry import WorkspaceFileRegistry
 from src.workspace_events import emit_and_deliver
+from src.workspace_file_refs import (
+    delete_workspace_file_refs_for_referrer,
+    insert_workspace_file_refs,
+    list_workspace_file_ref_rows,
+    load_workspace_prompt_files,
+    merge_workspace_file_ref_paths,
+    validate_workspace_file_refs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +278,14 @@ class DesignWorkStateMachine:
                     f"attachment {rel!r} is not valid UTF-8 markdown"
                 ) from exc
         return normalized
+
+    async def _validate_workspace_file_refs(
+        self, ws: dict, paths: list[str] | None
+    ) -> list[str]:
+        rows = await validate_workspace_file_refs(
+            self.db, workspace_id=ws["id"], paths=paths,
+        )
+        return [row["relative_path"] for row in rows]
     # ---- public API ----
 
     async def create(
@@ -287,6 +303,7 @@ class DesignWorkStateMachine:
         max_loops: int | None = None,
         repo_refs: list[tuple[RepoRef, str | None]] | None = None,
         attachment_paths: list[str] | None = None,
+        workspace_file_refs: list[str] | None = None,
     ) -> dict:
         """Create a DesignWork plus its ``design_work_repos`` rows atomically.
 
@@ -305,6 +322,10 @@ class DesignWorkStateMachine:
         self._validate_max_loops_override(max_loops)
         attachment_paths = await self._validate_existing_attachments(
             ws, attachment_paths
+        )
+        workspace_file_refs = await self._validate_workspace_file_refs(
+            ws,
+            merge_workspace_file_ref_paths(workspace_file_refs, attachment_paths),
         )
 
         wid = self._new_id()
@@ -330,6 +351,7 @@ class DesignWorkStateMachine:
                 ("rubric_threshold_override", rubric_threshold),
                 ("max_loops_override", max_loops),
                 ("attachment_paths", attachment_paths or None),
+                ("workspace_file_refs", workspace_file_refs or None),
             )
             if value is not None
         }
@@ -372,6 +394,14 @@ class DesignWorkStateMachine:
                        VALUES(?,?,?,?,?)""",
                     (wid, ref.repo_id, ref.base_branch, rev, now),
                 )
+            await insert_workspace_file_refs(
+                self.db,
+                workspace_id=workspace_id,
+                referrer_kind="design_work",
+                referrer_id=wid,
+                relative_paths=workspace_file_refs,
+                created_at=now,
+            )
         await emit_and_deliver(
             self.db,
             self.webhooks,
@@ -582,6 +612,9 @@ class DesignWorkStateMachine:
         ws = await self.workspaces.get(dw["workspace_id"])
         if ws is None:
             raise NotFoundError(f"workspace {dw['workspace_id']!r} not found")
+        await delete_workspace_file_refs_for_referrer(
+            self.db, referrer_kind="design_work", referrer_id=dw_id,
+        )
 
         paths = {
             p for p in (dw.get("user_input_path"), dw.get("output_path"))
@@ -603,6 +636,11 @@ class DesignWorkStateMachine:
             )
             await self.db.execute(
                 "DELETE FROM design_work_repos WHERE design_work_id=?", (dw_id,),
+            )
+            await delete_workspace_file_refs_for_referrer(
+                self.db,
+                referrer_kind="design_work",
+                referrer_id=dw_id,
             )
             await self.db.execute(
                 "DELETE FROM agent_executions "
@@ -682,8 +720,8 @@ class DesignWorkStateMachine:
         user_input = await self.registry.read_text(
             workspace_slug=ws["slug"], relative_path=dw["user_input_path"],
         )
-        attachments = await self._load_prompt_attachments(
-            ws, _decode_attachment_paths(dw.get("gates_json")),
+        attachments = await self._load_prompt_workspace_files(
+            dw, ws,
         )
         # LLM receives an absolute output path so it can `Write` without
         # guessing a cwd; relative paths are workspace-internal only.
@@ -723,47 +761,46 @@ class DesignWorkStateMachine:
         root = Path(self.workspaces.workspaces_root)
         return (root / ws["slug"] / relative_path).as_posix()
 
-    async def _load_prompt_attachments(
-        self, ws: dict, paths: list[str]
+    async def _load_prompt_workspace_files(
+        self, dw: dict, ws: dict
     ) -> list[PromptAttachment]:
-        remaining = _MAX_ATTACHMENT_PROMPT_TOTAL_CHARS
-        attachments: list[PromptAttachment] = []
-        for rel in validate_attachment_paths(paths):
-            if remaining <= 0:
-                break
-            if Path(rel).suffix.lower() != ".md":
-                ref = await self.registry.stat(
-                    workspace_slug=ws["slug"], relative_path=rel,
+        rows = await list_workspace_file_ref_rows(
+            self.db, referrer_kind="design_work", referrer_id=dw["id"],
+        )
+        if not rows:
+            legacy_paths = _decode_attachment_paths(dw.get("gates_json"))
+            if legacy_paths:
+                rows = await validate_workspace_file_refs(
+                    self.db, workspace_id=ws["id"], paths=legacy_paths,
                 )
-                if ref is None:
-                    content = f"[Attachment {rel!r} could not be found.]"
-                else:
-                    content = (
-                        "Original file attachment preserved for reference.\n"
-                        f"- Workspace-relative path: `{rel}`\n"
-                        f"- Absolute path: `{self._abs_for(ws, rel)}`\n"
-                        f"- Size: {ref.size} bytes"
-                    )
+        files = await load_workspace_prompt_files(
+            registry=self.registry,
+            workspace_row=ws,
+            file_rows=rows,
+            abs_for=self._abs_for,
+            max_each_chars=_MAX_ATTACHMENT_PROMPT_CHARS,
+            max_total_chars=_MAX_ATTACHMENT_PROMPT_TOTAL_CHARS,
+        )
+        attachments: list[PromptAttachment] = []
+        for file in files:
+            header = (
+                f"Kind: {file.kind}\n"
+                f"Size: {file.byte_size if file.byte_size is not None else 'unknown'} bytes\n"
+                f"Workspace-relative path: `{file.relative_path}`\n"
+                f"Absolute path: `{file.absolute_path}`"
+            )
+            if file.content is None:
+                content = header + "\n\nContent is not inlined; inspect the path if needed."
             else:
-                try:
-                    content = await self.registry.read_text(
-                        workspace_slug=ws["slug"], relative_path=rel,
-                    )
-                except Exception:
-                    logger.exception("failed to read design attachment %s", rel)
-                    content = f"[Attachment {rel!r} could not be read.]"
-            allowed = min(_MAX_ATTACHMENT_PROMPT_CHARS, remaining)
-            truncated = len(content) > allowed
-            clipped = content[:allowed]
+                content = header + "\n\nContent:\n" + file.content
             attachments.append(
                 PromptAttachment(
-                    path=rel,
-                    content=clipped,
-                    truncated=truncated,
-                    original_chars=len(content),
+                    path=file.relative_path,
+                    content=content,
+                    truncated=file.truncated,
+                    original_chars=file.original_chars,
                 )
             )
-            remaining -= len(clipped)
         return attachments
 
     async def _d4_llm_generate(self, dw: dict) -> None:

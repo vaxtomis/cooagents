@@ -88,6 +88,7 @@ const devWork: DevWork = {
   progress: null,
   repo_refs: [],
   repos: [],
+  workspace_file_refs: [],
 };
 
 const waitingGate: GateInfo = {

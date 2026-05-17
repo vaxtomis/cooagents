@@ -1,6 +1,7 @@
 import type {
   CreateWorkspacePayload,
   WorkspaceAttachment,
+  WorkspaceFilesEnvelope,
   WorkspacePage,
   Workspace,
   WorkspaceStatus,
@@ -45,6 +46,47 @@ export async function archiveWorkspace(id: string): Promise<void> {
 
 export async function syncWorkspaces(): Promise<WorkspaceSyncReport> {
   return apiFetch<WorkspaceSyncReport>("/workspaces/sync", { method: "POST" });
+}
+
+export interface ListWorkspaceFilesParams {
+  kind?: string;
+  query?: string;
+  selectable?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listWorkspaceFiles(
+  workspaceId: string,
+  params: ListWorkspaceFilesParams = {},
+): Promise<WorkspaceFilesEnvelope> {
+  const query = { ...params };
+  return apiFetch<WorkspaceFilesEnvelope>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/files`,
+    { query },
+  );
+}
+
+export async function uploadWorkspaceFile(
+  workspaceId: string,
+  file: File,
+): Promise<WorkspaceAttachment> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch<WorkspaceAttachment>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/files/upload`,
+    { method: "POST", body },
+  );
+}
+
+export async function deleteWorkspaceFile(
+  workspaceId: string,
+  relativePath: string,
+): Promise<void> {
+  await apiRequest<void>(`/workspaces/${encodeURIComponent(workspaceId)}/files`, {
+    method: "DELETE",
+    query: { relative_path: relativePath },
+  });
 }
 
 export async function uploadWorkspaceAttachment(

@@ -1,16 +1,23 @@
-import { useMemo, useState, type FormEvent } from "react";
-import { FileText, Upload, X } from "lucide-react";
+import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { Copy, Search, Trash2, Upload } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import useSWR from "swr";
 import { createDesignWork, listDesignWorkPage } from "../api/designWorks";
 import { listDesignDocs } from "../api/designDocs";
 import { createDevWork, listDevWorkPage } from "../api/devWorks";
 import { listWorkspaceEvents } from "../api/workspaceEvents";
-import { archiveWorkspace, getWorkspace, uploadWorkspaceAttachment } from "../api/workspaces";
+import {
+  archiveWorkspace,
+  deleteWorkspaceFile,
+  getWorkspace,
+  listWorkspaceFiles,
+  uploadWorkspaceFile,
+} from "../api/workspaces";
 import { AppDialog } from "../components/AppDialog";
 import { PaginationControls } from "../components/PaginationControls";
 import { PolicyOverrideFields, parsePolicyOverrides } from "../components/PolicyOverrideFields";
 import { EmptyState, SectionPanel } from "../components/SectionPanel";
+import { WorkspaceFilePicker } from "../components/WorkspaceFilePicker";
 import {
   MOUNT_NAME_RE,
   RepoRefsEditor,
@@ -29,16 +36,19 @@ import type {
   DevWork,
   RepoRef,
   WorkspaceEvent,
+  WorkspaceFile,
 } from "../types";
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9]|-(?!-)){0,61}[a-z0-9]$|^[a-z0-9]$/;
 const WORK_ITEM_PAGE_SIZE = 6;
 const EVENTS_PAGE_SIZE = 20;
+const WORKSPACE_FILE_PAGE_SIZE = 20;
 
-const TAB_IDS = ["designs", "devworks", "events"] as const;
+const TAB_IDS = ["designs", "devworks", "files", "events"] as const;
 type TabId = (typeof TAB_IDS)[number];
 
 const TAB_LABELS: Record<TabId, string> = {
+  files: "Files",
   designs: "设计工作",
   devworks: "开发工作",
   events: "事件流",
@@ -58,7 +68,6 @@ const MAX_DESIGN_ATTACHMENTS = 10;
 const MAX_ATTACHMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
 const ATTACHMENT_ACCEPT = ".md,.doc,.docx,.pdf,.xls,.xlsx,.excel,.png,.jpg,.jpeg";
 const ATTACHMENT_EXT_RE = /\.(md|doc|docx|pdf|xls|xlsx|excel|png|jpe?g)$/i;
-const ATTACHMENT_EXT_LABEL = "MD / DOC / DOCX / PDF / Excel / PNG / JPG";
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -148,23 +157,9 @@ function DesignWorkCreateForm({
   const [rubricThreshold, setRubricThreshold] = useState("");
   const [showRepos, setShowRepos] = useState(false);
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>([]);
-  const [attachments, setAttachments] = useState<File[]>([]);
+  const [workspaceFileRefs, setWorkspaceFileRefs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  function addAttachments(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const next = [...attachments, ...Array.from(files)];
-    const validationError = validateAttachments(next);
-    setError(validationError);
-    setAttachments(next);
-  }
-
-  function removeAttachment(index: number) {
-    const next = attachments.filter((_, itemIndex) => itemIndex !== index);
-    setAttachments(next);
-    setError(validateAttachments(next));
-  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -177,9 +172,6 @@ function DesignWorkCreateForm({
 
     const policyOverrides = parsePolicyOverrides({ maxLabel: "DesignWork max loops", maxRaw: maxLoops, thresholdLabel: "DesignWork rubric threshold", thresholdRaw: rubricThreshold });
     if (policyOverrides.error) return setError(policyOverrides.error);
-    const attachmentError = validateAttachments(attachments);
-    if (attachmentError) return setError(attachmentError);
-
     let designRefs: RepoRef[] | undefined;
     if (showRepos && repoRefs.length > 0) {
       for (const row of repoRefs) {
@@ -196,12 +188,6 @@ function DesignWorkCreateForm({
     setError(null);
     setSubmitting(true);
     try {
-      const uploadedAttachments = await Promise.all(
-        attachments.map((file) => uploadWorkspaceAttachment(workspaceId, file)),
-      );
-      const attachmentPaths = uploadedAttachments.map(
-        (attachment) => attachment.attachment_path ?? attachment.markdown_path,
-      );
       const created = await createDesignWork({
         workspace_id: workspaceId,
         title: trimmedTitle,
@@ -213,7 +199,7 @@ function DesignWorkCreateForm({
         ...(policyOverrides.maxValue !== undefined ? { max_loops: policyOverrides.maxValue } : {}),
         ...(policyOverrides.thresholdValue !== undefined ? { rubric_threshold: policyOverrides.thresholdValue } : {}),
         repo_refs: designRefs,
-        ...(attachmentPaths.length > 0 ? { attachment_paths: attachmentPaths } : {}),
+        ...(workspaceFileRefs.length > 0 ? { workspace_file_refs: workspaceFileRefs } : {}),
       });
       setTitle("");
       setSlug("");
@@ -223,7 +209,7 @@ function DesignWorkCreateForm({
       setRubricThreshold("");
       setShowRepos(false);
       setRepoRefs([]);
-      setAttachments([]);
+      setWorkspaceFileRefs([]);
       onCreated(created);
     } catch (err) {
       setError(extractError(err, "创建设计工作失败"));
@@ -264,52 +250,13 @@ function DesignWorkCreateForm({
         />
       </label>
 
-      <div className="space-y-3 rounded-2xl border border-border bg-panel-strong/55 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-medium text-copy">补充附件</p>
-            <p className="mt-1 text-xs text-muted">{ATTACHMENT_EXT_LABEL}</p>
-          </div>
-          <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-border-dark/60 bg-panel px-3 py-2 text-xs font-medium text-copy-soft transition hover:border-accent/45 hover:text-copy">
-            <Upload aria-hidden="true" className="h-4 w-4" />
-            <span>选择附件</span>
-            <input
-              className="sr-only"
-              type="file"
-              accept={ATTACHMENT_ACCEPT}
-              multiple
-              onChange={(event) => {
-                addAttachments(event.target.files);
-                event.target.value = "";
-              }}
-            />
-          </label>
-        </div>
-        {attachments.length > 0 ? (
-          <div className="space-y-2">
-            {attachments.map((file, index) => (
-              <div
-                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-panel/70 px-3 py-2 text-xs text-muted"
-                key={`${file.name}:${file.size}:${index}`}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <FileText aria-hidden="true" className="h-4 w-4 shrink-0 text-copy-soft" />
-                  <span className="truncate text-copy-soft">{file.name}</span>
-                  <span className="shrink-0">{formatBytes(file.size)}</span>
-                </span>
-                <button
-                  aria-label={`Remove ${file.name}`}
-                  className="rounded-lg border border-border px-2 py-1 text-muted transition hover:border-danger/30 hover:text-danger"
-                  onClick={() => removeAttachment(index)}
-                  type="button"
-                >
-                  <X aria-hidden="true" className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      <WorkspaceFilePicker
+        label="DesignWork Workspace files"
+        maxSelected={MAX_DESIGN_ATTACHMENTS}
+        onChange={setWorkspaceFileRefs}
+        value={workspaceFileRefs}
+        workspaceId={workspaceId}
+      />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.95fr)]">
         <label className="flex items-center gap-3 rounded-2xl border border-border bg-panel-strong/55 px-4 py-3 text-sm text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
@@ -420,6 +367,7 @@ function DevWorkCreateForm({
   const [recommendedTechStack, setRecommendedTechStack] = useState("");
   const [maxRounds, setMaxRounds] = useState("");
   const [rubricThreshold, setRubricThreshold] = useState("");
+  const [workspaceFileRefs, setWorkspaceFileRefs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -476,6 +424,7 @@ function DevWorkCreateForm({
             : {}),
           ...(policyOverrides.maxValue !== undefined ? { max_rounds: policyOverrides.maxValue } : {}),
           ...(policyOverrides.thresholdValue !== undefined ? { rubric_threshold: policyOverrides.thresholdValue } : {}),
+          ...(workspaceFileRefs.length > 0 ? { workspace_file_refs: workspaceFileRefs } : {}),
       });
       setDesignDocId("");
       setRepoRefs([]);
@@ -485,6 +434,7 @@ function DevWorkCreateForm({
       setRecommendedTechStack("");
       setMaxRounds("");
       setRubricThreshold("");
+      setWorkspaceFileRefs([]);
       onCreated(created);
     } catch (err) {
       setError(extractError(err, "创建开发工作失败"));
@@ -515,6 +465,13 @@ function DevWorkCreateForm({
         <span>仓库绑定</span>
         <RepoRefsEditor minRows={1} mode="dev" onChange={setRepoRefs} value={repoRefs} />
       </div>
+
+      <WorkspaceFilePicker
+        label="DevWork Workspace files"
+        onChange={setWorkspaceFileRefs}
+        value={workspaceFileRefs}
+        workspaceId={workspaceId}
+      />
 
       <div className="space-y-3 rounded-2xl border border-border bg-panel-strong/55 p-4">
         <label className="flex items-center gap-3 text-sm text-muted">
@@ -636,6 +593,220 @@ function EventRow({ event }: { event: WorkspaceEvent }) {
         </pre>
       ) : null}
     </article>
+  );
+}
+
+function WorkspaceFileRow({
+  file,
+  deleting,
+  onCopy,
+  onDelete,
+}: {
+  file: WorkspaceFile;
+  deleting: boolean;
+  onCopy: (path: string) => void;
+  onDelete: (path: string) => void;
+}) {
+  return (
+    <article className="flex flex-col gap-3 rounded-xl border border-border bg-panel-strong/80 p-3 md:flex-row md:items-center md:justify-between">
+      <div className="min-w-0">
+        <p className="truncate font-mono text-sm text-copy">{file.relative_path}</p>
+        <p className="mt-1 text-xs text-muted">
+          {file.kind} / {formatBytes(file.byte_size ?? 0)} / refs {file.reference_count}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          aria-label={`Copy ${file.relative_path}`}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel text-muted transition hover:border-accent/40 hover:text-copy"
+          onClick={() => onCopy(file.relative_path)}
+          title="Copy path"
+          type="button"
+        >
+          <Copy aria-hidden="true" className="h-4 w-4" />
+        </button>
+        <button
+          aria-label={`Delete ${file.relative_path}`}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel text-muted transition hover:border-danger/40 hover:text-danger disabled:opacity-50"
+          disabled={deleting}
+          onClick={() => onDelete(file.relative_path)}
+          title="Delete"
+          type="button"
+        >
+          <Trash2 aria-hidden="true" className="h-4 w-4" />
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function WorkspaceFilesPanel({
+  workspaceId,
+  active,
+}: {
+  workspaceId: string;
+  active: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [deletingPath, setDeletingPath] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const filesQuery = useSWR(
+    ["workspace-files", workspaceId, query.trim(), kind, offset],
+    () =>
+      listWorkspaceFiles(workspaceId, {
+        query: query.trim() || undefined,
+        kind: kind || undefined,
+        limit: WORKSPACE_FILE_PAGE_SIZE,
+        offset,
+      }),
+    { revalidateOnFocus: false },
+  );
+  const files = filesQuery.data?.files ?? [];
+
+  async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
+    const filesToUpload = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (filesToUpload.length === 0) return;
+    const validationError = validateAttachments(filesToUpload);
+    if (validationError) {
+      setMessage(validationError);
+      return;
+    }
+    setUploading(true);
+    setMessage(null);
+    try {
+      await Promise.all(
+        filesToUpload.map((file) => uploadWorkspaceFile(workspaceId, file)),
+      );
+      setOffset(0);
+      await filesQuery.mutate();
+    } catch (err) {
+      setMessage(extractError(err, "Workspace file upload failed"));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function copyPath(path: string) {
+    await navigator.clipboard?.writeText(path);
+    setMessage(`Copied ${path}`);
+  }
+
+  async function deleteFile(path: string) {
+    setDeletingPath(path);
+    setMessage(null);
+    try {
+      await deleteWorkspaceFile(workspaceId, path);
+      await filesQuery.mutate();
+    } catch (err) {
+      setMessage(extractError(err, "Workspace file delete failed"));
+    } finally {
+      setDeletingPath(null);
+    }
+  }
+
+  return (
+    <SectionPanel
+      kicker="Files"
+      title="Workspace Files"
+      actions={
+        <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-border-dark/60 bg-panel-strong/85 px-4 py-3 text-sm font-medium text-copy-soft shadow-[0_14px_28px_rgba(0,0,0,0.28)] transition hover:border-accent/50 hover:bg-panel hover:text-copy has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+          <Upload aria-hidden="true" className="h-4 w-4" />
+          <span>{uploading ? "Uploading..." : "Upload"}</span>
+          <input
+            aria-label="Upload workspace files"
+            className="sr-only"
+            disabled={!active || uploading}
+            multiple
+            onChange={(event) => void handleUpload(event)}
+            type="file"
+            accept={ATTACHMENT_ACCEPT}
+          />
+        </label>
+      }
+    >
+      <div className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem]">
+        <label className="relative block">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+          />
+          <input
+            aria-label="Search workspace files"
+            className={`${FORM_FIELD_CLASSNAME} pl-10`}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOffset(0);
+            }}
+            placeholder="Search files"
+            value={query}
+          />
+        </label>
+        <select
+          aria-label="Workspace file kind"
+          className={FORM_SELECT_CLASSNAME}
+          onChange={(event) => {
+            setKind(event.target.value);
+            setOffset(0);
+          }}
+          value={kind}
+        >
+          <option value="">All kinds</option>
+          <option value="attachment">attachment</option>
+          <option value="image">image</option>
+          <option value="context">context</option>
+          <option value="artifact">artifact</option>
+          <option value="feedback">feedback</option>
+          <option value="other">other</option>
+          <option value="workspace_md">workspace_md</option>
+          <option value="design_doc">design_doc</option>
+          <option value="design_input">design_input</option>
+          <option value="prompt">prompt</option>
+          <option value="iteration_note">iteration_note</option>
+        </select>
+      </div>
+
+      {message ? <p className="mb-3 text-xs text-muted">{message}</p> : null}
+
+      {files.length === 0 ? (
+        filesQuery.error ? (
+          <QueryErrorState
+            message={extractError(filesQuery.error, "Workspace files failed to load")}
+            onRetry={() => void filesQuery.mutate()}
+          />
+        ) : filesQuery.data === undefined ? (
+          <LoadingBlock rows={3} />
+        ) : (
+          <EmptyState copy="No Workspace files found." />
+        )
+      ) : (
+        <div className="space-y-2">
+          {files.map((file) => (
+            <WorkspaceFileRow
+              deleting={deletingPath === file.relative_path}
+              file={file}
+              key={file.relative_path}
+              onCopy={(path) => void copyPath(path)}
+              onDelete={(path) => void deleteFile(path)}
+            />
+          ))}
+        </div>
+      )}
+
+      {filesQuery.data ? (
+        <div className="mt-3">
+          <PaginationControls
+            pagination={filesQuery.data.pagination}
+            itemLabel="files"
+            onPageChange={setOffset}
+            disabled={filesQuery.isLoading}
+          />
+        </div>
+      ) : null}
+    </SectionPanel>
   );
 }
 
@@ -979,6 +1150,13 @@ function WorkspaceDetailContent({ workspaceId }: { workspaceId: string }) {
             </div>
           ) : null}
         </SectionPanel>
+      ) : null}
+
+      {tab === "files" ? (
+        <WorkspaceFilesPanel
+          active={workspace?.status === "active"}
+          workspaceId={workspaceId}
+        />
       ) : null}
 
       {tab === "events" ? (

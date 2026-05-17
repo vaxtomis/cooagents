@@ -402,6 +402,57 @@ async def test_create_persists_recommended_tech_stack(client):
     assert "recommended_tech_stack" not in gates
 
 
+async def test_create_accepts_workspace_file_refs_and_prompts_them(client):
+    app = client._app
+    await app.state.registry.put_markdown(
+        workspace_row=app.state._ws,
+        relative_path="notes/dev.md",
+        text="# Dev notes\n\nUse this while building.",
+        kind="other",
+    )
+
+    r = await client.post(
+        "/api/v1/dev-works",
+        json=_payload(app, workspace_file_refs=["notes/dev.md"]),
+    )
+
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["workspace_file_refs"] == ["notes/dev.md"]
+    rows = await app.state.db.fetchall(
+        "SELECT referrer_kind, referrer_id, relative_path "
+        "FROM workspace_file_refs WHERE referrer_id=?",
+        (body["id"],),
+    )
+    assert [dict(row) for row in rows] == [{
+        "referrer_kind": "dev_work",
+        "referrer_id": body["id"],
+        "relative_path": "notes/dev.md",
+    }]
+
+    final = await _wait_for_terminal(client, body["id"])
+    assert final["workspace_file_refs"] == ["notes/dev.md"]
+    prompt = await app.state.registry.read_text(
+        workspace_slug=app.state._ws["slug"],
+        relative_path=f"devworks/{body['id']}/prompts/step2-round1.md",
+    )
+    assert "## Workspace File References" in prompt
+    assert "### `notes/dev.md`" in prompt
+    assert "# Dev notes" in prompt
+
+
+async def test_create_rejects_protected_workspace_file_ref(client):
+    app = client._app
+
+    r = await client.post(
+        "/api/v1/dev-works",
+        json=_payload(app, workspace_file_refs=["workspace.md"]),
+    )
+
+    assert r.status_code == 400
+    assert "selectable workspace files" in r.json()["message"]
+
+
 async def test_list_requires_workspace_id(client):
     r = await client.get("/api/v1/dev-works")
     assert r.status_code == 422

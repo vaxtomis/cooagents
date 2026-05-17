@@ -991,6 +991,7 @@ class DevWorkStepHandlersMixin:
         #    mount table for read-only repo/docs/interface inspection before
         #    it commits to the round's implementation plan.
         mount_entries = await self._load_mount_table_entries(dw)
+        workspace_file_refs = await self._load_workspace_prompt_files(dw, ws)
         prompt_text = compose_step2(
             Step2Inputs(
                 dev_work_id=dw["id"],
@@ -1002,6 +1003,7 @@ class DevWorkStepHandlersMixin:
                 recommended_tech_stack=recommended_tech_stack,
                 worktree_path=dw.get("worktree_path"),
                 mount_table_entries=mount_entries,
+                workspace_file_refs=workspace_file_refs,
                 output_path=note_abs,
             )
         )
@@ -1113,6 +1115,7 @@ class DevWorkStepHandlersMixin:
         # Phase 6: Step3 sees every mount's worktree (multi-mount tasks
         # may need to scan non-primary mounts for context).
         mount_entries = await self._load_mount_table_entries(dw)
+        workspace_file_refs = await self._load_workspace_prompt_files(dw, ws)
         prompt = compose_step3(
             Step3Inputs(
                 worktree_path=dw["worktree_path"],
@@ -1120,6 +1123,7 @@ class DevWorkStepHandlersMixin:
                 iteration_note_path=self._abs_for(ws, note["markdown_path"]),
                 output_path=ctx_abs,
                 mount_table_entries=mount_entries,
+                workspace_file_refs=workspace_file_refs,
             )
         )
         prompt_rel = f"devworks/{dw['id']}/prompts/step3-round{round_n}.md"
@@ -1196,6 +1200,7 @@ class DevWorkStepHandlersMixin:
         # ``worktree_path`` below remains the primary's path, used as the
         # prompt's default landing pad.
         mount_entries = await self._load_mount_table_entries(dw)
+        workspace_file_refs = await self._load_workspace_prompt_files(dw, ws)
         previous_review = await self.db.fetchone(
             "SELECT score_breakdown_json FROM reviews "
             "WHERE dev_work_id=? ORDER BY round DESC, created_at DESC LIMIT 1",
@@ -1216,6 +1221,7 @@ class DevWorkStepHandlersMixin:
                 context_path=self._abs_for(ws, ctx_rel),
                 findings_output_path=self._abs_for(ws, findings_rel),
                 mount_table_entries=mount_entries,
+                workspace_file_refs=workspace_file_refs,
                 retry_feedback=retry_feedback,
                 previous_actual_score_b=previous_actual_score_b,
             )

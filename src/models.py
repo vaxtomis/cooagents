@@ -265,6 +265,20 @@ class WorkspaceAttachment(BaseModel):
     image_paths: list[str] = Field(default_factory=list)
 
 
+class WorkspaceFile(BaseModel):
+    id: str
+    workspace_id: str
+    relative_path: str
+    kind: str
+    content_hash: str | None = None
+    byte_size: int | None = None
+    local_mtime_ns: int | None = None
+    created_at: str
+    updated_at: str
+    selectable: bool = False
+    reference_count: int = 0
+
+
 class WorkspaceMetrics(BaseModel):
     """PRD Phase 8 Success Metrics — lifetime by default; windowed via ?since=&until=.
 
@@ -322,6 +336,10 @@ class CreateDesignWorkRequest(BaseModel):
     # converted to markdown; PDF, Excel, and images are referenced as original
     # files.
     attachment_paths: list[str] = Field(default_factory=list)
+    # Workspace-relative paths selected from the Workspace file library.
+    # ``attachment_paths`` remains a legacy alias and is merged at the route
+    # layer.
+    workspace_file_refs: list[str] = Field(default_factory=list)
 
     @field_validator("slug")
     @classmethod
@@ -339,6 +357,13 @@ class CreateDesignWorkRequest(BaseModel):
         from src.design_attachments import validate_attachment_paths
 
         return validate_attachment_paths(v)
+
+    @field_validator("workspace_file_refs")
+    @classmethod
+    def _check_workspace_file_refs(cls, v: list[str]) -> list[str]:
+        from src.workspace_file_refs import normalize_workspace_file_refs
+
+        return normalize_workspace_file_refs(v)
 
     @model_validator(mode="after")
     def _check_mode_parent_combo(self) -> "CreateDesignWorkRequest":
@@ -362,6 +387,8 @@ class RetryDesignWorkRequest(BaseModel):
     repo_refs: list["RepoRef"] | None = None
     # Omitted means "reuse source attachments"; [] means "retry with none".
     attachment_paths: list[str] | None = None
+    # Omitted means "reuse source workspace files"; [] means "retry with none".
+    workspace_file_refs: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -378,6 +405,7 @@ class RetryDesignWorkRequest(BaseModel):
             "agent",
             "repo_refs",
             "attachment_paths",
+            "workspace_file_refs",
         }
         explicit_nulls = [
             name for name, value in data.items()
@@ -408,6 +436,15 @@ class RetryDesignWorkRequest(BaseModel):
 
         return validate_attachment_paths(v)
 
+    @field_validator("workspace_file_refs")
+    @classmethod
+    def _check_workspace_file_refs(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        from src.workspace_file_refs import normalize_workspace_file_refs
+
+        return normalize_workspace_file_refs(v)
+
 
 class DesignWorkRetrySource(BaseModel):
     title: str
@@ -417,6 +454,7 @@ class DesignWorkRetrySource(BaseModel):
     agent: AgentKind | None = None
     repo_refs: list["RepoRef"] = Field(default_factory=list)
     attachment_paths: list[str] = Field(default_factory=list)
+    workspace_file_refs: list[str] = Field(default_factory=list)
 
 
 class DesignWorkProgress(BaseModel):
@@ -439,6 +477,7 @@ class DesignWorkProgress(BaseModel):
     # Phase 4 (repo-registry): persisted refs from design_work_repos.
     repo_refs: list["DesignRepoRefView"] = Field(default_factory=list)
     attachment_paths: list[str] = Field(default_factory=list)
+    workspace_file_refs: list[str] = Field(default_factory=list)
 
 
 class DesignWorkPage(BaseModel):
@@ -471,6 +510,14 @@ class CreateDevWorkRequest(BaseModel):
     # 4-step validation chain (existence → health → branch resolves →
     # in-payload mount uniqueness) lives in ``routes/_repo_refs_validation``.
     repo_refs: list["DevRepoRef"] = Field(..., min_length=1)
+    workspace_file_refs: list[str] = Field(default_factory=list)
+
+    @field_validator("workspace_file_refs")
+    @classmethod
+    def _check_workspace_file_refs(cls, v: list[str]) -> list[str]:
+        from src.workspace_file_refs import normalize_workspace_file_refs
+
+        return normalize_workspace_file_refs(v)
 
     @model_validator(mode="after")
     def _validate_repo_refs(self) -> "CreateDevWorkRequest":
@@ -555,6 +602,7 @@ class DevWorkProgress(BaseModel):
     # without a follow-up GET on /api/v1/repos/{id}. UI consumers keep
     # reading repo_refs.
     repos: list["WorkerRepoHandoff"] = Field(default_factory=list)
+    workspace_file_refs: list[str] = Field(default_factory=list)
 
 
 class DevWorkPage(BaseModel):

@@ -22,6 +22,7 @@ import { RepoRefsEditor, type RepoRefsEditorRow } from "../components/RepoRefsEd
 import { ReviewRow } from "../components/ReviewHistory";
 import { MetricCard, SectionPanel } from "../components/SectionPanel";
 import { StatusBadge } from "../components/StatusBadge";
+import { WorkspaceFilePicker } from "../components/WorkspaceFilePicker";
 import {
   useWorkspaceActivePolling,
   useWorkspaceDetailPolling,
@@ -138,11 +139,13 @@ function DesignWorkRetryForm({
   submitting,
   onCancel,
   onSubmit,
+  workspaceId,
 }: {
   source: DesignWorkRetrySource;
   submitting: boolean;
   onCancel: () => void;
   onSubmit: (payload: RetryDesignWorkPayload) => Promise<void>;
+  workspaceId: string;
 }) {
   const [title, setTitle] = useState(source.title);
   const [slug, setSlug] = useState(source.slug);
@@ -154,12 +157,10 @@ function DesignWorkRetryForm({
   const [repoRefs, setRepoRefs] = useState<RepoRefsEditorRow[]>(
     toEditorRows(source.repo_refs),
   );
-  const [attachmentPaths, setAttachmentPaths] = useState(source.attachment_paths ?? []);
+  const [workspaceFileRefs, setWorkspaceFileRefs] = useState(
+    source.workspace_file_refs ?? source.attachment_paths ?? [],
+  );
   const [error, setError] = useState<string | null>(null);
-
-  function removeAttachmentPath(path: string) {
-    setAttachmentPaths((current) => current.filter((item) => item !== path));
-  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -192,7 +193,7 @@ function DesignWorkRetryForm({
         needs_frontend_mockup: needsFrontendMockup,
         agent: agent || null,
         repo_refs: refs,
-        attachment_paths: attachmentPaths,
+        workspace_file_refs: workspaceFileRefs,
       });
     } catch (err) {
       setError(extractError(err, "Retry failed"));
@@ -260,30 +261,12 @@ function DesignWorkRetryForm({
         value={repoRefs}
       />
 
-      {attachmentPaths.length > 0 ? (
-        <div className="space-y-2 rounded-2xl border border-border bg-panel-strong/55 p-4">
-          <p className="text-sm font-medium text-copy">Supplemental attachments</p>
-          {attachmentPaths.map((path) => (
-            <div
-              className="flex items-center justify-between gap-3 rounded-xl border border-border bg-panel/70 px-3 py-2 text-xs text-muted"
-              key={path}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <FileText aria-hidden="true" className="h-4 w-4 shrink-0 text-copy-soft" />
-                <span className="truncate font-mono text-copy-soft">{path}</span>
-              </span>
-              <button
-                aria-label={`Remove ${path}`}
-                className="rounded-lg border border-border px-2 py-1 text-muted transition hover:border-danger/30 hover:text-danger"
-                onClick={() => removeAttachmentPath(path)}
-                type="button"
-              >
-                <X aria-hidden="true" className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      <WorkspaceFilePicker
+        label="DesignWork retry Workspace files"
+        onChange={setWorkspaceFileRefs}
+        value={workspaceFileRefs}
+        workspaceId={workspaceId}
+      />
 
       {error ? <p className="text-xs text-danger">{error}</p> : null}
 
@@ -855,6 +838,7 @@ function DesignWorkContent({ wsId, dwId }: { wsId: string; dwId: string }) {
               onSubmit={submitRetry}
               source={retrySourceQuery.data}
               submitting={actionPending === "retry"}
+              workspaceId={wsId}
             />
           ) : (
             <div className="h-48 animate-pulse rounded-2xl border border-border bg-panel-strong/70" />
