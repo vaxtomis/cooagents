@@ -9,6 +9,15 @@ from src.exceptions import BadRequestError
 from src.storage.base import normalize_key
 
 MAX_DESIGN_ATTACHMENTS = 10
+ALLOWED_DESIGN_ATTACHMENT_EXTENSIONS = {
+    "jpg",
+    "jpeg",
+    "md",
+    "pdf",
+    "png",
+    "xls",
+    "xlsx",
+}
 
 _SAFE_STEM_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -23,14 +32,18 @@ def sanitize_attachment_stem(filename: str) -> str:
 def validate_attachment_path(relative_path: str) -> str:
     """Normalize and constrain a DesignWork attachment path.
 
-    Attachments are stored as markdown under ``attachments/``. DesignWork
-    creation accepts paths instead of raw file bodies, so this guard prevents
-    arbitrary workspace files from being pulled into LLM prompts.
+    Attachments must live under ``attachments/``. DesignWork creation accepts
+    paths instead of raw file bodies, so this guard prevents arbitrary
+    workspace files from being pulled into LLM prompts.
     """
     rel = normalize_key(relative_path).as_posix()
-    if not rel.startswith("attachments/") or not rel.endswith(".md"):
+    suffix = Path(rel).suffix.lstrip(".").lower()
+    if (
+        not rel.startswith("attachments/")
+        or suffix not in ALLOWED_DESIGN_ATTACHMENT_EXTENSIONS
+    ):
         raise BadRequestError(
-            "attachment_paths entries must be markdown files under attachments/"
+            "attachment_paths entries must be supported files under attachments/"
         )
     return rel
 

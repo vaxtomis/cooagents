@@ -623,6 +623,42 @@ describe("WorkspaceDetailPage", () => {
     });
   });
 
+  it("DesignWork form accepts expanded attachment file types", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue(workspace);
+    vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listDesignDocs).mockResolvedValue([]);
+    vi.mocked(listDevWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });
+    vi.mocked(listWorkspaceEvents).mockResolvedValue(eventsEnvelope);
+    vi.mocked(listRepos).mockResolvedValue([repoFrontend]);
+    vi.mocked(uploadWorkspaceAttachment).mockResolvedValue({
+      filename: "brief.pdf",
+      attachment_path: "attachments/brief.pdf",
+      markdown_path: "attachments/brief.pdf",
+      content_hash: "hash",
+      byte_size: 7,
+      converted_from: "pdf",
+      image_paths: [],
+    });
+    vi.mocked(createDesignWork).mockResolvedValue(designWork);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "新建设计工作" }));
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "Hello" } });
+    fireEvent.change(screen.getByLabelText("Slug 标识"), { target: { value: "feature-x" } });
+    fireEvent.change(screen.getByLabelText("需求说明"), { target: { value: "do something" } });
+    const file = new File(["%PDF"], "brief.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText("选择附件"), { target: { files: [file] } });
+
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => {
+      expect(uploadWorkspaceAttachment).toHaveBeenCalledWith("ws-1", file);
+      const args = vi.mocked(createDesignWork).mock.calls[0][0];
+      expect(args.attachment_paths).toEqual(["attachments/brief.pdf"]);
+    });
+  });
+
   it("DesignWork form rejects more than ten attachments before upload", async () => {
     vi.mocked(getWorkspace).mockResolvedValue(workspace);
     vi.mocked(listDesignWorkPage).mockResolvedValue({ items: [], pagination: { limit: 6, offset: 0, total: 0, has_more: false } });

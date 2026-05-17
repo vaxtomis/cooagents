@@ -18,9 +18,28 @@ def test_validate_upload_docx():
     assert validate_upload("requirement.docx") == "docx"
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("brief.pdf", "pdf"),
+        ("legacy.doc", "doc"),
+        ("sheet.xls", "xls"),
+        ("sheet.xlsx", "xlsx"),
+        ("sheet.excel", "xlsx"),
+        ("mockup.png", "png"),
+        ("photo.jpg", "jpg"),
+        ("photo.jpeg", "jpg"),
+    ],
+)
+def test_validate_upload_supported_design_attachment_types(filename, expected):
+    assert validate_upload(filename) == expected
+
+
 def test_validate_upload_case_insensitive():
     assert validate_upload("doc.MD") == "md"
     assert validate_upload("doc.DOCX") == "docx"
+    assert validate_upload("brief.PDF") == "pdf"
+    assert validate_upload("photo.JPEG") == "jpg"
 
 
 def test_validate_upload_rejects_txt():

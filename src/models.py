@@ -253,10 +253,15 @@ class WorkspaceSyncReport(BaseModel):
 
 class WorkspaceAttachment(BaseModel):
     filename: str
+    attachment_path: str
+    # Backward-compatible response field. For original-file uploads this is
+    # the same value as attachment_path, even when the path is not markdown.
     markdown_path: str
     content_hash: str | None = None
     byte_size: int | None = None
-    converted_from: Literal["md", "docx"]
+    converted_from: Literal[
+        "doc", "docx", "jpg", "md", "pdf", "png", "xls", "xlsx",
+    ]
     image_paths: list[str] = Field(default_factory=list)
 
 
@@ -313,8 +318,9 @@ class CreateDesignWorkRequest(BaseModel):
     # Phase 4 (repo-registry): optional repo binding. Empty list keeps
     # pure-doc DesignWorks creatable.
     repo_refs: list["RepoRef"] = Field(default_factory=list)
-    # Uploaded supplemental markdown files under attachments/. .docx uploads
-    # are converted to markdown before their paths are referenced here.
+    # Uploaded supplemental files under attachments/. Word documents are
+    # converted to markdown; PDF, Excel, and images are referenced as original
+    # files.
     attachment_paths: list[str] = Field(default_factory=list)
 
     @field_validator("slug")

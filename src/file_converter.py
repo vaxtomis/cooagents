@@ -1,10 +1,10 @@
 """Document conversion helpers.
 
-docx -> markdown uses Microsoft's ``markitdown`` library with ``keep_data_uris``
-turned on, then extracts inline base64 images into a sibling folder and
-rewrites references to relative paths. This mirrors the manual workflow of
-``markitdown ... --keep-data-uris`` followed by the ``extract_md_images.py``
-post-processor.
+Document -> markdown uses Microsoft's ``markitdown`` library with
+``keep_data_uris`` turned on, then extracts inline base64 images into a
+sibling folder and rewrites references to relative paths. This mirrors the
+manual workflow of ``markitdown ... --keep-data-uris`` followed by the
+``extract_md_images.py`` post-processor.
 
 markdown -> docx still relies on ``pandoc`` since markitdown is one-way.
 """
@@ -20,7 +20,27 @@ from pathlib import Path
 
 from src.exceptions import BadRequestError
 
-ALLOWED_EXTENSIONS = {"md", "docx"}
+ALLOWED_EXTENSIONS = {
+    "doc",
+    "docx",
+    "excel",
+    "jpg",
+    "jpeg",
+    "md",
+    "pdf",
+    "png",
+    "xls",
+    "xlsx",
+}
+CONVERTIBLE_UPLOAD_EXTENSIONS = {"doc", "docx"}
+ORIGINAL_UPLOAD_EXTENSIONS = {"jpg", "pdf", "png", "xls", "xlsx"}
+_EXTENSION_ALIASES = {
+    "excel": "xlsx",
+    "jpeg": "jpg",
+}
+_SUPPORTED_UPLOAD_EXTENSIONS = (
+    ".md, .doc, .docx, .pdf, .xls, .xlsx, .excel, .png, .jpg"
+)
 
 # ![alt](data:image/TYPE;base64,DATA)
 _INLINE_IMAGE_RE = re.compile(
@@ -50,13 +70,14 @@ class ImageExtractionStats:
 
 
 def validate_upload(filename: str) -> str:
-    """Return normalised extension ('md' or 'docx'). Raise on invalid."""
+    """Return normalized extension for a supported attachment upload."""
     suffix = Path(filename).suffix.lstrip(".").lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise BadRequestError(
-            f"Only .md and .docx files are supported, got '.{suffix}'"
+            f"Only {_SUPPORTED_UPLOAD_EXTENSIONS} files are supported, "
+            f"got '.{suffix}'"
         )
-    return suffix
+    return _EXTENSION_ALIASES.get(suffix, suffix)
 
 
 def _mime_to_ext(mime_subtype: str) -> str:
@@ -131,30 +152,79 @@ async def convert_md_to_docx(input_path: Path, output_path: Path) -> None:
         raise RuntimeError(f"Document conversion failed: {stderr.decode()}")
 
 
-def _convert_docx_sync(input_path: Path) -> str:
-    """Blocking docx->markdown with keep_data_uris=True. Import is lazy so
+def _convert_document_sync(input_path: Path) -> str:
+    """Blocking document->markdown with keep_data_uris=True. Import is lazy so
     the rest of the module can be used in environments without markitdown."""
     try:
         from markitdown import MarkItDown
     except ImportError as e:  # pragma: no cover
         raise RuntimeError(
-            "markitdown is required for .docx -> .md conversion. "
+            "markitdown is required for attachment conversion. "
             "Install it with: pip install markitdown[docx]"
         ) from e
 
     md = MarkItDown()
-    result = md.convert(str(input_path), keep_data_uris=True)
+    try:
+        result = md.convert(str(input_path), keep_data_uris=True)
+    except Exception as e:  # noqa: BLE001 - external converters vary
+        suffix = input_path.suffix.lower() or "file"
+        raise RuntimeError(
+            f"attachment conversion failed for {suffix}: {e}"
+        ) from e
     return result.text_content
 
 
-async def convert_docx_to_md(
+def _find_libreoffice() -> str | None:
+    for name in ("soffice.com", "soffice", "libreoffice"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
+
+async def _convert_legacy_doc_to_docx(input_path: Path, output_dir: Path) -> Path:
+    converter = _find_libreoffice()
+    if converter is None:
+        raise RuntimeError(
+            "legacy .doc attachment conversion requires LibreOffice "
+            "(soffice) on PATH"
+        )
+
+    proc = await asyncio.create_subprocess_exec(
+        converter,
+        "--headless",
+        "--convert-to",
+        "docx",
+        "--outdir",
+        str(output_dir),
+        str(input_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        detail = (stderr or stdout).decode(errors="replace").strip()
+        raise RuntimeError(
+            f"legacy .doc attachment conversion failed: {detail}"
+        )
+
+    expected = output_dir / f"{input_path.stem}.docx"
+    if expected.exists():
+        return expected
+    matches = sorted(output_dir.glob("*.docx"))
+    if matches:
+        return matches[0]
+    raise RuntimeError("legacy .doc attachment conversion did not produce .docx")
+
+
+async def convert_document_to_md(
     input_path: Path,
     output_path: Path,
     *,
     extract_images: bool = True,
     image_subdir_name: str = "images",
 ) -> ImageExtractionStats | None:
-    """Convert .docx -> .md via markitdown; optionally extract inline images.
+    """Convert a supported document to markdown; optionally extract images.
 
     When ``extract_images`` is True, base64 images are written to
     ``output_path.parent / <output_stem>_<image_subdir_name>`` and references
@@ -162,7 +232,13 @@ async def convert_docx_to_md(
 
     Returns the extraction stats when images were processed, else ``None``.
     """
-    content = await asyncio.to_thread(_convert_docx_sync, input_path)
+    conversion_input = input_path
+    if input_path.suffix.lower() == ".doc":
+        conversion_input = await _convert_legacy_doc_to_docx(
+            input_path, input_path.parent,
+        )
+
+    content = await asyncio.to_thread(_convert_document_sync, conversion_input)
 
     stats: ImageExtractionStats | None = None
     if extract_images:
@@ -174,3 +250,19 @@ async def convert_docx_to_md(
     with output_path.open("w", encoding="utf-8", newline="") as f:
         f.write(content)
     return stats
+
+
+async def convert_docx_to_md(
+    input_path: Path,
+    output_path: Path,
+    *,
+    extract_images: bool = True,
+    image_subdir_name: str = "images",
+) -> ImageExtractionStats | None:
+    """Backward-compatible wrapper for existing .docx call sites."""
+    return await convert_document_to_md(
+        input_path,
+        output_path,
+        extract_images=extract_images,
+        image_subdir_name=image_subdir_name,
+    )

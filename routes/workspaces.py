@@ -22,7 +22,12 @@ from slowapi import Limiter
 
 from src.design_attachments import sanitize_attachment_stem
 from src.exceptions import BadRequestError, NotFoundError
-from src.file_converter import convert_docx_to_md, validate_upload
+from src.file_converter import (
+    CONVERTIBLE_UPLOAD_EXTENSIONS,
+    ORIGINAL_UPLOAD_EXTENSIONS,
+    convert_document_to_md,
+    validate_upload,
+)
 from src.models import (
     CreateWorkspaceRequest,
     WorkspaceAttachment,
@@ -136,10 +141,10 @@ async def _read_upload_bytes(
     return data
 
 
-async def _convert_docx_attachment(input_path: Path, output_path: Path) -> None:
+async def _convert_document_attachment(input_path: Path, output_path: Path) -> None:
     try:
         await asyncio.wait_for(
-            convert_docx_to_md(input_path, output_path),
+            convert_document_to_md(input_path, output_path),
             timeout=ATTACHMENT_CONVERSION_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError as exc:
@@ -241,13 +246,24 @@ async def upload_workspace_attachment(
             data=data,
             kind="attachment",
         )
-    else:
+    elif ext in ORIGINAL_UPLOAD_EXTENSIONS:
+        attachment_rel = f"attachments/{stem}-{unique}.{ext}"
+        row = await registry.put_bytes(
+            workspace_row=dict(ws),
+            relative_path=attachment_rel,
+            data=data,
+            kind="attachment",
+        )
+        if ext in {"jpg", "png"}:
+            image_paths.append(attachment_rel)
+    elif ext in CONVERTIBLE_UPLOAD_EXTENSIONS:
+        input_suffix = ext
         with tempfile.TemporaryDirectory() as tmp:
             tmp_dir = Path(tmp)
-            input_path = tmp_dir / "input.docx"
+            input_path = tmp_dir / f"input.{input_suffix}"
             output_path = tmp_dir / markdown_name
             input_path.write_bytes(data)
-            await _convert_docx_attachment(input_path, output_path)
+            await _convert_document_attachment(input_path, output_path)
 
             markdown_data = _read_converted_markdown(output_path)
             images_dir = tmp_dir / f"{output_path.stem}_images"
@@ -271,13 +287,16 @@ async def upload_workspace_attachment(
                     kind="image",
                 )
                 image_paths.append(image_rel)
+    else:
+        raise BadRequestError(f"unsupported attachment type '.{ext}'")
 
     response.headers["Location"] = (
         f"/api/v1/workspaces/{workspace_id}/attachments?"
-        f"markdown_path={quote(row['relative_path'], safe='/')}"
+        f"attachment_path={quote(row['relative_path'], safe='/')}"
     )
     return WorkspaceAttachment(
         filename=filename,
+        attachment_path=row["relative_path"],
         markdown_path=row["relative_path"],
         content_hash=row.get("content_hash"),
         byte_size=row.get("byte_size"),

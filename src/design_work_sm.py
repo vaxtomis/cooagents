@@ -252,6 +252,15 @@ class DesignWorkStateMachine:
     ) -> list[str]:
         normalized = validate_attachment_paths(paths)
         for rel in normalized:
+            ref = await self.registry.stat(
+                workspace_slug=ws["slug"], relative_path=rel,
+            )
+            if ref is None:
+                raise BadRequestError(
+                    f"attachment {rel!r} was not found in the workspace"
+                )
+            if Path(rel).suffix.lower() != ".md":
+                continue
             try:
                 await self.registry.read_text(
                     workspace_slug=ws["slug"], relative_path=rel,
@@ -259,10 +268,6 @@ class DesignWorkStateMachine:
             except UnicodeDecodeError as exc:
                 raise BadRequestError(
                     f"attachment {rel!r} is not valid UTF-8 markdown"
-                ) from exc
-            except NotFoundError as exc:
-                raise BadRequestError(
-                    f"attachment {rel!r} was not found in the workspace"
                 ) from exc
         return normalized
     # ---- public API ----
@@ -726,13 +731,27 @@ class DesignWorkStateMachine:
         for rel in validate_attachment_paths(paths):
             if remaining <= 0:
                 break
-            try:
-                content = await self.registry.read_text(
+            if Path(rel).suffix.lower() != ".md":
+                ref = await self.registry.stat(
                     workspace_slug=ws["slug"], relative_path=rel,
                 )
-            except Exception:
-                logger.exception("failed to read design attachment %s", rel)
-                content = f"[Attachment {rel!r} could not be read.]"
+                if ref is None:
+                    content = f"[Attachment {rel!r} could not be found.]"
+                else:
+                    content = (
+                        "Original file attachment preserved for reference.\n"
+                        f"- Workspace-relative path: `{rel}`\n"
+                        f"- Absolute path: `{self._abs_for(ws, rel)}`\n"
+                        f"- Size: {ref.size} bytes"
+                    )
+            else:
+                try:
+                    content = await self.registry.read_text(
+                        workspace_slug=ws["slug"], relative_path=rel,
+                    )
+                except Exception:
+                    logger.exception("failed to read design attachment %s", rel)
+                    content = f"[Attachment {rel!r} could not be read.]"
             allowed = min(_MAX_ATTACHMENT_PROMPT_CHARS, remaining)
             truncated = len(content) > allowed
             clipped = content[:allowed]

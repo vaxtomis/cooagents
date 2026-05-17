@@ -250,10 +250,11 @@ export interface WorkspaceSyncReport {
 
 export interface WorkspaceAttachment {
   filename: string;
+  attachment_path?: string;
   markdown_path: string;
   content_hash: string | null;
   byte_size: number | null;
-  converted_from: "md" | "docx";
+  converted_from: "doc" | "docx" | "jpg" | "md" | "pdf" | "png" | "xls" | "xlsx";
   image_paths: string[];
 }
 
@@ -347,7 +348,7 @@ export interface CreateDesignWorkPayload {
   // Phase 4 (repo-registry): optional repo binding. Empty list keeps
   // pure-doc DesignWorks creatable; omit (or send `[]`) when none.
   repo_refs?: RepoRef[];
-  // Workspace-relative markdown paths returned by the attachment upload API.
+  // Workspace-relative paths returned by the attachment upload API.
   attachment_paths?: string[];
 }
 

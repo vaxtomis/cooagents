@@ -287,6 +287,37 @@ async def test_prompt_includes_uploaded_attachments(env):
     assert "Include enterprise audit trails." in prompt
 
 
+async def test_prompt_includes_original_file_attachment_path(env):
+    await env["registry"].put_bytes(
+        workspace_row=env["ws"],
+        relative_path="attachments/requirements.pdf",
+        data=b"%PDF original bytes",
+        kind="attachment",
+    )
+    sm = DesignWorkStateMachine(
+        db=env["db"], workspaces=env["wm"], design_docs=env["ddm"],
+        executor=StubExecutor(FIXTURES / "perfect"),
+        config=_build_config(), registry=env["registry"],
+    )
+    dw = await sm.create(
+        workspace_id=env["ws"]["id"], title="T",
+        sub_slug="with-pdf", user_input="x" * 50,
+        mode=DesignWorkMode.new, parent_version=None,
+        needs_frontend_mockup=False, agent="claude",
+        attachment_paths=["attachments/requirements.pdf"],
+    )
+    for _ in range(4):
+        dw = await sm.tick(dw["id"])
+    assert dw["current_state"] == "LLM_GENERATE"
+    prompt = await env["registry"].read_text(
+        workspace_slug=env["ws"]["slug"],
+        relative_path=f"designs/.drafts/{dw['id']}-prompt-loop0.md",
+    )
+    assert "Original file attachment preserved for reference." in prompt
+    assert "attachments/requirements.pdf" in prompt
+    assert ".pdf`" in prompt
+
+
 async def test_recovers_existing_output_for_current_prompt(env):
     stub = StubExecutor(FIXTURES / "perfect")
     sm = DesignWorkStateMachine(

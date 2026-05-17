@@ -56,7 +56,9 @@ const DIALOG_FOOTER_CLASSNAME =
   "flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-end";
 const MAX_DESIGN_ATTACHMENTS = 10;
 const MAX_ATTACHMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
-const ATTACHMENT_EXT_RE = /\.(md|docx)$/i;
+const ATTACHMENT_ACCEPT = ".md,.doc,.docx,.pdf,.xls,.xlsx,.excel,.png,.jpg,.jpeg";
+const ATTACHMENT_EXT_RE = /\.(md|doc|docx|pdf|xls|xlsx|excel|png|jpe?g)$/i;
+const ATTACHMENT_EXT_LABEL = "MD / DOC / DOCX / PDF / Excel / PNG / JPG";
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -70,7 +72,7 @@ function validateAttachments(files: File[]): string | null {
   }
   for (const file of files) {
     if (!ATTACHMENT_EXT_RE.test(file.name)) {
-      return "附件只支持 .md 和 .docx";
+      return "附件只支持 .md、.doc、.docx、.pdf、Excel、.png 和 .jpg";
     }
     if (file.size <= 0) {
       return `附件 ${file.name} 不能为空`;
@@ -197,7 +199,9 @@ function DesignWorkCreateForm({
       const uploadedAttachments = await Promise.all(
         attachments.map((file) => uploadWorkspaceAttachment(workspaceId, file)),
       );
-      const attachmentPaths = uploadedAttachments.map((attachment) => attachment.markdown_path);
+      const attachmentPaths = uploadedAttachments.map(
+        (attachment) => attachment.attachment_path ?? attachment.markdown_path,
+      );
       const created = await createDesignWork({
         workspace_id: workspaceId,
         title: trimmedTitle,
@@ -264,7 +268,7 @@ function DesignWorkCreateForm({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-medium text-copy">补充附件</p>
-            <p className="mt-1 text-xs text-muted">MD / DOCX</p>
+            <p className="mt-1 text-xs text-muted">{ATTACHMENT_EXT_LABEL}</p>
           </div>
           <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-border-dark/60 bg-panel px-3 py-2 text-xs font-medium text-copy-soft transition hover:border-accent/45 hover:text-copy">
             <Upload aria-hidden="true" className="h-4 w-4" />
@@ -272,7 +276,7 @@ function DesignWorkCreateForm({
             <input
               className="sr-only"
               type="file"
-              accept=".md,.docx"
+              accept={ATTACHMENT_ACCEPT}
               multiple
               onChange={(event) => {
                 addAttachments(event.target.files);

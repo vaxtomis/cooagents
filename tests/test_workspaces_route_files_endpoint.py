@@ -142,14 +142,17 @@ async def test_upload_markdown_attachment_saves_workspace_file(client):
 async def test_upload_docx_attachment_converts_to_markdown(client, monkeypatch):
     from routes import workspaces as ws_route
 
-    async def fake_convert_docx_to_md(input_path, output_path, **_kwargs):
+    async def fake_convert_document_to_md(input_path, output_path, **_kwargs):
         assert input_path.read_bytes() == b"docx bytes"
+        assert input_path.suffix == ".docx"
         output_path.write_text("# Converted\n\nDoc text", encoding="utf-8")
         images_dir = output_path.parent / f"{output_path.stem}_images"
         images_dir.mkdir()
         (images_dir / "image_001.png").write_bytes(b"png")
 
-    monkeypatch.setattr(ws_route, "convert_docx_to_md", fake_convert_docx_to_md)
+    monkeypatch.setattr(
+        ws_route, "convert_document_to_md", fake_convert_document_to_md,
+    )
 
     c, ws_root = client
     ws = await _create_workspace(c, slug="att-docx")
@@ -174,15 +177,108 @@ async def test_upload_docx_attachment_converts_to_markdown(client, monkeypatch):
     assert (ws_root / "att-docx" / body["image_paths"][0]).read_bytes() == b"png"
 
 
+async def test_upload_doc_attachment_converts_to_markdown(client, monkeypatch):
+    from routes import workspaces as ws_route
+
+    async def fake_convert_document_to_md(input_path, output_path, **_kwargs):
+        assert input_path.read_bytes() == b"document bytes"
+        assert input_path.suffix == ".doc"
+        output_path.write_text("# Converted doc", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ws_route, "convert_document_to_md", fake_convert_document_to_md,
+    )
+
+    c, ws_root = client
+    ws = await _create_workspace(c, slug="att-doc")
+    r = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/attachments",
+        files={"file": ("legacy.doc", b"document bytes", "application/msword")},
+    )
+
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["converted_from"] == "doc"
+    assert body["attachment_path"] == body["markdown_path"]
+    assert body["markdown_path"].startswith("attachments/legacy-")
+    assert body["markdown_path"].endswith(".md")
+    assert body["image_paths"] == []
+    assert (ws_root / "att-doc" / body["markdown_path"]).read_text(
+        encoding="utf-8"
+    ) == "# Converted doc"
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_path_suffix", "expected_from", "content_type"),
+    [
+        ("brief.pdf", ".pdf", "pdf", "application/pdf"),
+        ("sheet.xls", ".xls", "xls", "application/vnd.ms-excel"),
+        (
+            "sheet.xlsx",
+            ".xlsx",
+            "xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        (
+            "sheet.excel",
+            ".xlsx",
+            "xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        ("mockup.png", ".png", "png", "image/png"),
+        ("photo.jpg", ".jpg", "jpg", "image/jpeg"),
+        ("photo.jpeg", ".jpg", "jpg", "image/jpeg"),
+    ],
+)
+async def test_upload_original_attachment_saves_original_file(
+    client, monkeypatch, filename, expected_path_suffix, expected_from, content_type,
+):
+    from routes import workspaces as ws_route
+
+    async def fail_convert_document_to_md(*_args, **_kwargs):
+        raise AssertionError("original attachments must not be converted")
+
+    monkeypatch.setattr(
+        ws_route, "convert_document_to_md", fail_convert_document_to_md,
+    )
+
+    c, ws_root = client
+    ws = await _create_workspace(c, slug=f"att-{expected_from}")
+    r = await c.post(
+        f"/api/v1/workspaces/{ws['id']}/attachments",
+        files={"file": (filename, b"original bytes", content_type)},
+    )
+
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["converted_from"] == expected_from
+    assert body["attachment_path"] == body["markdown_path"]
+    assert body["attachment_path"].startswith(
+        f"attachments/{Path(filename).stem}-"
+    )
+    assert body["attachment_path"].endswith(expected_path_suffix)
+    expected_images = [body["attachment_path"]] if expected_from in {"jpg", "png"} else []
+    assert body["image_paths"] == expected_images
+    assert (
+        ws_root / f"att-{expected_from}" / body["attachment_path"]
+    ).read_bytes() == b"original bytes"
+
+    idx = await c.get(f"/api/v1/workspaces/{ws['id']}/files")
+    rows = {row["relative_path"]: row for row in idx.json()["files"]}
+    assert rows[body["attachment_path"]]["kind"] == "attachment"
+
+
 async def test_upload_docx_attachment_rejects_large_converted_markdown(
     client, monkeypatch
 ):
     from routes import workspaces as ws_route
 
-    async def fake_convert_docx_to_md(input_path, output_path, **_kwargs):
+    async def fake_convert_document_to_md(input_path, output_path, **_kwargs):
         output_path.write_text("12345", encoding="utf-8")
 
-    monkeypatch.setattr(ws_route, "convert_docx_to_md", fake_convert_docx_to_md)
+    monkeypatch.setattr(
+        ws_route, "convert_document_to_md", fake_convert_document_to_md,
+    )
     monkeypatch.setattr(ws_route, "MAX_ATTACHMENT_CONVERTED_MARKDOWN_BYTES", 4)
 
     c, _ = client
@@ -210,14 +306,16 @@ async def test_upload_docx_attachment_rejects_large_converted_images(
 ):
     from routes import workspaces as ws_route
 
-    async def fake_convert_docx_to_md(input_path, output_path, **_kwargs):
+    async def fake_convert_document_to_md(input_path, output_path, **_kwargs):
         output_path.write_text("# Converted", encoding="utf-8")
         images_dir = output_path.parent / f"{output_path.stem}_images"
         images_dir.mkdir()
         (images_dir / "image_001.png").write_bytes(b"12")
         (images_dir / "image_002.png").write_bytes(b"34")
 
-    monkeypatch.setattr(ws_route, "convert_docx_to_md", fake_convert_docx_to_md)
+    monkeypatch.setattr(
+        ws_route, "convert_document_to_md", fake_convert_document_to_md,
+    )
     monkeypatch.setattr(ws_route, "MAX_ATTACHMENT_TOTAL_IMAGE_BYTES", 3)
 
     c, _ = client
